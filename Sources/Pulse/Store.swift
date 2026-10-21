@@ -7,7 +7,7 @@ final class Store: ObservableObject {
     @Published var syncing = false
     @Published var lastSync: Date?
     @Published var lastError: String?
-    @Published var hasLinearKey = linearKey() != nil
+    @Published var hasLinearKey = demoMode || linearKey() != nil
     @Published var selected: Set<String> = []
     @Published var me: String?
     @Published var today: [ActionItem] = []
@@ -40,9 +40,11 @@ final class Store: ObservableObject {
         if synthesis != nil {
             synthesizedAt = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         }
+        if demoMode { try? seedDemo(db) }
         doneIDs = Set(savedIDs(doneKey))
         pinnedIDs = savedIDs(pinKey)
         load()
+        if demoMode { loadDemo() }
     }
 
     func load() {
@@ -74,7 +76,7 @@ final class Store: ObservableObject {
     }
 
     func refresh() async {
-        guard !syncing else { return }
+        guard !syncing, !demoMode else { return }
         syncing = true
         var message = ""
         do {
@@ -107,7 +109,10 @@ final class Store: ObservableObject {
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
+    func localBranchesForDemo(_ branches: Set<String>) { localBranches = branches }
+
     func refreshTodayIfStale() {
+        guard !demoMode else { return }
         if Date().timeIntervalSince(todayFetched) > 300, !syncing { Task { await refreshToday() } }
     }
 
@@ -253,7 +258,7 @@ final class Store: ObservableObject {
     }
 
     func synthesize() async {
-        guard !synthesizing else { return }
+        guard !synthesizing, !demoMode else { return }
         synthesizing = true
         synthesisError = nil
         do {
@@ -271,6 +276,7 @@ final class Store: ObservableObject {
     }
 
     func startHourlySync() {
+        guard !demoMode else { return }
         Task {
             while true {
                 await refresh()

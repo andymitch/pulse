@@ -455,26 +455,32 @@ private struct TicketButton: View {
     }
 
     var body: some View {
-        Menu {
-            if item.started {
-                Section("Open in") { ForEach(choices, id: \.self) { menuItem($0) } }
-                Divider()
-                menuItem(.prompt)
-            } else {
-                menuItem(.prompt)
-                if !ides.isEmpty { Section("Start in") { ForEach(ides, id: \.self) { menuItem($0) } } }
-                if !agents.isEmpty { Section("Start in \(terminalName)") { ForEach(agents, id: \.self) { menuItem($0) } } }
-                Divider()
-                menuItem(.linear)
+        ControlGroup {
+            Button { Task { await store.launch(primary, item: item) } } label: {
+                Label { Text(label(primary)) } icon: { icon(primary) }
             }
-        } label: {
-            Label { Text(label(primary)) } icon: { icon(primary) }
-        } primaryAction: {
-            Task { await store.launch(primary, item: item) }
+            .labelStyle(.titleAndIcon)
+            .help(item.started ? "Open in \(primary.name)" : primary == .prompt ? "Copy the agent prompt" : isAgent(primary) ? "Start \(primary.name) in \(terminalName)" : "Start in \(primary.name)")
+            Menu {
+                if item.started {
+                    Section("Open in") { ForEach(choices, id: \.self) { menuItem($0) } }
+                    Divider()
+                    menuItem(.prompt)
+                } else {
+                    menuItem(.prompt)
+                    if !ides.isEmpty { Section("Start in") { ForEach(ides, id: \.self) { menuItem($0) } } }
+                    if !agents.isEmpty { Section("Start in \(terminalName)") { ForEach(agents, id: \.self) { menuItem($0) } } }
+                    Divider()
+                    menuItem(.linear)
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .menuIndicator(.hidden)
+            .help("More ways to \(item.started ? "open" : "start")")
         }
-        .menuStyle(.button)
+        .controlGroupStyle(.navigation)
         .fixedSize()
-        .help(item.started ? "Open in \(primary.name)" : primary == .prompt ? "Copy the agent prompt" : isAgent(primary) ? "Start \(primary.name) in \(terminalName)" : "Start in \(primary.name)")
     }
 
     @ViewBuilder private func icon(_ l: Launch) -> some View {

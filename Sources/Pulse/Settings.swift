@@ -97,7 +97,13 @@ struct Settings: Codable, Equatable {
         ("Claude Code", "claude -p --permission-mode acceptEdits \"$(cat {prompt})\""),
     ]
 
-    static let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Pulse")
+    static let dir: URL = {
+        guard demoMode else { return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Pulse") }
+        let demo = FileManager.default.temporaryDirectory.appendingPathComponent("PulseDemo")
+        try? FileManager.default.removeItem(at: demo)
+        try? FileManager.default.createDirectory(at: demo, withIntermediateDirectories: true)
+        return demo
+    }()
     private static let file = dir.appendingPathComponent("settings.json")
 
     static func load() -> Settings {
@@ -133,6 +139,7 @@ struct Settings: Codable, Equatable {
 func expand(_ path: String) -> String { (path as NSString).expandingTildeInPath }
 
 var settings: Settings = {
+    if demoMode { return .demo }
     var s = Settings.load()
     if s.githubAccount.isEmpty || s.githubOrg.isEmpty, let account = ghAccounts().first {
         if s.githubAccount.isEmpty { s.githubAccount = account }
