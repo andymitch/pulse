@@ -66,9 +66,15 @@ func worktree(for branch: String, ticket: String) throws -> String {
     return path
 }
 
+private var zedReusesWindows: Bool {
+    let file = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".config/zed/settings.json")
+    let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    return text.range(of: #""cli_default_open_behavior"\s*:\s*"new_window""#, options: .regularExpression) != nil
+}
+
 func openInIDE(_ ide: IDE, path: String, prompt: String? = nil) throws {
     if ide == .zed, FileManager.default.fileExists(atPath: "/usr/local/bin/zed") {
-        try shell("/usr/local/bin/zed -n \(quoted(path))")
+        try shell("/usr/local/bin/zed \(zedReusesWindows ? "" : "-n ")\(quoted(path))")
     } else {
         try shell("open -a \(quoted(ide.app.path)) \(quoted(path))")
     }
