@@ -6,7 +6,10 @@ A macOS menu-bar app that tells you what to work on today, what your team is foc
 - **Focus**: one distilled summary of what the team is pushing on, with source cards and a button that reads it aloud.
 - **Trends**: PRs merged and Linear tickets opened or closed per person, over 7 days, 5 weeks or 12 months.
 
-<p align="center"><img src="docs/screenshot.png" alt="Pulse showing today's checklist, the team focus with source cards, and trends" width="560"></p>
+<p align="center">
+  <img src="docs/screenshot-today.png" alt="Today's checklist with start and open buttons, and the team focus" width="49%">
+  <img src="docs/screenshot-trends.png" alt="The focus source cards and the PRs merged trend, stacked by teammate" width="49%">
+</p>
 
 Everything runs on your Mac. Pulse has no server and sends no telemetry. Your data goes only to the services you connect and to the AI agent you choose for the briefing.
 
@@ -79,7 +82,7 @@ swift run Pulse --self-test
 ./build.sh --install
 ```
 
-To try Pulse without connecting anything, run `open build/Pulse.app --args --demo`. It uses a fictional team and a throwaway data folder, and never syncs. The screenshot above is the demo.
+To try Pulse without connecting anything, run `open build/Pulse.app --args --demo`. It uses a fictional team and a throwaway data folder, and never syncs. The screenshots above are the demo.
 
 ### Releasing
 
