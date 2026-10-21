@@ -1,0 +1,61 @@
+import Foundation
+
+func selfTest() throws {
+    let db = try DB(path: ":memory:")
+    for (n, author, created, merged, adds) in [
+        (1, "jane-acme", "2026-09-01T00:00:00Z", "2026-09-01T10:00:00Z", 100),
+        (2, "acme-omar", "2026-09-02T00:00:00Z", "2026-09-02T20:00:00Z", 600),
+        (3, "jane-acme", "2026-09-30T00:00:00Z", "2026-10-01T04:00:00Z", 50),
+        (4, "jane-acme", "2025-01-01T00:00:00Z", "2025-01-02T00:00:00Z", 50),
+        (5, "someone", "2026-09-03T00:00:00Z", "2026-09-03T01:00:00Z", 10),
+    ] {
+        try db.query("INSERT INTO prs VALUES ('r', ?, ?, ?, ?, ?)", [n, author, created, merged, adds])
+    }
+    try db.query("INSERT INTO users VALUES ('Jane Doe', 'jane@x.com'), ('Omar Reyes', 'omar@x.com'), ('Sam Lee', 'slee@x.com')")
+    try db.query("INSERT INTO issues VALUES ('i1', 'i1', '', '', 'kai@x.com', NULL, '2026-09-05T00:00:00Z', '2026-10-02T00:00:00Z')")
+    try db.query("INSERT INTO issues VALUES ('i2', 'i2', '', '', NULL, 'Omar Reyes', '2026-09-06T00:00:00Z', NULL)")
+
+    let t = try db.trends(since: "2026-01-01", org: "acmecorp")
+    func check(_ ok: Bool, _ what: String, line: Int = #line) {
+        if !ok { FileHandle.standardError.write("FAIL line \(line): \(what)\n".data(using: .utf8)!); exit(1) }
+    }
+    check(t.prs.map(\.person) == ["Jane Doe", "Omar Reyes", "someone", "Jane Doe"], "github logins map to Linear names")
+    let stats = prStats(t.prs.filter { $0.person != "someone" })
+    check(stats["2026-09"]?.merged == 2 && stats["2026-10"]?.merged == 1, "merged per month")
+    check(abs(stats["2026-09"]!.medianHours - 15) < 1e-6, "median hours")
+    check(stats["2026-09"]?.medianAdditions == 350, "median additions")
+    check(stats["2026-09"]?.over500 == 1, "over 500")
+    check(t.created == [Count(bucket: "2026-09", person: "Kai", n: 1)], "created skips missing creator")
+    check(t.completed.isEmpty, "completed skips missing assignee")
+    check(prReasons(ci: "SUCCESS", mergeState: "UNKNOWN", decision: nil, unanswered: 0).reasons.isEmpty, "quiet PR is skipped")
+    check(prReasons(ci: "SUCCESS", mergeState: "CLEAN", decision: "APPROVED", unanswered: 0).reasons == ["Approved, ready to merge"], "approved")
+    check(prReasons(ci: "PENDING", mergeState: "CLEAN", decision: "APPROVED", unanswered: 0).reasons.isEmpty, "approved but CI pending")
+    let bad = prReasons(ci: "FAILURE", mergeState: "BEHIND", decision: "APPROVED", unanswered: 2)
+    check(bad.failing && bad.reasons == ["CI failing", "2 unanswered threads", "Behind main"], "failing and behind")
+    let u = URL(string: "https://x")!
+    let merged = mergeTicketsAndPRs([
+        ActionItem(id: "KLE-1", kind: .ticket, title: "One", reason: "KLE-1 · In Review", url: u, ticket: "KLE-1", started: true, branch: "kle-1-one", priority: 3, since: Date()),
+        ActionItem(id: "KLE-2", kind: .ticket, title: "Two", reason: "KLE-2 · Todo", url: u, ticket: "KLE-2", branch: "kle-2-two", priority: 2, since: Date()),
+        ActionItem(id: "pr1", kind: .failing, title: "Fix one", reason: "CI failing", url: u, started: true, branch: "kle-1-one", pr: u, since: Date()),
+        ActionItem(id: "pr9", kind: .pr, title: "Loose PR", reason: "Behind main", url: u, started: true, branch: "other", pr: u, since: Date()),
+        ActionItem(id: "rev", kind: .review, title: "Their PR", reason: "Review", url: u, pr: u, since: Date()),
+    ])
+    check(merged.map(\.id) == ["KLE-1", "rev", "pr9", "KLE-2"], "ticket absorbs its PR and takes its urgency")
+    check(merged[0].kind == .failing && merged[0].pr == u && merged[0].reason.hasSuffix("CI failing"), "merged ticket carries PR state")
+    check(!merged[3].started && merged[3].pr == nil, "todo ticket stays startable")
+    let weeks = try db.trends(since: "2026-09-01", range: .month, org: "acmecorp")
+    check(Set(weeks.prs.map(\.bucket)) == ["2026-08-31", "2026-09-28"], "weeks start on Monday")
+    check(TrendRange.month.buckets(now: iso.date(from: "2026-10-21T12:00:00Z")!) == ["2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"], "last 5 weeks")
+    check(TrendRange.week.buckets(now: iso.date(from: "2026-10-21T12:00:00Z")!).last == "2026-10-21", "last 7 days end today")
+    check(autoAffix(org: "acmecorp", logins: ["jane-acme", "priyaacme", "acme-omar", "someone"]) == "acme", "affix from org name")
+    check(autoAffix(org: "acme", logins: ["jane", "bob"]) == "", "no affix when logins don't share it")
+    try db.query("INSERT INTO prs VALUES ('r', 6, 'zz-handle', '2026-09-04T00:00:00Z', '2026-09-04T01:00:00Z', 1)")
+    try db.query("INSERT INTO github_users VALUES ('zz-handle', 'Sam Lee')")
+    check(try db.trends(since: "2026-09-04", org: "acmecorp").prs.first?.person == "Sam Lee", "GitHub profile name wins")
+    check(Version("v2")! > Version("1.4.0")!, "major beats minor")
+    check(Version("2.0.0-beta.3")! < Version("v2")!, "stable beats its beta")
+    check(Version("v2-beta.2")! < Version("v2-beta.10")!, "beta numbers compare as numbers")
+    check(Version("v2-beta.1")! > Version("v1.3")!, "a beta of the next major beats the current stable")
+    check(!(Version("1.0.0")! < Version("v1")!), "1.0.0 equals v1")
+    print("self-test ok")
+}

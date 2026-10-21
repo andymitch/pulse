@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type"
+        type: choice
+        options: [major, hotfix, beta]
+        default: major
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      prev: ${{ steps.v.outputs.prev }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: v
+        env:
+          TYPE: ${{ inputs.release_type }}
+        run: |
+          set -euo pipefail
+          TYPE="${TYPE:-major}"
+          LATEST_MAJOR=$(git tag -l 'v*' | { grep -E '^v[0-9]+$' || true; } | sed 's/^v//' | sort -n | tail -1)
+          PRERELEASE=false
+          if [ "$TYPE" = "hotfix" ]; then
+            if [ -z "$LATEST_MAJOR" ]; then echo "No major release to hotfix"; exit 1; fi
+            N=$LATEST_MAJOR
+            X=$(git tag -l "v${N}.*" | { grep -E "^v${N}\.[0-9]+$" || true; } | sed "s/^v${N}\.//" | sort -n | tail -1)
+            X=$(( ${X:-0} + 1 ))
+            VERSION="${N}.${X}.0"; TAG="v${N}.${X}"
+          elif [ "$TYPE" = "beta" ]; then
+            N=$(( ${LATEST_MAJOR:-0} + 1 ))
+            B=$(git tag -l "v${N}-beta.*" | { grep -E "^v${N}-beta\.[0-9]+$" || true; } | sed "s/^v${N}-beta\.//" | sort -n | tail -1)
+            B=$(( ${B:-0} + 1 ))
+            VERSION="${N}.0.0-beta.${B}"; TAG="v${N}-beta.${B}"
+            PRERELEASE=true
+          else
+            N=$(( ${LATEST_MAJOR:-0} + 1 ))
+            VERSION="${N}.0.0"; TAG="v${N}"
+          fi
+          PREV=$(git tag -l 'v*' | { grep -E '^v[0-9]+(\.[0-9]+)?$' || true; } | sort -V | tail -1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Next release: $TAG (version $VERSION), prev ${PREV:-<none>}, prerelease=$PRERELEASE"
+      - name: Create draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.v.outputs.tag }}
+          PRERELEASE: ${{ steps.v.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          FLAGS=(--draft --target "${{ github.sha }}" --title "Pulse $TAG" --notes "Building…")
+          if [ "$PRERELEASE" = "true" ]; then FLAGS+=(--prerelease); fi
+          gh release create "$TAG" "${FLAGS[@]}" --repo "${{ github.repository }}"
+
+  macos:
+    needs: prepare
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Use the newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+      - name: Build, package and sign the update
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PULSE_UPDATE_KEY: ${{ secrets.PULSE_UPDATE_KEY }}
+        run: |
+          set -euo pipefail
+          swift run Pulse --self-test
+          ./build.sh --release
+          test -s build/Pulse_aarch64.zip.sig
+      - name: Upload to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release upload "$TAG" build/Pulse_aarch64.zip build/Pulse_aarch64.zip.sig build/Pulse_aarch64.dmg --clobber --repo "${{ github.repository }}"
+
+  notes:
+    needs: [prepare, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Publish with categorized notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PREV: ${{ needs.prepare.outputs.prev }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          HEAD: ${{ github.sha }}
+        run: |
+          node scripts/release-notes.mjs > notes.md
+          cat notes.md
+          gh release edit "$TAG" --repo "$REPO" --notes-file notes.md --draft=false --prerelease="$PRERELEASE"
