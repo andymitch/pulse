@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             let height = min(920, (sender.window?.screen?.visibleFrame.height ?? 920) - 40)
             popover.contentSize = NSSize(width: 760, height: height)
             store.refreshTodayIfStale()
+            Updater.shared.checkIfDue(every: 1800)
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             outsideClicks = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                 self?.popover.performClose(nil)

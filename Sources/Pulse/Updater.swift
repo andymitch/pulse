@@ -44,8 +44,8 @@ final class Updater: ObservableObject {
 
     var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
 
-    func checkIfDue() {
-        guard Date().timeIntervalSince(checked) > 12 * 3600 else { return }
+    func checkIfDue(every interval: TimeInterval = 12 * 3600) {
+        guard !demoMode, Date().timeIntervalSince(checked) > interval else { return }
         Task { await check() }
     }
 
