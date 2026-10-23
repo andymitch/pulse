@@ -1,9 +1,10 @@
 # Pulse
 
-A macOS menu-bar app that tells you what to work on today, what your team is focused on, and how shipping is trending. Pulse pulls together GitHub, Linear, Slack, Mail and your meeting notes.
+A macOS menu-bar app that tells you what to work on today, what your team is focused on, and how shipping is trending. Pulse pulls together GitHub, Linear, Slack, Mail and the meetings it records for you.
 
 - **Today**: a short checklist planned each morning to fit about 5 hours, covering reviews to unblock, replies you owe, and the tickets that matter most. Linear tickets show their real status, which you can change from the list. **Start** creates a git worktree on the ticket's branch, moves the ticket to In Progress, and opens it in your IDE's agent panel (Zed, Cursor, VS Code) or in a terminal agent (pi, Claude Code, or your own).
 - **Focus**: one distilled summary of what the team is pushing on, with source cards and a button that reads it aloud.
+- **Meetings**: Pulse notices Google Meet calls, Slack huddles and calendar meetings, records them, transcribes them on your Mac, and saves a summary with the decisions and important points. The briefing reads them.
 - **Trends**: PRs merged and Linear tickets opened or closed per person, over 7 days, 5 weeks or 12 months.
 
 <p align="center">
@@ -11,7 +12,7 @@ A macOS menu-bar app that tells you what to work on today, what your team is foc
   <img src="docs/screenshot-trends.png" alt="The focus source cards and the PRs merged trend, stacked by teammate" width="49%">
 </p>
 
-Everything runs on your Mac. Pulse has no server and sends no telemetry. Your data goes only to the services you connect and to the AI agent you choose for the briefing.
+Everything runs on your Mac. Pulse has no server and sends no telemetry. Your data goes only to the services you connect and to the AI agent you choose for the briefing and meeting summaries.
 
 ## Requirements
 
@@ -19,7 +20,7 @@ Everything runs on your Mac. Pulse has no server and sends no telemetry. Your da
 - [GitHub CLI](https://cli.github.com), signed in (`gh auth login`)
 - A Linear personal API key
 - For the morning briefing: [pi](https://pi.dev) or [Claude Code](https://claude.com/claude-code), with **Linear** and **Slack** MCP servers configured
-- Optional: Mail.app with your email account, and [Superwhisper](https://superwhisper.com) for meeting transcripts
+- Optional: Mail.app with your email account
 
 ## Install
 
@@ -50,7 +51,7 @@ Click the gear in the popover.
 3. **Slack**: leave it on. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
 4. **Mail**: turn it on, and macOS asks once for permission to read Mail.
 5. **Meetings**:
-   - Superwhisper: set meeting detection to Automatic in Superwhisper.
+   - Record meetings: on by default. Recording starts when another app uses your mic during a Google Meet call, a Slack huddle or a calendar event with attendees, and stops a short while after the mic is released. The menu bar icon turns into a red record button while it records; right-click it and choose **Stop Recording** to skip a meeting. The first time, macOS asks for microphone, screen and system audio recording, and calendar access, and Pulse downloads about 500 MB of speech models. The briefing agent writes each summary from the transcript. Let people know you're recording.
    - Otter: connect it to Slack or have it email its summaries.
    - Loom: links shared in Slack or email are picked up without setup.
 6. **Code**: set the repository and the folder for new worktrees, then choose your IDEs and terminal agents. In an agent command, `{prompt}` is replaced with the path of a file holding the ticket prompt.
@@ -69,8 +70,11 @@ Pulse keeps everything in `~/Library/Application Support/Pulse/`:
 - `pulse.db`: the SQLite cache behind Trends
 - `settings.json`
 - `synthesis.json`: the latest briefing
-- `meetings/`: archived meeting transcripts
+- `meetings/`: meeting summaries and transcripts, one Markdown file per meeting
+- `recordings/`: meeting audio, kept only until it's transcribed
 - `mail/`: the latest inbox export
+
+The speech models live in `~/Library/Application Support/FluidAudio/`.
 
 Delete the folder to start fresh. The Linear key lives in the Keychain under `pulse`.
 

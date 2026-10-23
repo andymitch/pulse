@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 func selfTest() throws {
@@ -57,5 +58,14 @@ func selfTest() throws {
     check(Version("v2-beta.2")! < Version("v2-beta.10")!, "beta numbers compare as numbers")
     check(Version("v2-beta.1")! > Version("v1.3")!, "a beta of the next major beats the current stable")
     check(!(Version("1.0.0")! < Version("v1")!), "1.0.0 equals v1")
+    let migrated = Settings.load(Data(#"{"meetings": ["superwhisper", "otter"], "superwhisperFolder": "~/x", "githubOrg": "acme"}"#.utf8))
+    check(migrated.meetings == [.record, .otter] && migrated.githubOrg == "acme", "Superwhisper setting becomes recording, other settings kept")
+    let w = { (word: String, t: Double) in WordTiming(word: word, startTime: t, endTime: t + 0.3) }
+    let lines = transcriptText(mine: [w("Ship", 0), w("it.", 0.4), w("Sounds", 5.2), w("Agreed.", 70)],
+                               theirs: [w("Sounds", 5), w("good.", 5.4), w("Next", 61), w("week.", 61.5)],
+                               turns: [Turn(speaker: "S7", start: 4.8, end: 6), Turn(speaker: "S2", start: 60.5, end: 62)],
+                               me: "Jane", attendees: ["Omar", "Priya"])
+    check(lines == "[0:00] Jane: Ship it.\n[0:05] Speaker 1: Sounds good.\n[1:01] Speaker 2: Next week.\n[1:10] Jane: Agreed.", "transcript merges tracks, drops echo, numbers speakers")
+    check(transcriptText(mine: [], theirs: [w("Hi", 1)], turns: [], me: "Jane", attendees: ["Omar"]) == "[0:01] Omar: Hi", "one other attendee is named")
     print("self-test ok")
 }

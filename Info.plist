@@ -24,6 +24,10 @@
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Pulse reads your recent inbox in Mail so the morning briefing can include email that needs you.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Pulse uses the current calendar event to notice a meeting, name its recording and label who spoke.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Pulse records your side of meetings so it can transcribe and summarize them on your Mac.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
