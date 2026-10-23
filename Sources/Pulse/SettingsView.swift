@@ -87,6 +87,7 @@ struct SettingsView: View {
                         Text(source.setup)
                     }
                 }
+                MeetingStatus()
             } header: { header("Meetings", nil, symbol: "waveform") }
 
             Section {
@@ -402,6 +403,26 @@ struct VoiceRow: View {
     private var detail: String {
         if !voice.supported { return "Needs macOS 15 or later. Pulse uses the system voice." }
         return "Kokoro, an open on-device voice. Downloads \(NaturalVoice.size) once; until then, and when off, Pulse uses the system voice."
+    }
+}
+
+struct MeetingStatus: View {
+    @ObservedObject private var meetings = Meetings.shared
+
+    var body: some View {
+        if let meeting = meetings.recording {
+            HStack {
+                Label("Recording \(meeting.title)", systemImage: "record.circle").foregroundStyle(.red)
+                Spacer()
+                Button("Stop") { Task { await meetings.stop(skip: true) } }
+            }
+        } else if meetings.transcribing {
+            HStack {
+                ProgressView().controlSize(.small)
+                Text("Transcribing and summarizing a meeting…").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        if let error = meetings.error { Text(error).font(.caption).foregroundStyle(.red) }
     }
 }
 

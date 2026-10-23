@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let popover = NSPopover()
     private var store: Store!
     private var badge: AnyCancellable?
+    private var recordingIcon: AnyCancellable?
     private var outsideClicks: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -48,6 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self.statusItem.button?.imagePosition = .imageLeading
         }
 
+        recordingIcon = Meetings.shared.$recording.sink { [weak self] meeting in
+            self?.statusItem.button?.image = NSImage(systemSymbolName: meeting == nil ? "waveform.path.ecg" : "record.circle",
+                                                     accessibilityDescription: meeting.map { "Pulse, recording \($0.title)" } ?? "Pulse")
+            self?.statusItem.button?.contentTintColor = meeting == nil ? nil : .systemRed
+        }
+        Meetings.shared.watch { [weak self] in self?.store.me }
+
         popover.contentViewController = NSHostingController(rootView: ContentView(store: store))
         popover.behavior = .transient
         popover.delegate = self
@@ -59,6 +67,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             let menu = NSMenu()
             menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
             menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
+            if Meetings.shared.recording != nil {
+                menu.addItem(withTitle: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "").target = self
+            }
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit Pulse", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             statusItem.menu = menu
@@ -80,6 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     @objc private func refresh() { Task { await store.refresh() } }
+
+    @objc private func stopRecording() { Task { await Meetings.shared.stop(skip: true) } }
 
     func popoverDidClose(_ notification: Notification) {
         if let outsideClicks { NSEvent.removeMonitor(outsideClicks) }

@@ -104,7 +104,6 @@ final class Store: ObservableObject {
         }
         today = mergeTicketsAndPRs(github + linear)
         localBranches = localBranchNames()
-        if settings.meetings.contains(.superwhisper) { archiveMeetings(from: expand(settings.superwhisperFolder), into: dir.appendingPathComponent("meetings")) }
         todayFetched = Date()
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
     }

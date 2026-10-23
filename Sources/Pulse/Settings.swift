@@ -54,13 +54,13 @@ enum IDE: String, Codable, CaseIterable {
 }
 
 enum MeetingSource: String, Codable, CaseIterable {
-    case superwhisper, otter, loom
+    case record, otter, loom
 
-    var name: String { rawValue == "superwhisper" ? "Superwhisper" : rawValue.capitalized }
+    var name: String { self == .record ? "Record meetings" : rawValue.capitalized }
 
     var setup: String {
         switch self {
-        case .superwhisper: "In Superwhisper, set Settings > Meetings > Meeting detection to Automatic. Pulse reads the transcripts from its recordings folder."
+        case .record: "Pulse records Google Meet calls, Slack huddles and calendar meetings once they use your mic, transcribes them on this Mac and saves a summary. The first meeting downloads about 500 MB of speech models. macOS asks for microphone, screen and system audio recording, and calendar access."
         case .otter: "Connect Otter to Slack, or have it email summaries, so its notes land somewhere the briefing reads."
         case .loom: "Loom links shared in Slack or email are read as meeting records. Nothing to set up."
         }
@@ -76,8 +76,7 @@ struct Settings: Codable, Equatable {
     var slackChannels: [SlackChannel] = []
     var mail = false
     var mailDays = 3
-    var meetings: [MeetingSource] = [.superwhisper]
-    var superwhisperFolder = "~/superwhisper/recordings"
+    var meetings: [MeetingSource] = [.record]
     var ides: [IDE] = [.zed]
     var agents: [Agent] = Settings.agentPresets
     var briefingCommand = Settings.briefingPresets[0].command
@@ -106,9 +105,12 @@ struct Settings: Codable, Equatable {
     }()
     private static let file = dir.appendingPathComponent("settings.json")
 
-    static func load() -> Settings {
+    static func load(_ data: Data? = try? Data(contentsOf: file)) -> Settings {
         let defaults = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(Settings()))) as? [String: Any] ?? [:]
-        var saved = (try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        var saved = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        if let meetings = saved["meetings"] as? [String] {
+            saved["meetings"] = meetings.map { $0 == "superwhisper" ? MeetingSource.record.rawValue : $0 }.filter { MeetingSource(rawValue: $0) != nil }
+        }
         if saved["slackChannels"] == nil {
             let old = [saved["engineeringChannels"], saved["businessChannels"]].compactMap { $0 as? String }.joined(separator: ", ")
             let regex = try! NSRegularExpression(pattern: #"#([\w-]+) \((\w+)\)"#)

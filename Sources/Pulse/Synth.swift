@@ -21,23 +21,6 @@ struct Synthesis: Codable {
     let sources: [Source]
 }
 
-func archiveMeetings(from folder: String, into archive: URL) {
-    let fm = FileManager.default
-    try? fm.createDirectory(at: archive, withIntermediateDirectories: true)
-    let recordings = URL(fileURLWithPath: folder)
-    for folder in (try? fm.contentsOfDirectory(at: recordings, includingPropertiesForKeys: nil)) ?? [] {
-        let target = archive.appendingPathComponent(folder.lastPathComponent + ".txt")
-        guard !fm.fileExists(atPath: target.path),
-              let data = try? Data(contentsOf: folder.appendingPathComponent("meta.json")),
-              let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              m["kind"] as? String == "meeting",
-              let text = m["result"] as? String, text.count > 200 else { continue }
-        let title = (m["title"] as? String) ?? (m["calendarEventTitle"] as? String) ?? "Meeting"
-        let minutes = ((m["duration"] as? Int) ?? 0) / 60000
-        try? "\(title)\nRecorded \(m["datetime"] as? String ?? "") (\(minutes) min)\n\n\(text)\n".write(to: target, atomically: true, encoding: .utf8)
-    }
-}
-
 func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
     let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
     return ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
@@ -59,7 +42,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     }
     if let mail { gather.append("Email from the last \(s.mailDays) days, as JSON with a url for each message: \(mail). Keep only email that needs \(me) to reply or act; ignore newsletters and notifications.") }
     var meetings: [String] = []
-    if s.meetings.contains(.superwhisper) { meetings.append("transcripts in these plain text files: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", "))") }
+    if s.meetings.contains(.record) { meetings.append("meetings Pulse recorded, each a file with its summary, decisions, important points and the transcript: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", "))") }
     if s.meetings.contains(.otter) { meetings.append("Otter summaries and otter.ai links posted in Slack or emailed") }
     if s.meetings.contains(.loom) { meetings.append("Loom recordings (loom.com links) shared in Slack or email, using their titles and any summary text") }
     if !meetings.isEmpty { gather.append("Meetings: " + meetings.joined(separator: "; ") + ".") }
@@ -106,11 +89,23 @@ func runSynthesis(dir: URL, candidates: [ActionItem], me: String) async throws -
             mailError = "Mail export failed: \(error)"
         }
     }
-    let transcripts = settings.meetings.contains(.superwhisper) ? meetingTranscripts(in: dir.appendingPathComponent("meetings")) : []
+    let transcripts = settings.meetings.contains(.record) ? meetingTranscripts(in: dir.appendingPathComponent("meetings")) : []
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates)
         .write(to: prompt, atomically: true, encoding: .utf8)
 
-    let log = try await Task.detached { () throws -> String in
+    let log = try await runAgent(prompt: prompt)
+
+    guard let data = try? Data(contentsOf: out) else {
+        throw SyncError(description: [mailError, "The briefing agent did not write its file. Last output:\n\(log)"].compactMap { $0 }.joined(separator: "\n"))
+    }
+    let synthesis = try JSONDecoder().decode(Synthesis.self, from: data)
+    try? FileManager.default.removeItem(at: dir.appendingPathComponent("synthesis.json"))
+    try FileManager.default.moveItem(at: out, to: dir.appendingPathComponent("synthesis.json"))
+    return synthesis
+}
+
+func runAgent(prompt: URL) async throws -> String {
+    try await Task.detached { () throws -> String in
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/zsh")
         p.arguments = ["-lc", "cd \"$HOME\" && " + settings.briefingCommand.replacingOccurrences(of: "{prompt}", with: quoted(prompt.path))]
@@ -122,12 +117,4 @@ func runSynthesis(dir: URL, candidates: [ActionItem], me: String) async throws -
         p.waitUntilExit()
         return String(decoding: data.suffix(2000), as: UTF8.self)
     }.value
-
-    guard let data = try? Data(contentsOf: out) else {
-        throw SyncError(description: [mailError, "The briefing agent did not write its file. Last output:\n\(log)"].compactMap { $0 }.joined(separator: "\n"))
-    }
-    let synthesis = try JSONDecoder().decode(Synthesis.self, from: data)
-    try? FileManager.default.removeItem(at: dir.appendingPathComponent("synthesis.json"))
-    try FileManager.default.moveItem(at: out, to: dir.appendingPathComponent("synthesis.json"))
-    return synthesis
 }
