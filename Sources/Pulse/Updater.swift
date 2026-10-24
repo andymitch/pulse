@@ -43,6 +43,7 @@ final class Updater: ObservableObject {
     private var checked = Date.distantPast
 
     var current: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
+    var devBuild: Bool { current.hasSuffix("-dev") }
 
     func checkIfDue(every interval: TimeInterval = 12 * 3600) {
         guard !demoMode, Date().timeIntervalSince(checked) > interval else { return }
@@ -51,6 +52,7 @@ final class Updater: ObservableObject {
 
     func check() async {
         checked = Date()
+        guard !devBuild else { return }
         guard let releases: [Release] = try? await fetch("https://api.github.com/repos/\(Self.repo)/releases?per_page=20"),
               let mine = Version(current) else { return }
         available = releases

@@ -42,6 +42,8 @@ To build it yourself, you only need the Xcode Command Line Tools:
 ./build.sh --install
 ```
 
+A local build is versioned after the latest tag with a `-dev` suffix, such as `1.1-dev`, and doesn't update itself, so an update can't replace your changes.
+
 ## Setup
 
 Click the gear in the popover.
