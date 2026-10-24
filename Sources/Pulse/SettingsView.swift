@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -93,6 +94,10 @@ struct SettingsView: View {
             Section {
                 VoiceRow(on: $draft.naturalVoice, asked: $draft.voiceAsked)
             } header: { header("Voice", nil, symbol: "speaker.wave.2") }
+
+            Section {
+                LaunchAtLoginRow()
+            } header: { header("Startup", nil, symbol: "power") }
 
             Section {
                 UpdatesRow(beta: $draft.betaUpdates)
@@ -423,6 +428,30 @@ struct MeetingStatus: View {
             }
         }
         if let error = meetings.error { Text(error).font(.caption).foregroundStyle(.red) }
+    }
+}
+
+struct LaunchAtLoginRow: View {
+    @State private var status = SMAppService.mainApp.status
+    @State private var error: String?
+
+    var body: some View {
+        Toggle("Open Pulse at login", isOn: Binding(get: { status == .enabled || status == .requiresApproval }, set: { on in
+            do {
+                try on ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
+                error = nil
+            } catch {
+                self.error = error.localizedDescription
+            }
+            status = SMAppService.mainApp.status
+        }))
+        if status == .requiresApproval {
+            HStack {
+                Text("Allow Pulse in Login Items to finish.").font(.caption).foregroundStyle(.secondary)
+                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+            }
+        }
+        if let error { Text(error).font(.caption).foregroundStyle(.red) }
     }
 }
 
