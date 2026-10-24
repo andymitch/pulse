@@ -66,5 +66,7 @@ func selfTest() throws {
                                me: "Jane", attendees: ["Omar", "Priya"])
     check(lines == "[0:00] Jane: Ship it.\n[0:05] Speaker 1: Sounds good.\n[1:01] Speaker 2: Next week.\n[1:10] Jane: Agreed.", "transcript merges tracks, drops echo, numbers speakers")
     check(transcriptText(mine: [], theirs: [w("Hi", 1)], turns: [], me: "Jane", attendees: ["Omar"]) == "[0:01] Omar: Hi", "one other attendee is named")
+    let reply = { (title: String) in Synthesis.Todo(ref: nil, title: title, why: "", url: "message://%3Cm1%3E", source: "mail", minutes: 5) }
+    check(reply("Reply to Dana").id == reply("Reply to Dana about the date").id, "a reworded briefing item keeps its done state")
     print("self-test ok")
 }

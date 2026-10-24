@@ -10,6 +10,8 @@ struct Synthesis: Codable {
         let title, why: String
         let url, source: String?
         let minutes: Int?
+
+        var id: String { ref ?? "ai-" + (url ?? title) }
     }
     struct Source: Codable {
         let id: Int
