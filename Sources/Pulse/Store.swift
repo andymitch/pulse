@@ -171,7 +171,7 @@ final class Store: ObservableObject {
                 return TodoRow(item: item, why: p.why, minutes: p.minutes, done: item.closed || doneIDs.contains(item.id))
             }
             guard let url = URL(string: p.url ?? "") ?? (p.ref.flatMap { URL(string: "https://linear.app/\(db.meta("linear_workspace") ?? "")/issue/\($0)") }) else { return nil }
-            let id = p.ref ?? "ai-\(p.title)"
+            let id = p.id
             let resolved = p.ref != nil
             let item = ActionItem(id: id, kind: .followUp, title: p.title, reason: resolved ? "Done" : (p.source ?? "").capitalized,
                                   url: url, since: planned)

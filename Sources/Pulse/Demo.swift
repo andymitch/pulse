@@ -114,6 +114,6 @@ extension Store {
             ])
         synthesizedAt = Calendar.current.date(bySettingHour: 7, minute: 5, second: 0, of: Date())
         lastSync = Date().addingTimeInterval(-90)
-        doneIDs = ["ai-Reply to Dana about the pilot start date"]
+        doneIDs = ["ai-message://%3Cdemo%40acme.com%3E"]
     }
 }
