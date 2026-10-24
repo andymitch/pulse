@@ -10,10 +10,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Pulse "$APP/Contents/MacOS/Pulse"
 cp Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-if [[ -n "${VERSION:-}" ]]; then
-    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
+if [[ -z "${VERSION:-}" ]]; then
+    TAG=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || echo v0)
+    VERSION="${TAG#v}-dev"
 fi
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
 
 if [[ -n "${DEVELOPER_ID:-}" ]]; then
     codesign --force --options runtime --timestamp --entitlements Pulse.entitlements --sign "$DEVELOPER_ID" "$APP"

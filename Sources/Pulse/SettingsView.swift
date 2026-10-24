@@ -464,7 +464,9 @@ struct UpdatesRow: View {
         HStack {
             Text("Pulse \(updater.current)")
             Spacer()
-            if checking {
+            if updater.devBuild {
+                Text("Local build, updates are off").font(.caption).foregroundStyle(.secondary)
+            } else if checking {
                 ProgressView().controlSize(.small)
             } else if let release = updater.available {
                 Button("Update to \(release.tag_name)") { Task { await updater.install() } }
