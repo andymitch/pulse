@@ -26,7 +26,6 @@ func selfTest() throws {
     check(abs(stats["2026-09"]!.medianHours - 15) < 1e-6, "median hours")
     check(stats["2026-09"]?.medianAdditions == 350, "median additions")
     check(stats["2026-09"]?.over500 == 1, "over 500")
-    check(t.created == [Count(bucket: "2026-09", person: "Kai", n: 1)], "created skips missing creator")
     check(t.completed.isEmpty, "completed skips missing assignee")
     check(prReasons(ci: "SUCCESS", mergeState: "UNKNOWN", decision: nil, unanswered: 0).reasons.isEmpty, "quiet PR is skipped")
     check(prReasons(ci: "SUCCESS", mergeState: "CLEAN", decision: "APPROVED", unanswered: 0).reasons == ["Approved, ready to merge"], "approved")

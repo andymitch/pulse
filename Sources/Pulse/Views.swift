@@ -99,9 +99,6 @@ struct ContentView: View {
             case .prs:
                 StackedChart(store: store, counts: prCounts, unit: "PRs")
                 PRStatsTable(store: store)
-            case .opened:
-                StackedChart(store: store, counts: store.trends.created, unit: "Tickets")
-                Text("Tickets created, by creator.").font(.caption2).foregroundStyle(.secondary)
             case .closed:
                 StackedChart(store: store, counts: store.trends.completed, unit: "Tickets")
                 Text("Tickets completed, by assignee.").font(.caption2).foregroundStyle(.secondary)
@@ -178,7 +175,7 @@ struct ContentView: View {
 }
 
 enum TrendMetric: String, CaseIterable {
-    case prs = "PRs merged", opened = "Tickets opened", closed = "Tickets closed"
+    case prs = "PRs merged", closed = "Tickets closed"
 
     var brand: Brand { self == .prs ? .github : .linear }
 }
