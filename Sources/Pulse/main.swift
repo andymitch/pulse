@@ -82,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             popover.contentSize = NSSize(width: 760, height: height)
             store.refreshTodayIfStale()
             Updater.shared.checkIfDue(every: 1800)
+            NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             outsideClicks = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
                 self?.popover.performClose(nil)
@@ -98,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if let outsideClicks { NSEvent.removeMonitor(outsideClicks) }
         outsideClicks = nil
         Speaker.shared.stop()
+        NSApp.deactivate()
     }
 
     @objc private func showSettings() {
