@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 private let exportScript = """
 function run(argv) {
@@ -22,6 +22,8 @@ function run(argv) {
   return JSON.stringify(out.slice(0, 80));
 }
 """
+
+var mailRunning: Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.mail").isEmpty }
 
 func exportMail(days: Int, to file: URL) throws {
     let script = file.deletingLastPathComponent().appendingPathComponent("export-mail.js")

@@ -49,7 +49,7 @@ Click the gear in the popover.
 1. **GitHub**: pick your `gh` account and organization. Pulse matches GitHub people to Linear people automatically, first by GitHub profile name, then by login.
 2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's stored in your Keychain and can be replaced or removed there.
 3. **Slack**: leave it on. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
-4. **Mail**: turn it on, and macOS asks once for permission to read Mail.
+4. **Mail**: turn it on, and macOS asks once for permission to read Mail. Pulse reads your inbox only while Mail is open and never launches it.
 5. **Meetings**:
    - Record meetings: on by default. Recording starts when another app uses your mic during a Google Meet call, a Slack huddle or a calendar event with attendees, and stops a short while after the mic is released. The menu bar icon turns into a red record button while it records; right-click it and choose **Stop Recording** to skip a meeting. The first time, macOS asks for microphone, screen and system audio recording, and calendar access, and Pulse downloads about 500 MB of speech models. The briefing agent writes each summary from the transcript. Let people know you're recording.
    - Otter: connect it to Slack or have it email its summaries.
