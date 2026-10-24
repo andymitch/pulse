@@ -65,7 +65,7 @@ final class Store: ObservableObject {
     private func ranked(_ t: Trends) -> [String] {
         var totals: [String: Int] = [:]
         for r in t.prs { totals[r.person, default: 0] += 1 }
-        for c in t.created + t.completed { totals[c.person, default: 0] += c.n }
+        for c in t.completed { totals[c.person, default: 0] += c.n }
         return totals.keys.sorted { (totals[$0]!, $1) > (totals[$1]!, $0) }
     }
 

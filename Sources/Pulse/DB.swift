@@ -103,7 +103,6 @@ struct Count: Equatable {
 
 struct Trends {
     var prs: [PRRow] = []
-    var created: [Count] = []
     var completed: [Count] = []
 }
 
@@ -217,14 +216,12 @@ extension DB {
                          hours: r[2] as? Double ?? 0, additions: r[3] as? Int ?? 0)
         }
 
-        func counts(_ date: String, _ person: String) throws -> [Count] {
-            try query("""
-                SELECT \(range.sql(date)), \(person), count(*)
-                FROM issues WHERE \(date) >= ? AND \(person) IS NOT NULL GROUP BY 1, 2
-                """, [since]).map {
-                Count(bucket: $0[0] as! String, person: displayName($0[1] as! String), n: $0[2] as! Int)
-            }
+        let completed = try query("""
+            SELECT \(range.sql("completed_at")), assignee, count(*)
+            FROM issues WHERE completed_at >= ? AND assignee IS NOT NULL GROUP BY 1, 2
+            """, [since]).map {
+            Count(bucket: $0[0] as! String, person: displayName($0[1] as! String), n: $0[2] as! Int)
         }
-        return Trends(prs: prs, created: try counts("created_at", "creator"), completed: try counts("completed_at", "assignee"))
+        return Trends(prs: prs, completed: completed)
     }
 }
