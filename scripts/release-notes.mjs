@@ -92,6 +92,9 @@ for (const msg of messages) {
   // leading number is the issue the branch addresses.
   const br = firstLine.match(/Merge branch '[a-z]+\/(\d+)-/);
   if (br) issueNums.add(Number(br[1]));
+  // Rebased or direct commits carry no PR number, but name what they close
+  // ("Closes #14", "Fixes #5"), so list those issues.
+  for (const m of msg.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #(\d+)/gi)) issueNums.add(Number(m[1]));
 }
 
 const sections = {};
