@@ -80,7 +80,7 @@ func runSynthesis(dir: URL, candidates: [ActionItem], me: String) async throws -
     let day = Date().formatted(date: .complete, time: .omitted)
     var mail: String?
     var mailError: String?
-    if settings.mail {
+    if settings.mail, mailRunning {
         let file = dir.appendingPathComponent("mail/inbox.json")
         do {
             try await Task.detached { try exportMail(days: settings.mailDays, to: file) }.value

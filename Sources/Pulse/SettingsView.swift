@@ -77,7 +77,7 @@ struct SettingsView: View {
                 Toggle("Read Mail inbox in the briefing", isOn: $draft.mail)
                 if draft.mail { Stepper("Last \(draft.mailDays) days", value: $draft.mailDays, in: 1...14) }
             } header: { header("Mail", nil, symbol: "envelope") } footer: {
-                note("Uses the accounts in Mail.app. macOS asks once for permission to read Mail.")
+                note("Uses the accounts in Mail.app, and only while Mail is open, so Pulse never launches it. macOS asks once for permission to read Mail.")
             }
 
             Section {
