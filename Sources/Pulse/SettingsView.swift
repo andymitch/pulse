@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var accounts: [String] = []
     @State private var orgs: [String] = []
     @State private var replacingKey = false
+    @State private var synced = settings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,7 +15,6 @@ struct SettingsView: View {
                 Button { store.showingSettings = false } label: { Label("Back", systemImage: "chevron.left") }
                     .buttonStyle(.plain)
                 Spacer()
-                Button("Save", action: save).keyboardShortcut("s").disabled(draft == settings)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -23,6 +23,12 @@ struct SettingsView: View {
         }
         .task { await loadGitHub() }
         .onChange(of: draft.githubAccount) { Task { await loadGitHub() } }
+        .onChange(of: draft) { old, new in save(old, new) }
+        .task(id: syncInputs(draft)) {
+            try? await Task.sleep(for: .seconds(1))
+            if !Task.isCancelled { syncIfChanged() }
+        }
+        .onDisappear(perform: syncIfChanged)
     }
 
     private var form: some View {
@@ -176,16 +182,24 @@ struct SettingsView: View {
         if !draft.githubOrg.isEmpty && !orgs.contains(draft.githubOrg) { orgs.insert(draft.githubOrg, at: 0) }
     }
 
-    private func save() {
+    private func save(_ old: Settings, _ new: Settings) {
         do {
-            try draft.save()
-            settings = draft
-            store.load()
-            store.showingSettings = false
-            Task { await store.refresh() }
+            try new.save()
+            settings = new
+            store.objectWillChange.send()
         } catch {
             store.lastError = "\(error)"
         }
+        if old.betaUpdates != new.betaUpdates { Task { await Updater.shared.check() } }
+    }
+
+    private func syncInputs(_ s: Settings) -> [String] { [s.githubAccount, s.githubOrg, s.repoPath] }
+
+    private func syncIfChanged() {
+        guard syncInputs(settings) != syncInputs(synced) else { return }
+        synced = settings
+        store.load()
+        Task { await store.refresh() }
     }
 
     private func member<T: Equatable>(_ value: T, of list: Binding<[T]>) -> Binding<Bool> {
@@ -221,7 +235,7 @@ struct ConnectionRow: View {
                 Link("Install \(agent.name)", destination: URL(string: agent == .pi ? "https://pi.dev" : "https://claude.com/claude-code")!)
             }
         }
-        .task { await check() }
+        .task(id: agent) { await check() }
         if let error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(4) }
     }
 
