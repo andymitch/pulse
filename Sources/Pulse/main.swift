@@ -1,6 +1,9 @@
 import AppKit
 import Combine
+import os
 import SwiftUI
+
+private let log = Logger(subsystem: "com.andymitch.pulse", category: "popover")
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
@@ -9,7 +12,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var store: Store!
     private var badge: AnyCancellable?
     private var recordingIcon: AnyCancellable?
-    private var outsideClicks: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let dir = Settings.dir
@@ -84,10 +86,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             Updater.shared.checkIfDue(every: 1800)
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-            outsideClicks = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-                self?.popover.performClose(nil)
-            }
             popover.contentViewController?.view.window?.makeKey()
+            log.log("Opened popover, active: \(NSApp.isActive, privacy: .public)")
         }
     }
 
@@ -95,11 +95,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func stopRecording() { Task { await Meetings.shared.stop(skip: true) } }
 
+    func popoverWillClose(_ notification: Notification) {
+        log.log("Closing popover, active: \(NSApp.isActive, privacy: .public), event: \(String(describing: NSApp.currentEvent), privacy: .public)")
+    }
+
     func popoverDidClose(_ notification: Notification) {
-        if let outsideClicks { NSEvent.removeMonitor(outsideClicks) }
-        outsideClicks = nil
         Speaker.shared.stop()
-        NSApp.deactivate()
+        if !popover.isShown { NSApp.deactivate() }
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        log.log("Resigned active, frontmost: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public)")
     }
 
     @objc private func showSettings() {
