@@ -71,6 +71,7 @@ struct ContentView: View {
                         .disabled(store.synthesizing)
                 }
                 PrioritiesView(store: store)
+                MeetingsView()
                 SectionHeader(title: "Trends") {
                     Picker("", selection: $metric) {
                         ForEach(TrendMetric.allCases.filter { $0 == .prs || store.hasLinearKey }, id: \.self) { m in
