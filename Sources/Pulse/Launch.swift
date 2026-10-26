@@ -15,6 +15,23 @@ func open(_ url: URL, in app: App? = nil) {
     NSWorkspace.shared.open([url], withApplicationAt: app.url, configuration: NSWorkspace.OpenConfiguration())
 }
 
+func adoptLoginShellPath() {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh")
+    p.arguments = ["-ilc", "printf '\\n__PULSE_PATH__%s' \"$PATH\""]
+    let pipe = Pipe()
+    p.standardInput = FileHandle.nullDevice
+    p.standardOutput = pipe
+    p.standardError = FileHandle.nullDevice
+    guard (try? p.run()) != nil else { return }
+    DispatchQueue.global().asyncAfter(deadline: .now() + 5) { if p.isRunning { p.terminate() } }
+    p.waitUntilExit()
+    let out = String(decoding: pipe.fileHandleForReading.availableData, as: UTF8.self)
+    guard p.terminationStatus == 0, let marker = out.range(of: "\n__PULSE_PATH__", options: .backwards) else { return }
+    let path = out[marker.upperBound...]
+    if !path.isEmpty { setenv("PATH", String(path), 1) }
+}
+
 @discardableResult
 func shell(_ command: String) throws -> String {
     let p = Process()

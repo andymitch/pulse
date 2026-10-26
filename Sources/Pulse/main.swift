@@ -113,6 +113,7 @@ if CommandLine.arguments.contains("--self-test") {
     exit(0)
 }
 
+adoptLoginShellPath()
 let delegate = MainActor.assumeIsolated { AppDelegate() }
 MainActor.assumeIsolated {
     NSApplication.shared.delegate = delegate
