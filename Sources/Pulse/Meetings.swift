@@ -27,6 +27,8 @@ final class Meetings: ObservableObject {
     private var capture: Capture?
     private var quietPolls = 0
     private var dismissed = false
+    private var askedScreen = false
+    private var askedCalendar = false
     private var me: () -> String? = { nil }
     private let calendar = EKEventStore()
     private let recordings = Settings.dir.appendingPathComponent("recordings")
@@ -71,7 +73,7 @@ final class Meetings: ObservableObject {
         var call: String?
         if micUsers.contains(where: { $0.hasPrefix("com.tinyspeck.slackmacgap") }) {
             call = "Slack huddle"
-        } else if event == nil {
+        } else if event == nil, canCaptureScreen() {
             let titles = (try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false))?.windows.compactMap(\.title) ?? []
             if titles.contains(where: { $0.hasPrefix("Meet - ") || $0.hasPrefix("Meet – ") }) { call = "Google Meet" }
         }
@@ -82,8 +84,21 @@ final class Meetings: ObservableObject {
                        attendees: people.filter { !$0.isCurrentUser }.map { $0.name ?? $0.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") })
     }
 
+    private func canCaptureScreen() -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+        if !askedScreen {
+            askedScreen = true
+            CGRequestScreenCaptureAccess()
+        }
+        return false
+    }
+
     private func currentEvent() async -> EKEvent? {
-        guard (try? await calendar.requestFullAccessToEvents()) == true else { return nil }
+        if EKEventStore.authorizationStatus(for: .event) == .notDetermined, !askedCalendar {
+            askedCalendar = true
+            _ = try? await calendar.requestFullAccessToEvents()
+        }
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
         let now = Date()
         let soon = now.addingTimeInterval(600)
         return calendar.events(matching: calendar.predicateForEvents(withStart: now.addingTimeInterval(-86400), end: soon, calendars: nil))
