@@ -23,6 +23,7 @@ final class Meetings: ObservableObject {
     static let shared = Meetings()
     @Published private(set) var recording: Meeting?
     @Published private(set) var transcribing = false
+    @Published private(set) var saved: [SavedMeeting] = []
     @Published var error: String?
     private var capture: Capture?
     private var quietPolls = 0
@@ -34,6 +35,7 @@ final class Meetings: ObservableObject {
 
     func watch(me: @escaping () -> String?) {
         guard !demoMode else { return }
+        saved = savedMeetings(in: archive)
         self.me = me
         Task { await processPending() }
         Task {
@@ -120,6 +122,7 @@ final class Meetings: ObservableObject {
             }
         }
         transcribing = false
+        saved = savedMeetings(in: archive)
     }
 
     private func pending() -> [URL] {
@@ -305,6 +308,47 @@ func notesPrompt(_ m: Meeting, transcript: String, output: String) -> String {
     - speakers: name a "Speaker N" only when the transcript makes clear who it is, for example they are addressed by name or introduce themselves\(m.attendees.isEmpty ? "" : ", and only with one of the attendees"). Leave the rest out.
     - Write plainly. No hype, no filler.
     """
+}
+
+struct SavedMeeting: Identifiable {
+    let file: URL
+    let start: Date
+    var title = "", recorded = "", summary = ""
+    var decisions: [String] = [], points: [String] = []
+
+    var id: URL { file }
+}
+
+func savedMeetings(in archive: URL, limit: Int = 10) -> [SavedMeeting] {
+    ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
+        .filter { $0.pathExtension == "md" }
+        .compactMap { file in TimeInterval(file.deletingPathExtension().lastPathComponent).map { (file, Date(timeIntervalSince1970: $0)) } }
+        .sorted { $0.1 > $1.1 }
+        .prefix(limit)
+        .compactMap { file, start in (try? String(contentsOf: file, encoding: .utf8)).map { parseMeeting($0, file: file, start: start) } }
+}
+
+func parseMeeting(_ markdown: String, file: URL, start: Date) -> SavedMeeting {
+    var m = SavedMeeting(file: file, start: start)
+    var section = ""
+    for line in markdown.split(separator: "\n").map(String.init) {
+        if line.hasPrefix("## ") {
+            section = String(line.dropFirst(3))
+            if section == "Transcript" { break }
+        } else if line.hasPrefix("# "), m.title.isEmpty {
+            m.title = String(line.dropFirst(2))
+        } else {
+            let item = line.hasPrefix("- ") ? String(line.dropFirst(2)) : line
+            switch section {
+            case "": m.recorded = line
+            case "Summary": m.summary += m.summary.isEmpty ? line : "\n" + line
+            case "Decisions": m.decisions.append(item)
+            case "Important points": m.points.append(item)
+            default: break
+            }
+        }
+    }
+    return m
 }
 
 func meetingMarkdown(_ m: Meeting, notes: MeetingNotes?, transcript: String) -> String {
