@@ -20,7 +20,7 @@ fi
 if [[ -n "${DEVELOPER_ID:-}" ]]; then
     codesign --force --options runtime --timestamp --entitlements Pulse.entitlements --sign "$DEVELOPER_ID" "$APP"
 else
-    codesign --force --sign - "$APP"
+    codesign --force --sign - --requirements '=designated => identifier "com.andymitch.pulse"' "$APP"
 fi
 echo "Built $(pwd)/$APP"
 
