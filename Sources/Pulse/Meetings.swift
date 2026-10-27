@@ -2,6 +2,7 @@ import AVFoundation
 import CoreAudio
 import EventKit
 import FluidAudio
+import IOKit.pwr_mgt
 import ScreenCaptureKit
 
 struct Meeting: Codable {
@@ -211,10 +212,12 @@ private final class Capture: NSObject, SCStreamOutput {
     private var system: AVAudioFile?
     private var mic: AVAudioFile?
     private var lastSystem = Date()
+    private var awake: IOPMAssertionID = 0
 
     init(folder: URL, mic micAllowed: Bool) async throws {
         self.folder = folder
         super.init()
+        IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), "Recording a meeting" as CFString, &awake)
         try await startSystem()
         let format = engine.inputNode.outputFormat(forBus: 0)
         guard micAllowed, format.sampleRate > 0 else { return }
@@ -275,6 +278,8 @@ private final class Capture: NSObject, SCStreamOutput {
             if let system { try append(pcm, to: system, since: begun) }
         }
     }
+
+    deinit { IOPMAssertionRelease(awake) }
 
     func stop() async {
         try? await stream?.stopCapture()
