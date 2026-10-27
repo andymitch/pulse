@@ -99,6 +99,7 @@ func selfTest() throws {
     let converter = AVAudioConverter(from: high.format, to: mono)!
     let converted = (0..<10).compactMap { _ in convert(high, with: converter)?.frameLength }.reduce(0, +)
     check(abs(Int(converted) - 16000) < 300, "mic audio is converted when the input format changes")
+    check(spokenWords("[0:26] Andrew Mitchell: Uh") == 1 && spokenWords("[61:02] Jane: Note: ship it\n[61:05] Speaker 1: Sure") == 4, "spoken words skip timestamps and speakers")
     let reply = { (title: String) in Synthesis.Todo(ref: nil, title: title, why: "", url: "message://%3Cm1%3E", source: "mail", minutes: 5) }
     check(reply("Reply to Dana").id == reply("Reply to Dana about the date").id, "a reworded briefing item keeps its done state")
     print("self-test ok")

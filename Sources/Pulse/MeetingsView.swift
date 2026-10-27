@@ -7,7 +7,12 @@ struct MeetingsView: View {
         if settings.recordMeetings || !meetings.saved.isEmpty {
             SectionHeader(title: "Meetings") {
                 if let recording = meetings.recording {
-                    Label("Recording \(recording.title)", systemImage: "record.circle").font(.caption).foregroundStyle(.red)
+                    if meetings.noAudio {
+                        Label("Recording \(recording.title), but some audio isn't coming in", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                            .help("Pulse retries every few seconds. Unlock the screen, or check Microphone and Screen & System Audio Recording for Pulse in System Settings > Privacy & Security.")
+                    } else {
+                        Label("Recording \(recording.title)", systemImage: "record.circle").font(.caption).foregroundStyle(.red)
+                    }
                     Button("Stop") { Task { await meetings.stop(skip: true) } }
                 } else {
                     if meetings.transcribing {
