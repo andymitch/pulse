@@ -52,12 +52,13 @@ Click the gear in the popover.
 2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's stored in your Keychain and can be replaced or removed there.
 3. **Slack**: leave it on. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
 4. **Mail**: turn it on, and macOS asks once for permission to read Mail. Pulse reads your inbox only while Mail is open and never launches it.
-5. **Meetings**:
+5. **Shortcut**: press **⌃⌥⌘P** from any app to open and close Pulse, even when the menu bar icon is hidden behind the notch. Change or turn it off under Startup.
+6. **Meetings**:
    - Record meetings: on by default. Recording starts when another app uses your mic during a Google Meet call, a Slack huddle or a calendar event with attendees, and stops a short while after the mic is released. The menu bar icon turns into a red record button while it records. Press **Stop** in the Meetings header (or right-click the icon and choose **Stop Recording**) to end or skip a meeting, and **Start recording** to record one Pulse didn't detect. The first time, macOS asks for microphone, screen and system audio recording, and calendar access, and Pulse downloads about 500 MB of speech models. The briefing agent writes each summary from the transcript. Let people know you're recording.
    - Otter: connect it to Slack or have it email its summaries.
    - Loom: links shared in Slack or email are picked up without setup.
-6. **Code**: set the repository and the folder for new worktrees, then choose your IDEs and terminal agents. In an agent command, `{prompt}` is replaced with the path of a file holding the ticket prompt.
-7. **Briefing**: choose the agent command and the hour it runs. You can also press **Regenerate** at any time.
+7. **Code**: set the repository and the folder for new worktrees, then choose your IDEs and terminal agents. In an agent command, `{prompt}` is replaced with the path of a file holding the ticket prompt.
+8. **Briefing**: choose the agent command and the hour it runs. You can also press **Regenerate** at any time.
 8. **Startup**: turn on **Open Pulse at login** so it is running after a restart.
 
 ### MCP servers for the briefing

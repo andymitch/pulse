@@ -103,6 +103,7 @@ struct SettingsView: View {
 
             Section {
                 LaunchAtLoginRow()
+                HotkeyRow(hotkey: $draft.hotkey)
             } header: { header("Startup", nil, symbol: "power") }
 
             Section {
@@ -191,6 +192,7 @@ struct SettingsView: View {
             store.lastError = "\(error)"
         }
         if old.betaUpdates != new.betaUpdates { Task { await Updater.shared.check() } }
+        if old.hotkey != new.hotkey { GlobalHotkey.register(new.hotkey) }
     }
 
     private func syncInputs(_ s: Settings) -> [String] { [s.githubAccount, s.githubOrg, s.repoPath] }

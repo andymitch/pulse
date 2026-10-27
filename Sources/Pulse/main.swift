@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var store: Store!
     private var badge: AnyCancellable?
     private var recordingIcon: AnyCancellable?
+    private var anchor: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let dir = Settings.dir
@@ -66,6 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(rootView: ContentView(store: store))
         popover.behavior = .transient
         popover.delegate = self
+        GlobalHotkey.action = { [weak self] in self?.toggle() }
+        GlobalHotkey.register(settings.hotkey)
         store.startHourlySync()
     }
 
@@ -82,18 +85,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             statusItem.menu = menu
             sender.performClick(nil)
             statusItem.menu = nil
-        } else if popover.isShown {
-            popover.performClose(sender)
         } else {
-            let height = min(920, (sender.window?.screen?.visibleFrame.height ?? 920) - 40)
+            toggle(from: sender)
+        }
+    }
+
+    private func toggle(from view: NSView? = nil) {
+        if popover.isShown {
+            popover.performClose(nil)
+        } else if let view = view ?? statusItem.button.flatMap({ $0.window?.occlusionState.contains(.visible) == true ? $0 : nil }) ?? fallbackAnchor() {
+            let height = min(920, (view.window?.screen?.visibleFrame.height ?? 920) - 40)
             popover.contentSize = NSSize(width: 760, height: height)
             store.refreshTodayIfStale()
             Updater.shared.checkIfDue(every: 1800)
             NSApp.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            popover.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             log.log("Opened popover, active: \(NSApp.isActive, privacy: .public)")
         }
+    }
+
+    private func fallbackAnchor() -> NSView? {
+        guard let screen = NSScreen.main else { return nil }
+        let frame = screen.visibleFrame
+        let window = anchor ?? NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = .clear
+        window.setFrame(NSRect(x: frame.maxX - 400, y: frame.maxY - 1, width: 1, height: 1), display: false)
+        window.orderFrontRegardless()
+        anchor = window
+        return window.contentView
     }
 
     @objc private func refresh() { Task { await store.refresh() } }
@@ -106,6 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         Speaker.shared.stop()
+        anchor?.orderOut(nil)
         if !popover.isShown { NSApp.deactivate() }
     }
 
@@ -115,7 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func showSettings() {
         store.showingSettings = true
-        if let button = statusItem.button, !popover.isShown { clicked(button) }
+        if !popover.isShown { toggle() }
     }
 }
 
