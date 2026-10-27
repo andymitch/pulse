@@ -279,10 +279,14 @@ struct ChannelPicker: View {
             HStack {
                 Text("Channels")
                 Spacer()
-                Button { open = true; if all.isEmpty { all = cachedSlackChannels(); if all.isEmpty { Task { await load() } } } } label: {
+                Button { open = true } label: {
                     Label("Add", systemImage: "plus")
                 }
                     .popover(isPresented: $open, arrowEdge: .trailing) { list }
+            }
+            .task {
+                all = cachedSlackChannels()
+                if all.isEmpty || slackChannelsStale { await load() }
             }
             if selected.isEmpty {
                 Text("None picked, so the briefing reads your busiest channels.").font(.caption).foregroundStyle(.secondary)
@@ -308,15 +312,20 @@ struct ChannelPicker: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 TextField("Search channels", text: $search).textFieldStyle(.roundedBorder)
-                Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless).disabled(loading).help("Refresh the channel list")
+                if loading {
+                    ProgressView().controlSize(.small).help("Refreshing the channel list")
+                } else {
+                    Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless).help("Refresh the channel list")
+                }
             }
-            if loading {
+            if loading && all.isEmpty {
                 HStack { ProgressView().controlSize(.small); Text("Asking \(BriefingAgent.current.name) for your channels…").font(.caption) }
                     .padding(.vertical, 20)
-            } else if let error {
+            } else if let error, all.isEmpty {
                 Text(error).font(.caption).foregroundStyle(.red).lineLimit(6)
                 Button("Try again") { Task { await load() } }
             } else {
+                if let error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(2) }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(all.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }, id: \.id) { channel in
@@ -338,6 +347,7 @@ struct ChannelPicker: View {
     }
 
     private func load() async {
+        guard !loading else { return }
         loading = true
         error = nil
         do { all = try await fetchSlackChannels() } catch { self.error = "\(error)" }
