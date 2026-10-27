@@ -8,11 +8,18 @@ struct MeetingsView: View {
             SectionHeader(title: "Meetings") {
                 if let recording = meetings.recording {
                     Label("Recording \(recording.title)", systemImage: "record.circle").font(.caption).foregroundStyle(.red)
-                } else if meetings.transcribing {
-                    ProgressView().controlSize(.small)
-                    Text("Transcribing…").font(.caption).foregroundStyle(.secondary)
+                    Button("Stop") { Task { await meetings.stop(skip: true) } }
+                } else {
+                    if meetings.transcribing {
+                        ProgressView().controlSize(.small)
+                        Text("Transcribing…").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if settings.meetings.contains(.record) {
+                        Button("Start recording") { Task { await meetings.startManually() } }
+                    }
                 }
             }
+            if let error = meetings.error { Text(error).font(.caption).foregroundStyle(.red) }
             if meetings.saved.isEmpty {
                 Panel(title: "Meetings") { Text("No recorded meetings yet.").foregroundStyle(.secondary) }
             }

@@ -28,6 +28,8 @@ final class Meetings: ObservableObject {
     private var capture: Capture?
     private var quietPolls = 0
     private var dismissed = false
+    private var manual = false
+    private var starting = false
     private var askedScreen = false
     private var askedCalendar = false
     private var me: () -> String? = { nil }
@@ -51,6 +53,7 @@ final class Meetings: ObservableObject {
     func stop(skip: Bool = false) async {
         guard let capture, var meeting = recording else { return }
         dismissed = skip
+        manual = false
         self.capture = nil
         recording = nil
         await capture.stop()
@@ -63,11 +66,17 @@ final class Meetings: ObservableObject {
         let users = micUsers()
         if users.isEmpty { dismissed = false }
         if recording != nil {
-            quietPolls = users.isEmpty ? quietPolls + 1 : 0
+            quietPolls = users.isEmpty && !manual ? quietPolls + 1 : 0
             if quietPolls >= 6 || !settings.meetings.contains(.record) { await stop() }
         } else if settings.meetings.contains(.record), !dismissed, !users.isEmpty, let meeting = await detect(users) {
             await start(meeting)
         }
+    }
+
+    func startManually() async {
+        guard recording == nil else { return }
+        let event = await currentEvent()
+        await start(meeting(event?.title ?? "Meeting", event), manual: true)
     }
 
     private func detect(_ micUsers: [String]) async -> Meeting? {
@@ -80,6 +89,10 @@ final class Meetings: ObservableObject {
             if titles.contains(where: { $0.hasPrefix("Meet - ") || $0.hasPrefix("Meet – ") }) { call = "Google Meet" }
         }
         guard let title = event?.title ?? call else { return nil }
+        return meeting(title, event)
+    }
+
+    private func meeting(_ title: String, _ event: EKEvent?) -> Meeting {
         let people = event?.attendees ?? []
         return Meeting(title: title, start: Date(),
                        me: me() ?? people.first(where: \.isCurrentUser)?.name ?? "Me",
@@ -108,13 +121,17 @@ final class Meetings: ObservableObject {
             .min { abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now)) }
     }
 
-    private func start(_ meeting: Meeting) async {
+    private func start(_ meeting: Meeting, manual: Bool = false) async {
+        guard !starting, recording == nil else { return }
+        starting = true
+        defer { starting = false }
         let folder = recordings.appendingPathComponent(String(Int(meeting.start.timeIntervalSince1970)))
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try JSONEncoder().encode(meeting).write(to: folder.appendingPathComponent("meeting.json"))
             capture = try await Capture(folder: folder, mic: await AVCaptureDevice.requestAccess(for: .audio))
             recording = meeting
+            self.manual = manual
             quietPolls = 0
             error = nil
         } catch {
@@ -250,6 +267,7 @@ func micUsers() -> [String] {
     return processes
         .filter { audioProperty($0, kAudioProcessPropertyIsRunningInput, UInt32(0)) != 0 && audioProperty($0, kAudioProcessPropertyPID, pid_t(0)) != getpid() }
         .map { audioProperty($0, kAudioProcessPropertyBundleID, "" as CFString) as String }
+        .filter { $0 != "com.apple.replayd" }
 }
 
 func transcribeMeeting(_ folder: URL, me: String, attendees: [String]) async throws -> String {
