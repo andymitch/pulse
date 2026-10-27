@@ -1,4 +1,5 @@
 import FluidAudio
+import AppKit
 import Foundation
 
 func selfTest() throws {
@@ -59,6 +60,11 @@ func selfTest() throws {
     check(!(Version("1.0.0")! < Version("v1")!), "1.0.0 equals v1")
     let migrated = Settings.load(Data(#"{"meetings": ["superwhisper", "otter"], "superwhisperFolder": "~/x", "githubOrg": "acme"}"#.utf8))
     check(migrated.meetings == [.record, .otter] && migrated.githubOrg == "acme", "Superwhisper setting becomes recording, other settings kept")
+    var off = Settings()
+    off.hotkey = .off
+    check(Settings.load(try JSONEncoder().encode(off)).hotkey == .off && Settings.load(Data("{}".utf8)).hotkey == .standard, "a turned-off shortcut stays off")
+    let key = { (flags: NSEvent.ModifierFlags) in NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: "k", charactersIgnoringModifiers: "k", isARepeat: false, keyCode: 40).flatMap(Hotkey.init) }
+    check(key([.command, .option])?.label == "⌥⌘K" && key([.command, .option])?.modifiers == 2304 && key([.shift]) == nil, "a shortcut needs a modifier and is labelled in order")
     let w = { (word: String, t: Double) in WordTiming(word: word, startTime: t, endTime: t + 0.3) }
     let lines = transcriptText(mine: [w("Ship", 0), w("it.", 0.4), w("Sounds", 5.2), w("Agreed.", 70)],
                                theirs: [w("Sounds", 5), w("good.", 5.4), w("Next", 61), w("week.", 61.5)],
