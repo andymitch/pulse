@@ -10,7 +10,6 @@ extension Settings {
         s.repoPath = "~/code/acme"
         s.slackChannels = [SlackChannel(id: "C1", name: "engineering"), SlackChannel(id: "C2", name: "launch")]
         s.mail = true
-        s.meetings = [.record, .otter]
         s.ides = [.zed, .cursor]
         s.voiceAsked = true
         return s

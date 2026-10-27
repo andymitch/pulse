@@ -4,7 +4,7 @@ struct MeetingsView: View {
     @ObservedObject private var meetings = Meetings.shared
 
     var body: some View {
-        if settings.meetings.contains(.record) || !meetings.saved.isEmpty {
+        if settings.recordMeetings || !meetings.saved.isEmpty {
             SectionHeader(title: "Meetings") {
                 if let recording = meetings.recording {
                     Label("Recording \(recording.title)", systemImage: "record.circle").font(.caption).foregroundStyle(.red)
@@ -14,7 +14,7 @@ struct MeetingsView: View {
                         ProgressView().controlSize(.small)
                         Text("Transcribing…").font(.caption).foregroundStyle(.secondary)
                     }
-                    if settings.meetings.contains(.record) {
+                    if settings.recordMeetings {
                         Button("Start recording") { Task { await meetings.startManually() } }
                     }
                 }
