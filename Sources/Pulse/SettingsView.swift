@@ -88,11 +88,9 @@ struct SettingsView: View {
             }
 
             Section {
-                ForEach(MeetingSource.allCases, id: \.self) { source in
-                    Toggle(isOn: member(source, of: $draft.meetings)) {
-                        Text(source.name)
-                        Text(source.setup)
-                    }
+                Toggle(isOn: $draft.recordMeetings) {
+                    Text("Record meetings")
+                    Text("Pulse records Google Meet calls, Slack huddles and calendar meetings once they use your mic, transcribes them on this Mac and saves a summary. The first meeting downloads about 500 MB of speech models. macOS asks for microphone, screen and system audio recording, and calendar access.")
                 }
                 MeetingStatus()
             } header: { header("Meetings", nil, symbol: "waveform") }

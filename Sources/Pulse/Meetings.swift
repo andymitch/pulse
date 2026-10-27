@@ -71,8 +71,8 @@ final class Meetings: ObservableObject {
             var live = manual || !users.isEmpty
             if !live { live = await meetOpen() }
             quietPolls = live ? 0 : quietPolls + 1
-            if quietPolls >= 6 || !settings.meetings.contains(.record) { await stop() }
-        } else if settings.meetings.contains(.record), !dismissed, !users.isEmpty, let meeting = await detect(users) {
+            if quietPolls >= 6 || !settings.recordMeetings { await stop() }
+        } else if settings.recordMeetings, !dismissed, !users.isEmpty, let meeting = await detect(users) {
             await start(meeting)
         }
     }

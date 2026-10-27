@@ -43,11 +43,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
         gather.append("Slack messages that need \(me): mentions of them and DMs to them from the last 7 days, keeping only those not yet answered.")
     }
     if let mail { gather.append("Email from the last \(s.mailDays) days, as JSON with a url for each message: \(mail). Keep only email that needs \(me) to reply or act; ignore newsletters and notifications.") }
-    var meetings: [String] = []
-    if s.meetings.contains(.record) { meetings.append("meetings Pulse recorded, each a file with its summary, decisions, important points and the transcript: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", "))") }
-    if s.meetings.contains(.otter) { meetings.append("Otter summaries and otter.ai links posted in Slack or emailed") }
-    if s.meetings.contains(.loom) { meetings.append("Loom recordings (loom.com links) shared in Slack or email, using their titles and any summary text") }
-    if !meetings.isEmpty { gather.append("Meetings: " + meetings.joined(separator: "; ") + ".") }
+    if s.recordMeetings { gather.append("Meetings Pulse recorded, each a file with its summary, decisions, important points and the transcript: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", ")).") }
     gather.append("\(me)'s open work right now, from GitHub and Linear. Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
     let kinds = ["github", "linear"] + (s.slack ? ["slack"] : []) + (mail != nil ? ["mail"] : []) + ["meeting", "doc"]
     let kindList = kinds.map { "\"\($0)\"" }.joined(separator: " | ")
@@ -91,7 +87,7 @@ func runSynthesis(dir: URL, candidates: [ActionItem], me: String) async throws -
             mailError = "Mail export failed: \(error)"
         }
     }
-    let transcripts = settings.meetings.contains(.record) ? meetingTranscripts(in: dir.appendingPathComponent("meetings")) : []
+    let transcripts = settings.recordMeetings ? meetingTranscripts(in: dir.appendingPathComponent("meetings")) : []
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates)
         .write(to: prompt, atomically: true, encoding: .utf8)
 

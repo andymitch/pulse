@@ -60,7 +60,8 @@ func selfTest() throws {
     check(Version("v2-beta.1")! > Version("v1.3")!, "a beta of the next major beats the current stable")
     check(!(Version("1.0.0")! < Version("v1")!), "1.0.0 equals v1")
     let migrated = Settings.load(Data(#"{"meetings": ["superwhisper", "otter"], "superwhisperFolder": "~/x", "githubOrg": "acme"}"#.utf8))
-    check(migrated.meetings == [.record, .otter] && migrated.githubOrg == "acme", "Superwhisper setting becomes recording, other settings kept")
+    check(migrated.recordMeetings && migrated.githubOrg == "acme", "Superwhisper setting becomes recording, other settings kept")
+    check(!Settings.load(Data(#"{"meetings": ["otter"]}"#.utf8)).recordMeetings && Settings.load(Data("{}".utf8)).recordMeetings, "recording stays off if it was off, and is on by default")
     var off = Settings()
     off.hotkey = .off
     check(Settings.load(try JSONEncoder().encode(off)).hotkey == .off && Settings.load(Data("{}".utf8)).hotkey == .standard, "a turned-off shortcut stays off")

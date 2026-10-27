@@ -40,7 +40,6 @@ private struct SourceCard: View {
         case "slack": .slack
         case "linear": .linear
         case "github": .github
-        case "loom": .loom
         default: nil
         }
     }
