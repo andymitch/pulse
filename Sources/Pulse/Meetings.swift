@@ -24,6 +24,7 @@ final class Meetings: ObservableObject {
     static let shared = Meetings()
     @Published private(set) var recording: Meeting?
     @Published private(set) var transcribing = false
+    @Published private(set) var noAudio = false
     @Published private(set) var saved: [SavedMeeting] = []
     @Published var error: String?
     private var capture: Capture?
@@ -57,6 +58,7 @@ final class Meetings: ObservableObject {
         manual = false
         self.capture = nil
         recording = nil
+        noAudio = false
         await capture.stop()
         meeting.minutes = Int(Date().timeIntervalSince(meeting.start) / 60)
         try? JSONEncoder().encode(meeting).write(to: capture.folder.appendingPathComponent("meeting.json"))
@@ -66,7 +68,10 @@ final class Meetings: ObservableObject {
     private func poll() async {
         let users = micUsers()
         if users.isEmpty { dismissed = false }
-        if let capture { await capture.heal() }
+        if let capture {
+            await capture.heal()
+            noAudio = capture.silent
+        }
         if recording != nil {
             var live = manual || !users.isEmpty
             if !live { live = await meetOpen() }
@@ -179,7 +184,8 @@ final class Meetings: ObservableObject {
         }
         var transcript = try String(contentsOf: file, encoding: .utf8)
         if !transcript.isEmpty {
-            let notes = await summarize(meeting, transcript: file, folder: folder)
+            var notes: MeetingNotes?
+            if spokenWords(transcript) >= 30 { notes = await summarize(meeting, transcript: file, folder: folder) }
             for (label, name) in notes?.speakers ?? [:] { transcript = transcript.replacingOccurrences(of: "] \(label):", with: "] \(name):") }
             try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
             try meetingMarkdown(meeting, notes: notes, transcript: transcript)
@@ -212,6 +218,7 @@ private final class Capture: NSObject, SCStreamOutput {
     private var system: AVAudioFile?
     private var mic: AVAudioFile?
     private var lastSystem = Date()
+    private var lastMic = Date()
     private var awake: IOPMAssertionID = 0
 
     init(folder: URL, mic micAllowed: Bool) async throws {
@@ -251,8 +258,13 @@ private final class Capture: NSObject, SCStreamOutput {
         engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             guard let self, let file = self.mic, let buffer = converter.map({ convert(buffer, with: $0) }) ?? buffer else { return }
             try? append(buffer, to: file, since: self.begun)
+            self.queue.async { self.lastMic = Date() }
         }
         try? engine.start()
+    }
+
+    var silent: Bool {
+        queue.sync { Date().timeIntervalSince(mic == nil ? lastSystem : min(lastSystem, lastMic)) > 15 }
     }
 
     func heal() async {
@@ -290,6 +302,10 @@ private final class Capture: NSObject, SCStreamOutput {
         }
         queue.sync { system = nil }
     }
+}
+
+func spokenWords(_ transcript: String) -> Int {
+    transcript.split(separator: "\n").map { $0.split(separator: ":", maxSplits: 2).last ?? "" }.reduce(0) { $0 + $1.split(separator: " ").count }
 }
 
 func append(_ buffer: AVAudioPCMBuffer, to file: AVAudioFile, since start: Date) throws {
