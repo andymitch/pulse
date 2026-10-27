@@ -70,13 +70,20 @@ func cachedSlackChannels() -> [SlackChannel] {
     (try? Data(contentsOf: channelsFile)).flatMap { try? JSONDecoder().decode([SlackChannel].self, from: $0) } ?? []
 }
 
+var slackChannelsStale: Bool {
+    let modified = (try? channelsFile.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+    return Date().timeIntervalSince(modified) > 86400
+}
+
 func fetchSlackChannels() async throws -> [SlackChannel] {
-    let out = channelsFile
+    let out = channelsFile.appendingPathExtension("new")
     let prompt = """
     Using your Slack tools (in pi, call them through codemode), list every channel I am a member of: public and private, not archived, and not DMs. Follow pagination until you have them all.
     This is read-only. Never post or change anything.
     Write a JSON array to \(out.path) with exactly this shape and nothing else: [{"id": string, "name": string}], where name has no leading #. Sort by name.
     """
     let data = try await runAgent(prompt, output: out, name: "slack-channels")
-    return try JSONDecoder().decode([SlackChannel].self, from: data)
+    let channels = try JSONDecoder().decode([SlackChannel].self, from: data)
+    try data.write(to: channelsFile)
+    return channels
 }
