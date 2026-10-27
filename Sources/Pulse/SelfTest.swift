@@ -1,3 +1,4 @@
+import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -76,6 +77,21 @@ func selfTest() throws {
     check(parseMeeting(meetingMarkdown(standup, notes: long, transcript: ""), file: file, start: standup.start).decisions == Array(long.decisions.prefix(5)), "saved meeting keeps at most 5 decisions")
     let bare = parseMeeting(meetingMarkdown(standup, notes: nil, transcript: "[0:01] Jane: Hi"), file: file, start: standup.start)
     check(bare.title == "Standup" && bare.summary.isEmpty && bare.decisions.isEmpty, "meeting saved without a summary")
+    let rate = 16000.0
+    let mono = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)!
+    let tone = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: 1600)!
+    tone.frameLength = 1600
+    let audio = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID()).caf")
+    defer { try? FileManager.default.removeItem(at: audio) }
+    let track = try AVAudioFile(forWriting: audio, settings: mono.settings)
+    try append(tone, to: track, since: Date())
+    try append(tone, to: track, since: Date(timeIntervalSinceNow: -3))
+    check((48000...48100).contains(track.length), "a gap in the audio is filled with silence so tracks stay aligned")
+    let high = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!, frameCapacity: 4800)!
+    high.frameLength = 4800
+    let converter = AVAudioConverter(from: high.format, to: mono)!
+    let converted = (0..<10).compactMap { _ in convert(high, with: converter)?.frameLength }.reduce(0, +)
+    check(abs(Int(converted) - 16000) < 300, "mic audio is converted when the input format changes")
     let reply = { (title: String) in Synthesis.Todo(ref: nil, title: title, why: "", url: "message://%3Cm1%3E", source: "mail", minutes: 5) }
     check(reply("Reply to Dana").id == reply("Reply to Dana about the date").id, "a reworded briefing item keeps its done state")
     print("self-test ok")
