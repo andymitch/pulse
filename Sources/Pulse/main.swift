@@ -52,9 +52,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
 
         recordingIcon = Meetings.shared.$recording.sink { [weak self] meeting in
-            self?.statusItem.button?.image = NSImage(systemSymbolName: meeting == nil ? "waveform.path.ecg" : "record.circle",
-                                                     accessibilityDescription: meeting.map { "Pulse, recording \($0.title)" } ?? "Pulse")
-            self?.statusItem.button?.contentTintColor = meeting == nil ? nil : .systemRed
+            guard let meeting else {
+                self?.statusItem.button?.image = NSImage(systemSymbolName: "waveform.path.ecg", accessibilityDescription: "Pulse")
+                return
+            }
+            let image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Pulse, recording \(meeting.title)")?
+                .withSymbolConfiguration(.init(paletteColors: [.systemRed]))
+            image?.isTemplate = false
+            self?.statusItem.button?.image = image
         }
         Meetings.shared.watch { [weak self] in self?.store.me }
 
