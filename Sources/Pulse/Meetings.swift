@@ -66,7 +66,9 @@ final class Meetings: ObservableObject {
         let users = micUsers()
         if users.isEmpty { dismissed = false }
         if recording != nil {
-            quietPolls = users.isEmpty && !manual ? quietPolls + 1 : 0
+            var live = manual || !users.isEmpty
+            if !live { live = await meetOpen() }
+            quietPolls = live ? 0 : quietPolls + 1
             if quietPolls >= 6 || !settings.meetings.contains(.record) { await stop() }
         } else if settings.meetings.contains(.record), !dismissed, !users.isEmpty, let meeting = await detect(users) {
             await start(meeting)
@@ -84,12 +86,17 @@ final class Meetings: ObservableObject {
         var call: String?
         if micUsers.contains(where: { $0.hasPrefix("com.tinyspeck.slackmacgap") }) {
             call = "Slack huddle"
-        } else if event == nil, canCaptureScreen() {
-            let titles = (try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false))?.windows.compactMap(\.title) ?? []
-            if titles.contains(where: { $0.hasPrefix("Meet - ") || $0.hasPrefix("Meet – ") }) { call = "Google Meet" }
+        } else if event == nil, await meetOpen() {
+            call = "Google Meet"
         }
         guard let title = event?.title ?? call else { return nil }
         return meeting(title, event)
+    }
+
+    private func meetOpen() async -> Bool {
+        guard canCaptureScreen() else { return false }
+        let titles = (try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false))?.windows.compactMap(\.title) ?? []
+        return titles.contains { $0.hasPrefix("Meet - ") || $0.hasPrefix("Meet – ") }
     }
 
     private func meeting(_ title: String, _ event: EKEvent?) -> Meeting {
