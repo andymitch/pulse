@@ -72,6 +72,8 @@ func selfTest() throws {
     let parsed = parseMeeting(meetingMarkdown(standup, notes: notes, transcript: "[0:01] Jane: # Not a title\n- not a point"), file: file, start: standup.start)
     check(parsed.title == "Standup" && parsed.recorded.hasPrefix("Recorded ") && parsed.summary == notes.summary, "saved meeting keeps title and summary")
     check(parsed.decisions == notes.decisions && parsed.points == notes.points, "saved meeting keeps decisions and points, not the transcript")
+    let long = MeetingNotes(title: "Standup", summary: "", decisions: (1...7).map { "**D\($0)** why" }, points: [], speakers: nil)
+    check(parseMeeting(meetingMarkdown(standup, notes: long, transcript: ""), file: file, start: standup.start).decisions == Array(long.decisions.prefix(5)), "saved meeting keeps at most 5 decisions")
     let bare = parseMeeting(meetingMarkdown(standup, notes: nil, transcript: "[0:01] Jane: Hi"), file: file, start: standup.start)
     check(bare.title == "Standup" && bare.summary.isEmpty && bare.decisions.isEmpty, "meeting saved without a summary")
     let reply = { (title: String) in Synthesis.Todo(ref: nil, title: title, why: "", url: "message://%3Cm1%3E", source: "mail", minutes: 5) }

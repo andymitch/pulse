@@ -68,7 +68,7 @@ private struct MeetingCard: View {
         if !items.isEmpty {
             Text(title.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                Text("• " + item).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text(markdown("• " + item)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             }
         }
     }

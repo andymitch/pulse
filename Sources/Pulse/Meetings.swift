@@ -318,8 +318,9 @@ func notesPrompt(_ m: Meeting, transcript: String, output: String) -> String {
     Rules:
     - title: "\(m.title)" unchanged, unless it is a generic name like "Google Meet" or "Slack huddle"; then a short name for what was discussed.
     - summary: 2 to 4 plain sentences on what the meeting was about and where it landed.
-    - decisions: each thing that was agreed or decided, one line each. Empty if none.
-    - points: the other important points, such as open questions, risks, and action items with the owner's name. One line each.
+    - decisions: the 1 to 5 most important things that were agreed or decided. Empty if nothing was decided.
+    - points: the 1 to 5 most important other points, such as open questions, risks, and action items with the owner's name.
+    - Each decision and point is one short line: the key part in bold, then the rest of the sentence, like "**Ship Friday** after QA signs off on the import fix".
     - speakers: name a "Speaker N" only when the transcript makes clear who it is, for example they are addressed by name or introduce themselves\(m.attendees.isEmpty ? "" : ", and only with one of the attendees"). Leave the rest out.
     - Write plainly. No hype, no filler.
     """
@@ -373,8 +374,8 @@ func meetingMarkdown(_ m: Meeting, notes: MeetingNotes?, transcript: String) -> 
     lines.append("Recorded \(m.start.formatted(date: .abbreviated, time: .shortened))\(length)\(with).")
     if let notes {
         lines += ["", "## Summary", "", notes.summary]
-        if !notes.decisions.isEmpty { lines += ["", "## Decisions", ""] + notes.decisions.map { "- " + $0 } }
-        if !notes.points.isEmpty { lines += ["", "## Important points", ""] + notes.points.map { "- " + $0 } }
+        if !notes.decisions.isEmpty { lines += ["", "## Decisions", ""] + notes.decisions.prefix(5).map { "- " + $0 } }
+        if !notes.points.isEmpty { lines += ["", "## Important points", ""] + notes.points.prefix(5).map { "- " + $0 } }
     }
     lines += ["", "## Transcript", "", transcript, ""]
     return lines.joined(separator: "\n")
