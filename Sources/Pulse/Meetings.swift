@@ -65,6 +65,7 @@ final class Meetings: ObservableObject {
     private func poll() async {
         let users = micUsers()
         if users.isEmpty { dismissed = false }
+        if let capture { await capture.heal() }
         if recording != nil {
             var live = manual || !users.isEmpty
             if !live { live = await meetOpen() }
@@ -203,14 +204,25 @@ final class Meetings: ObservableObject {
 
 private final class Capture: NSObject, SCStreamOutput {
     let folder: URL
-    private let stream: SCStream
+    private var stream: SCStream?
     private let engine = AVAudioEngine()
     private let queue = DispatchQueue(label: "pulse.meeting-audio")
+    private let begun = Date()
     private var system: AVAudioFile?
     private var mic: AVAudioFile?
+    private var lastSystem = Date()
 
     init(folder: URL, mic micAllowed: Bool) async throws {
         self.folder = folder
+        super.init()
+        try await startSystem()
+        let format = engine.inputNode.outputFormat(forBus: 0)
+        guard micAllowed, format.sampleRate > 0 else { return }
+        mic = try? AVAudioFile(forWriting: folder.appendingPathComponent("mic.caf"), settings: format.settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+        startMic()
+    }
+
+    private func startSystem() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
         guard let display = content.displays.first else { throw SyncError(description: "There is no display to capture audio from.") }
         let config = SCStreamConfiguration()
@@ -221,32 +233,51 @@ private final class Capture: NSObject, SCStreamOutput {
         config.width = 2
         config.height = 2
         config.minimumFrameInterval = CMTime(value: 10, timescale: 1)
-        stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: nil)
-        super.init()
+        let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: nil)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         try await stream.startCapture()
+        self.stream = stream
+        queue.sync { lastSystem = Date() }
+    }
 
+    private func startMic() {
+        guard let file = mic else { return }
         let format = engine.inputNode.outputFormat(forBus: 0)
-        guard micAllowed, format.sampleRate > 0 else { return }
-        mic = try? AVAudioFile(forWriting: folder.appendingPathComponent("mic.caf"), settings: format.settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in try? self?.mic?.write(from: buffer) }
+        guard format.sampleRate > 0 else { return }
+        let converter = format == file.processingFormat ? nil : AVAudioConverter(from: format, to: file.processingFormat)
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            guard let self, let file = self.mic, let buffer = converter.map({ convert(buffer, with: $0) }) ?? buffer else { return }
+            try? append(buffer, to: file, since: self.begun)
+        }
         try? engine.start()
+    }
+
+    func heal() async {
+        if mic != nil, !engine.isRunning {
+            engine.inputNode.removeTap(onBus: 0)
+            startMic()
+        }
+        if queue.sync(execute: { Date().timeIntervalSince(lastSystem) }) > 15 {
+            try? await stream?.stopCapture()
+            try? await startSystem()
+        }
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, let description = buffer.formatDescription else { return }
+        lastSystem = Date()
         let format = AVAudioFormat(cmAudioFormatDescription: description)
         try? buffer.withAudioBufferList { list, _ in
             guard let pcm = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: list.unsafePointer) else { return }
             if system == nil {
                 system = try AVAudioFile(forWriting: folder.appendingPathComponent("system.caf"), settings: format.settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
             }
-            try system?.write(from: pcm)
+            if let system { try append(pcm, to: system, since: begun) }
         }
     }
 
     func stop() async {
-        try? await stream.stopCapture()
+        try? await stream?.stopCapture()
         if mic != nil {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -254,6 +285,32 @@ private final class Capture: NSObject, SCStreamOutput {
         }
         queue.sync { system = nil }
     }
+}
+
+func append(_ buffer: AVAudioPCMBuffer, to file: AVAudioFile, since start: Date) throws {
+    let rate = file.processingFormat.sampleRate
+    var gap = AVAudioFramePosition(Date().timeIntervalSince(start) * rate) - AVAudioFramePosition(buffer.frameLength) - file.length
+    if gap > AVAudioFramePosition(rate) {
+        while gap > 0, let silence = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(min(gap, AVAudioFramePosition(rate)))) {
+            silence.frameLength = silence.frameCapacity
+            for channel in UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList) { memset(channel.mData, 0, Int(channel.mDataByteSize)) }
+            try file.write(from: silence)
+            gap -= AVAudioFramePosition(silence.frameLength)
+        }
+    }
+    try file.write(from: buffer)
+}
+
+func convert(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter) -> AVAudioPCMBuffer? {
+    let capacity = AVAudioFrameCount(Double(buffer.frameLength) * converter.outputFormat.sampleRate / buffer.format.sampleRate) + 1
+    guard let out = AVAudioPCMBuffer(pcmFormat: converter.outputFormat, frameCapacity: capacity) else { return nil }
+    var given = false
+    let status = converter.convert(to: out, error: nil) { _, input in
+        input.pointee = given ? .noDataNow : .haveData
+        defer { given = true }
+        return given ? nil : buffer
+    }
+    return status == .error ? nil : out
 }
 
 private func audioProperty<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ initial: T) -> T {
