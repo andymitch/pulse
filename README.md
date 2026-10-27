@@ -59,7 +59,7 @@ Click the gear in the popover.
    - Loom: links shared in Slack or email are picked up without setup.
 7. **Code**: set the repository and the folder for new worktrees, then choose your IDEs and terminal agents. In an agent command, `{prompt}` is replaced with the path of a file holding the ticket prompt.
 8. **Briefing**: choose the agent command and the hour it runs. You can also press **Regenerate** at any time.
-8. **Startup**: turn on **Open Pulse at login** so it is running after a restart.
+9. **Startup**: turn on **Open Pulse at login** so it is running after a restart.
 
 ### MCP servers for the briefing
 
