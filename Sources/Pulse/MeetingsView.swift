@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MeetingsView: View {
     @ObservedObject private var meetings = Meetings.shared
-    var limit = Int.max
+    var todayOnly = false
     var open: (() -> Void)?
 
     var body: some View {
@@ -26,12 +26,13 @@ struct MeetingsView: View {
                     }
                 }
             }
-            if meetings.saved.isEmpty {
-                Panel(title: "Meetings") { Text("No recorded meetings yet.").foregroundStyle(.secondary) }
+            let list = todayOnly ? meetings.saved.filter { Calendar.current.isDateInToday($0.start) } : meetings.saved
+            if list.isEmpty {
+                Panel(title: "Meetings") { Text(todayOnly ? "No meetings recorded today." : "No recorded meetings yet.").foregroundStyle(.secondary) }
             }
-            let days = Dictionary(grouping: meetings.saved.prefix(limit)) { Calendar.current.startOfDay(for: $0.start) }
+            let days = Dictionary(grouping: list) { Calendar.current.startOfDay(for: $0.start) }
             ForEach(days.keys.sorted(by: >), id: \.self) { day in
-                Text(dayLabel(day)).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                if !todayOnly { Text(dayLabel(day)).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary) }
                 ForEach(days[day]!) { MeetingCard(meeting: $0) }
             }
         }

@@ -2,7 +2,7 @@
 
 A macOS menu-bar app that tells you what to work on today, what your team is focused on, and how shipping is trending. Pulse pulls together GitHub, Linear, Slack, Mail and the meetings it records for you.
 
-Pulse opens on **Home**: your tasks, the focus headlines, the latest meeting and a trends summary, with Focus, Meetings and Trends each on their own tab.
+Pulse opens on **Home**: your tasks, the focus headlines, today's meetings and a trends summary, with Focus, Meetings and Trends each on their own tab.
 
 - **Tasks**: a short checklist planned each morning to fit about 5 hours, covering reviews to unblock, replies you owe, and the tickets that matter most. Linear tickets show their real status, which you can change from the list. An item's dropdown can also move it to the bottom for later, or remove it for the day. Finished tasks stay on the list, checked off, until the week is over. **Start** creates a git worktree on the ticket's branch, moves the ticket to In Progress, and opens it in your IDE's agent panel (Zed, Cursor, VS Code) or in a terminal agent (pi, Claude Code, or your own).
 - **Focus**: one distilled summary of what the team is pushing on, with source cards. Each focus item and meeting summary has its own button that reads it aloud.

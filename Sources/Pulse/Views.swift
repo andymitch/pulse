@@ -54,7 +54,7 @@ struct ContentView: View {
         TodayView(store: store)
         focusHeader { store.page = .focus }
         PrioritiesView(store: store, headlines: true)
-        MeetingsView(limit: 1) { store.page = .meetings }
+        MeetingsView(todayOnly: true) { store.page = .meetings }
         SectionHeader(title: "Trends", open: { store.page = .trends }) {
             Text("Last \(store.range.rawValue): \(trendsSummary)").font(.caption).foregroundStyle(.secondary)
         }
