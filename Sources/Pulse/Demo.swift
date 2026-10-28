@@ -114,6 +114,17 @@ extension Store {
         synthesizedAt = Calendar.current.date(bySettingHour: 7, minute: 5, second: 0, of: Date())
         lastSync = Date().addingTimeInterval(-90)
         doneIDs = ["ai-message://%3Cdemo%40acme.com%3E"]
+        let cal = Calendar(identifier: .iso8601)
+        let monday = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
+        doneThisWeek = [
+            (0, "ACME-187", "Show plan limits on the billing page", "ACME-187 · Medium"),
+            (0, "https://github.com/acmecorp/web/pull/401", "Speed up the usage report query", "Review requested by priya-acme · web#401"),
+            (1, "ACME-192", "Sample data for new workspaces", "ACME-192 · High"),
+        ].compactMap { offset, id, title, source in
+            let date = cal.date(byAdding: .day, value: offset, to: monday)!
+            guard date < cal.startOfDay(for: Date()) else { return nil }
+            return DoneItem(id: id, title: title, url: url(id.hasPrefix("http") ? id : "https://linear.app/acme/issue/\(id)"), source: source, day: date.formatted(localDay))
+        }
     }
 }
 

@@ -22,6 +22,7 @@ final class Store: ObservableObject {
     @Published var pinnedIDs: [String] = []
     @Published var laterIDs: Set<String> = []
     @Published var removedIDs: Set<String> = []
+    @Published var doneThisWeek: [DoneItem] = []
     @Published var workflow: [String: [WorkflowState]] = [:]
     private var localBranches: Set<String> = []
 
@@ -108,6 +109,7 @@ final class Store: ObservableObject {
         today = mergeTicketsAndPRs(github + linear)
         localBranches = localBranchNames()
         todayFetched = Date()
+        recordDone()
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
@@ -134,7 +136,7 @@ final class Store: ObservableObject {
         await refresh()
     }
 
-    private var day: String { Date().formatted(.iso8601.year().month().day()) }
+    private var day: String { Date().formatted(localDay) }
     private var loadedDay = ""
 
     private func loadDay() {
@@ -143,6 +145,30 @@ final class Store: ObservableObject {
         pinnedIDs = db.ids(pinKey)
         laterIDs = Set(db.ids(laterKey))
         removedIDs = Set(db.ids(removedKey))
+        doneThisWeek = db.meta(weekKey).flatMap { try? JSONDecoder().decode([DoneItem].self, from: Data($0.utf8)) } ?? []
+    }
+
+    private var weekKey: String {
+        let cal = Calendar(identifier: .iso8601)
+        let monday = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
+        return "week-" + monday.formatted(localDay)
+    }
+
+    var earlierThisWeek: [DoneItem] {
+        let shown = Set(checklist.map(\.id))
+        return doneThisWeek.filter { $0.day != day && !shown.contains($0.id) }
+    }
+
+    func recordDone() {
+        let rows = checklist
+        let done = Set(rows.filter(\.done).map(\.id)), shown = Set(rows.map(\.id))
+        var log = doneThisWeek.filter { $0.day != day || done.contains($0.id) || !shown.contains($0.id) }
+        let logged = Set(log.map(\.id))
+        log += rows.filter { $0.done && !logged.contains($0.id) }
+            .map { DoneItem(id: $0.id, title: $0.item.title, url: $0.item.url, source: $0.item.reason, day: day) }
+        guard log != doneThisWeek else { return }
+        doneThisWeek = log
+        if let json = try? JSONEncoder().encode(log) { try? db.setMeta(weekKey, String(decoding: json, as: UTF8.self)) }
     }
     private var doneKey: String { "done-" + day }
     private var pinKey: String { "pinned-" + day }
@@ -159,7 +185,10 @@ final class Store: ObservableObject {
         saveIDs(Array(ids), key)
     }
 
-    func toggleDone(_ id: String) { flip(&doneIDs, id, doneKey) }
+    func toggleDone(_ id: String) {
+        flip(&doneIDs, id, doneKey)
+        recordDone()
+    }
 
     func toggleLater(_ id: String) { flip(&laterIDs, id, laterKey) }
 
@@ -226,6 +255,7 @@ final class Store: ObservableObject {
                 today[i].state = state
                 today[i].started = state.type == "started"
             }
+            recordDone()
         } catch {
             lastError = "\(error)"
         }
@@ -293,6 +323,7 @@ final class Store: ObservableObject {
         do {
             synthesis = try await runSynthesis(dir: dir, candidates: today, me: me ?? "me")
             synthesizedAt = Date()
+            recordDone()
         } catch {
             synthesisError = "\(error)"
         }

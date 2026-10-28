@@ -111,6 +111,15 @@ func selfTest() throws {
         check(!store.moreItems.map(\.id).contains("T2"), "a removed item isn't in More either")
         store.restoreRemoved()
         check(store.checklist.map(\.id).first == "T2", "restoring brings removed items back")
+        store.toggleDone("T3")
+        check(store.doneThisWeek.map(\.id) == ["T3"] && store.earlierThisWeek.isEmpty, "checking an item off logs it for the week, but today's stay in the checklist")
+        check(Store(db: store.db, dir: store.dir).doneThisWeek.map(\.id) == ["T3"], "the week's done list survives a restart")
+        store.toggleDone("T3")
+        check(store.doneThisWeek.isEmpty, "unchecking it today takes it back out")
+        store.doneThisWeek = [DoneItem(id: "old", title: "Old", url: URL(string: "https://x")!, source: "", day: "2000-01-03"),
+                              DoneItem(id: "T4", title: "T4", url: URL(string: "https://x")!, source: "", day: "2000-01-03")]
+        store.recordDone()
+        check(store.earlierThisWeek.map(\.id) == ["old"], "earlier days show unless the item is back on today's list")
     }
     let mcpDir = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-mcp-\(UUID())")
     defer { try? FileManager.default.removeItem(at: mcpDir) }
@@ -120,7 +129,7 @@ func selfTest() throws {
     try JSONEncoder().encode(Synthesis(focus: [], today: [reply("Reply to Dana"), Synthesis.Todo(ref: "T-1", title: "Ship it", why: "", url: nil, source: "linear", minutes: 30)], sources: []))
         .write(to: mcpDir.appendingPathComponent("synthesis.json"))
     let mcpDB = try DB(path: mcpDir.appendingPathComponent("pulse.db").path)
-    try mcpDB.setMeta("done-" + Date().formatted(.iso8601.year().month().day()), "[\"\(reply("Reply to Dana").id)\"]")
+    try mcpDB.setMeta("done-" + Date().formatted(localDay), "[\"\(reply("Reply to Dana").id)\"]")
     let call = { (name: String, args: [String: Any]) -> Any? in
         let result = mcpResponse(["id": 1, "method": "tools/call", "params": ["name": name, "arguments": args]], dir: mcpDir)?["result"] as? [String: Any]
         let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""

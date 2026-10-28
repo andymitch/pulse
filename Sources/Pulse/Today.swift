@@ -268,6 +268,14 @@ func moveIssue(key: String, issueID: String, stateID: String) async throws {
                              ["id": issueID, "state": stateID])
 }
 
+let localDay = Date.ISO8601FormatStyle(timeZone: .current).year().month().day()
+
+struct DoneItem: Codable, Equatable, Identifiable {
+    let id, title: String
+    let url: URL
+    let source, day: String
+}
+
 struct TodoRow: Identifiable {
     let item: ActionItem
     let why: String?
@@ -283,7 +291,8 @@ struct TodayView: View {
     var body: some View {
         let rows = store.checklist
         let left = rows.filter { !$0.done && !store.laterIDs.contains($0.id) }.compactMap(\.minutes).reduce(0, +)
-        Panel(title: "Today · \(rows.filter(\.done).count) of \(rows.count) done", accessory: {
+        let week = store.earlierThisWeek.sorted { $0.day > $1.day }
+        Panel(title: "Tasks · \(rows.filter(\.done).count) of \(rows.count) done today", accessory: {
             if left > 0 { Text("about \(duration(left)) left").font(.caption).foregroundStyle(.secondary) }
         }) {
             if rows.isEmpty {
@@ -291,7 +300,21 @@ struct TodayView: View {
             }
             ForEach(rows) { row in
                 TodoRowView(store: store, row: row)
-                if row.id != rows.last?.id { Divider() }
+                if row.id != rows.last?.id || !week.isEmpty { Divider() }
+            }
+            ForEach(week) { item in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(nsImage: store.checkbox(done: true)).frame(width: 16, height: 17)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Button { open(item.url) } label: { Text(item.title).strikethrough().lineLimit(2) }
+                            .buttonStyle(.plain)
+                            .help("Open")
+                        Text(["Done \(weekday(item.day))", item.source].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).lineLimit(1)
+                    }
+                    .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                if item.id != week.last?.id { Divider() }
             }
         }
         let more = store.moreItems
@@ -313,6 +336,10 @@ struct TodayView: View {
                 .font(.caption)
                 .padding(.horizontal, 14)
         }
+    }
+
+    private func weekday(_ day: String) -> String {
+        (try? Date(day, strategy: localDay))?.formatted(.dateTime.weekday(.wide)) ?? day
     }
 }
 
