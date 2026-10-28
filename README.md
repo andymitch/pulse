@@ -67,6 +67,15 @@ Click the gear in the popover.
 
 The briefing only reads: the prompt tells the agent never to post or change anything. It writes a single JSON file, which Pulse checks before using.
 
+### Pulse as an MCP server
+
+Other agents can read what Pulse knows through its own MCP server. It runs over stdio and works whether or not the app is open:
+
+- **Claude Code**: `claude mcp add pulse -- /Applications/Pulse.app/Contents/MacOS/Pulse --mcp`
+- **pi** and other clients: add `{"pulse": {"command": "/Applications/Pulse.app/Contents/MacOS/Pulse", "args": ["--mcp"]}}` under `mcpServers`.
+
+It offers four read-only tools: `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and Today checklist) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). It never writes anything and never returns settings, tokens or keys.
+
 ## Data
 
 Pulse keeps everything in `~/Library/Application Support/Pulse/`:

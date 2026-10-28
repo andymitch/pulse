@@ -112,5 +112,27 @@ func selfTest() throws {
         store.restoreRemoved()
         check(store.checklist.map(\.id).first == "T2", "restoring brings removed items back")
     }
+    let mcpDir = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-mcp-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: mcpDir) }
+    try FileManager.default.createDirectory(at: mcpDir.appendingPathComponent("meetings"), withIntermediateDirectories: true)
+    try meetingMarkdown(standup, notes: notes, transcript: "[0:01] Jane: One\n[0:02] Omar: Two\n[0:03] Jane: Three")
+        .write(to: mcpDir.appendingPathComponent("meetings/0.md"), atomically: true, encoding: .utf8)
+    try JSONEncoder().encode(Synthesis(focus: [], today: [reply("Reply to Dana"), Synthesis.Todo(ref: "T-1", title: "Ship it", why: "", url: nil, source: "linear", minutes: 30)], sources: []))
+        .write(to: mcpDir.appendingPathComponent("synthesis.json"))
+    let mcpDB = try DB(path: mcpDir.appendingPathComponent("pulse.db").path)
+    try mcpDB.setMeta("done-" + Date().formatted(.iso8601.year().month().day()), "[\"\(reply("Reply to Dana").id)\"]")
+    let call = { (name: String, args: [String: Any]) -> Any? in
+        let result = mcpResponse(["id": 1, "method": "tools/call", "params": ["name": name, "arguments": args]], dir: mcpDir)?["result"] as? [String: Any]
+        let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
+        return try? JSONSerialization.jsonObject(with: Data(text.utf8))
+    }
+    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 4, "MCP lists its four tools")
+    check((mcpResponse(["id": 1, "method": "nope"], dir: mcpDir)?["error"] as? [String: Any])?["code"] as? Int == -32601 && mcpResponse(["method": "notifications/initialized"], dir: mcpDir) == nil, "MCP rejects unknown methods and doesn't answer notifications")
+    check((call("list_meetings", ["query": "launch"]) as? [[String: Any]])?.first?["id"] as? String == "0", "MCP finds a meeting by text")
+    let page = call("get_meeting", ["id": "0", "transcript": true, "offset": 1, "lines": 1]) as? [String: Any]
+    check(page?["transcript"] as? [String] == ["[0:02] Omar: Two"] && page?["transcriptLines"] as? Int == 3 && page?["decisions"] as? [String] == notes.decisions, "MCP pages a meeting transcript")
+    check(call("get_meeting", ["id": "../x"]) == nil, "MCP rejects a meeting id that isn't a timestamp")
+    check(((call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]])?.map { $0["done"] as? Bool } == [true, false], "MCP today marks done items")
+    check((call("stats", ["range": "7 days"]) as? [Any])?.count == 7, "MCP stats has one entry per period")
     print("self-test ok")
 }
