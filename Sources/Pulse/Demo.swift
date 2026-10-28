@@ -115,7 +115,7 @@ extension Store {
         lastSync = Date().addingTimeInterval(-90)
         doneIDs = ["ai-message://%3Cdemo%40acme.com%3E"]
         let cal = Calendar(identifier: .iso8601)
-        let monday = cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
+        let monday = thisMonday
         doneThisWeek = [
             (0, "ACME-187", "Show plan limits on the billing page", "ACME-187 · Medium"),
             (0, "https://github.com/acmecorp/web/pull/401", "Speed up the usage report query", "Review requested by priya-acme · web#401"),

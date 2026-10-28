@@ -268,7 +268,12 @@ func moveIssue(key: String, issueID: String, stateID: String) async throws {
                              ["id": issueID, "state": stateID])
 }
 
-let localDay = Date.ISO8601FormatStyle(timeZone: .current).year().month().day()
+let localDay = Date.ISO8601FormatStyle(timeZone: .autoupdatingCurrent).year().month().day()
+
+var thisMonday: Date {
+    let cal = Calendar(identifier: .iso8601)
+    return cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date()))!
+}
 
 struct DoneItem: Codable, Equatable, Identifiable {
     let id, title: String

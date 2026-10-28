@@ -76,8 +76,10 @@ final class DB: @unchecked Sendable {
         (try? query("SELECT value FROM meta WHERE key = ?", [key]))?.first?[0] as? String
     }
 
-    func ids(_ key: String) -> [String] {
-        meta(key).flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? []
+    func ids(_ key: String) -> [String] { decode(key) ?? [] }
+
+    func decode<T: Decodable>(_ key: String) -> T? {
+        meta(key).flatMap { try? JSONDecoder().decode(T.self, from: Data($0.utf8)) }
     }
 
     func setMeta(_ key: String, _ value: String) throws {

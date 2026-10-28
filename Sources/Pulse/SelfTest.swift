@@ -112,6 +112,9 @@ func selfTest() throws {
         store.restoreRemoved()
         check(store.checklist.map(\.id).first == "T2", "restoring brings removed items back")
         store.toggleDone("T3")
+        check(store.doneThisWeek.isEmpty, "nothing is logged before a successful fetch")
+        store.fetchedOK = true
+        store.recordDone()
         check(store.doneThisWeek.map(\.id) == ["T3"] && store.earlierThisWeek.isEmpty, "checking an item off logs it for the week, but today's stay in the checklist")
         check(Store(db: store.db, dir: store.dir).doneThisWeek.map(\.id) == ["T3"], "the week's done list survives a restart")
         store.toggleDone("T3")
