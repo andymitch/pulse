@@ -98,6 +98,8 @@ final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AV
     static let shared = Speaker()
     @Published var speaking = false
     @Published var preparing = false
+    @Published private(set) var text: String?
+    private var utterance: AVSpeechUtterance?
     private let synth = AVSpeechSynthesizer()
     private var player: AVAudioPlayer?
     private var task: Task<Void, Never>?
@@ -108,31 +110,36 @@ final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AV
     }
 
     func toggle(_ text: String) {
-        if speaking {
-            stop()
-            return
-        }
+        let other = self.text != text
+        stop()
+        if other { start(text) }
+    }
+
+    private func start(_ text: String) {
         let plain = String(markdown(text).characters)
+        self.text = text
         speaking = true
         preparing = true
         guard settings.naturalVoice, NaturalVoice.shared.state == .ready else { return system(plain) }
         task = Task {
             do {
                 let wav = try await NaturalVoice.shared.speak(plain)
-                guard speaking, !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return }
                 let player = try AVAudioPlayer(data: wav)
                 player.delegate = self
                 self.player = player
                 player.play()
                 preparing = false
             } catch {
-                if speaking { system(plain) }
+                if !Task.isCancelled { system(plain) }
             }
         }
     }
 
     func stop() {
         guard speaking || preparing else { return }
+        text = nil
+        utterance = nil
         preparing = false
         task?.cancel()
         player?.stop()
@@ -146,22 +153,30 @@ final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AV
         utterance.voice = AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language == AVSpeechSynthesisVoice.currentLanguageCode() }
             .max { $0.quality.rawValue < $1.quality.rawValue } ?? AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
+        self.utterance = utterance
         synth.speak(utterance)
     }
 
+    private func finished() {
+        text = nil
+        utterance = nil
+        player = nil
+        speaking = false
+        preparing = false
+    }
+
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didStart u: AVSpeechUtterance) {
-        Task { @MainActor in self.preparing = false }
+        let id = ObjectIdentifier(u)
+        Task { @MainActor in if self.utterance.map(ObjectIdentifier.init) == id { self.preparing = false } }
     }
 
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
-        Task { @MainActor in self.speaking = false }
-    }
-
-    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
-        Task { @MainActor in self.speaking = false; self.preparing = false }
+        let id = ObjectIdentifier(u)
+        Task { @MainActor in if self.utterance.map(ObjectIdentifier.init) == id { self.finished() } }
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully: Bool) {
-        Task { @MainActor in self.speaking = false; self.player = nil }
+        let id = ObjectIdentifier(p)
+        Task { @MainActor in if self.player.map(ObjectIdentifier.init) == id { self.finished() } }
     }
 }

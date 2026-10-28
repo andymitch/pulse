@@ -6,9 +6,6 @@ private let palette: [Color] = [.blue, .green, .orange, .purple, .red, .teal, .y
 struct ContentView: View {
     @ObservedObject var store: Store
     @State private var metric = TrendMetric.prs
-    @ObservedObject private var speaker = Speaker.shared
-    @ObservedObject private var voice = NaturalVoice.shared
-    @State private var askVoice = false
     @ObservedObject private var updater = Updater.shared
     @ObservedObject private var meetings = Meetings.shared
 
@@ -78,33 +75,7 @@ struct ContentView: View {
                 Text("Briefing \(at, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
             }
             if let focus = store.synthesis?.focus, !focus.isEmpty {
-                let text = focus.map { "\($0.headline). \($0.summary)" }.joined(separator: "\n\n")
-                if voice.state == .downloading && !voice.settingUp {
-                    HStack(spacing: 6) {
-                        ProgressView(value: voice.progress).progressViewStyle(.circular).controlSize(.small)
-                        Text("Downloading voice \(Int(voice.progress * 100))%").font(.caption).foregroundStyle(.secondary)
-                    }
-                } else if voice.settingUp {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("Setting up voice…").font(.caption).foregroundStyle(.secondary)
-                    }
-                } else if speaker.preparing {
-                    ProgressView().controlSize(.small).help("Preparing speech")
-                } else {
-                    Button {
-                        if !settings.naturalVoice && !settings.voiceAsked && voice.supported && !speaker.speaking {
-                            askVoice = true
-                        } else {
-                            speaker.toggle(text)
-                        }
-                    } label: {
-                        Image(systemName: speaker.speaking ? "stop.fill" : "speaker.wave.2.fill").font(.system(size: 13)).foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(speaker.speaking ? "Stop reading" : "Read the focus aloud")
-                    .popover(isPresented: $askVoice, arrowEdge: .bottom) { voicePrompt(text) }
-                }
+                SpeakButton(text: focus.map { "\($0.headline). \($0.summary)" }.joined(separator: "\n\n"), help: "Read the whole focus aloud")
             }
             Button(store.synthesis == nil ? "Generate" : "Regenerate") { Task { await store.synthesize() } }
                 .disabled(store.synthesizing)
@@ -141,38 +112,6 @@ struct ContentView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private func voicePrompt(_ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Use a natural voice?").font(.headline)
-            Text("Pulse can read the focus with Kokoro, a natural voice that runs on your Mac. It's a one-time \(NaturalVoice.size) download. You can change this later in Settings.")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Spacer()
-                Button("Not now") {
-                    remember(natural: false)
-                    speaker.toggle(text)
-                }
-                Button("Download") {
-                    remember(natural: true)
-                    Task {
-                        await voice.download()
-                        if voice.state == .ready { speaker.toggle(text) }
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(14)
-        .frame(width: 300)
-    }
-
-    private func remember(natural: Bool) {
-        askVoice = false
-        settings.voiceAsked = true
-        settings.naturalVoice = natural
-        try? settings.save()
     }
 
     private var prCounts: [Count] {
@@ -402,5 +341,80 @@ struct LinearKeyForm: View {
             do { try await store.saveLinearKey(key); key = "" } catch { self.error = "\(error)" }
             saving = false
         }
+    }
+}
+
+struct SpeakButton: View {
+    let text: String
+    var help = "Read aloud"
+    @ObservedObject private var speaker = Speaker.shared
+    @ObservedObject private var voice = NaturalVoice.shared
+    @State private var asking = false
+    @State private var downloading = false
+
+    var body: some View {
+        let active = speaker.text == text
+        if downloading, voice.state == .downloading {
+            status(voice.settingUp ? "Setting up voice…" : "Downloading voice \(Int(voice.progress * 100))%")
+        } else if active, voice.settingUp {
+            status("Setting up voice…")
+        } else if active, speaker.preparing {
+            ProgressView().controlSize(.small).help("Preparing speech")
+        } else {
+            Button {
+                if !settings.naturalVoice && !settings.voiceAsked && voice.supported && !active {
+                    asking = true
+                } else {
+                    speaker.toggle(text)
+                }
+            } label: {
+                Image(systemName: active ? "stop.fill" : "speaker.wave.2.fill").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(active ? "Stop reading" : help)
+            .accessibilityLabel(active ? "Stop reading" : help)
+            .popover(isPresented: $asking, arrowEdge: .bottom) { prompt }
+        }
+    }
+
+    private func status(_ label: String) -> some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text(label).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var prompt: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Use a natural voice?").font(.headline)
+            Text("Pulse can read aloud with Kokoro, a natural voice that runs on your Mac. It's a one-time \(NaturalVoice.size) download. You can change this later in Settings.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Not now") {
+                    remember(natural: false)
+                    speaker.toggle(text)
+                }
+                Button("Download") {
+                    remember(natural: true)
+                    downloading = true
+                    Task {
+                        await voice.download()
+                        downloading = false
+                        if voice.state == .ready { speaker.toggle(text) }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(14)
+        .frame(width: 300)
+    }
+
+    private func remember(natural: Bool) {
+        asking = false
+        settings.voiceAsked = true
+        settings.naturalVoice = natural
+        try? settings.save()
     }
 }

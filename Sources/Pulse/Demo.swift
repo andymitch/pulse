@@ -116,3 +116,11 @@ extension Store {
         doneIDs = ["ai-message://%3Cdemo%40acme.com%3E"]
     }
 }
+
+let demoMeetings = [
+    SavedMeeting(file: URL(fileURLWithPath: "/demo/meetings/planning.md"), start: Calendar.current.date(bySettingHour: 9, minute: 30, second: 0, of: Date())!,
+                 title: "Launch planning", recorded: "Recorded today at 9:30 (25 min). With Omar Reyes, Priya Shah.",
+                 summary: "The team agreed to open sign-ups on November 4 if teammate invites merge this week. Omar will review the invites PR today, and Priya will name the onboarding analytics events before Friday.",
+                 decisions: ["**Launch date**: sign-ups open November 4 if invites land this week", "**Analytics**: event names follow the existing `onboarding_` prefix"],
+                 points: ["**Invites PR**: two review comments left, both small", "**CSV export**: pilot customers want it before launch"]),
+]

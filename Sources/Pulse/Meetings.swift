@@ -41,7 +41,7 @@ final class Meetings: ObservableObject {
     private let archive = Settings.dir.appendingPathComponent("meetings")
 
     func watch(me: @escaping () -> String?) {
-        guard !demoMode else { return }
+        guard !demoMode else { saved = demoMeetings; return }
         saved = savedMeetings(in: archive)
         self.me = me
         Task { await processPending() }
