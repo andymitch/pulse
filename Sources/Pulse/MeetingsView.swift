@@ -26,19 +26,14 @@ struct MeetingsView: View {
                     }
                 }
             }
-            if todayOnly {
-                let today = meetings.saved.filter { Calendar.current.isDateInToday($0.start) }
-                if today.isEmpty { Panel(title: "Meetings") { Text("No meetings recorded today.").foregroundStyle(.secondary) } }
-                ForEach(today) { MeetingCard(meeting: $0) }
-            } else {
-                if meetings.saved.isEmpty {
-                    Panel(title: "Meetings") { Text("No recorded meetings yet.").foregroundStyle(.secondary) }
-                }
-                let days = Dictionary(grouping: meetings.saved) { Calendar.current.startOfDay(for: $0.start) }
-                ForEach(days.keys.sorted(by: >), id: \.self) { day in
-                    Text(dayLabel(day)).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(days[day]!) { MeetingCard(meeting: $0) }
-                }
+            let list = todayOnly ? meetings.saved.filter { Calendar.current.isDateInToday($0.start) } : meetings.saved
+            if list.isEmpty {
+                Panel(title: "Meetings") { Text(todayOnly ? "No meetings recorded today." : "No recorded meetings yet.").foregroundStyle(.secondary) }
+            }
+            let days = Dictionary(grouping: list) { Calendar.current.startOfDay(for: $0.start) }
+            ForEach(days.keys.sorted(by: >), id: \.self) { day in
+                if !todayOnly { Text(dayLabel(day)).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary) }
+                ForEach(days[day]!) { MeetingCard(meeting: $0) }
             }
         }
     }
