@@ -139,19 +139,16 @@ final class Store: ObservableObject {
 
     private func loadDay() {
         loadedDay = day
-        doneIDs = Set(savedIDs(doneKey))
-        pinnedIDs = savedIDs(pinKey)
-        laterIDs = Set(savedIDs(laterKey))
-        removedIDs = Set(savedIDs(removedKey))
+        doneIDs = Set(db.ids(doneKey))
+        pinnedIDs = db.ids(pinKey)
+        laterIDs = Set(db.ids(laterKey))
+        removedIDs = Set(db.ids(removedKey))
     }
     private var doneKey: String { "done-" + day }
     private var pinKey: String { "pinned-" + day }
     private var laterKey: String { "later-" + day }
     private var removedKey: String { "removed-" + day }
 
-    private func savedIDs(_ key: String) -> [String] {
-        db.meta(key).flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? []
-    }
 
     private func saveIDs(_ ids: [String], _ key: String) {
         if let json = try? JSONEncoder().encode(ids) { try? db.setMeta(key, String(decoding: json, as: UTF8.self)) }

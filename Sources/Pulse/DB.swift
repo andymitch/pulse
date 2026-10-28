@@ -11,6 +11,7 @@ final class DB: @unchecked Sendable {
         guard sqlite3_open_v2(path, &handle, readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK else {
             throw DBError(message: "cannot open \(path)")
         }
+        sqlite3_busy_timeout(handle, 2000)
         guard !readOnly else { return }
         try exec("""
             CREATE TABLE IF NOT EXISTS prs (
@@ -73,6 +74,10 @@ final class DB: @unchecked Sendable {
 
     func meta(_ key: String) -> String? {
         (try? query("SELECT value FROM meta WHERE key = ?", [key]))?.first?[0] as? String
+    }
+
+    func ids(_ key: String) -> [String] {
+        meta(key).flatMap { try? JSONDecoder().decode([String].self, from: Data($0.utf8)) } ?? []
     }
 
     func setMeta(_ key: String, _ value: String) throws {
