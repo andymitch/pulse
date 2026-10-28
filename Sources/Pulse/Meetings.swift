@@ -159,6 +159,7 @@ final class Meetings: ObservableObject {
     func delete(_ meeting: SavedMeeting) {
         do {
             try FileManager.default.trashItem(at: meeting.file, resultingItemURL: nil)
+            error = nil
         } catch {
             self.error = "Couldn't delete \(meeting.title): \(error.localizedDescription)"
         }
