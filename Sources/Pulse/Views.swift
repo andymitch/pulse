@@ -252,6 +252,7 @@ struct StackedChart: View {
     @ObservedObject var store: Store
     let counts: [Count]
     let unit: String
+    @State private var selected: String?
 
     private struct Bar: Identifiable {
         let bucket, person: String
@@ -270,15 +271,52 @@ struct StackedChart: View {
                 .map { Bar(bucket: m, person: $1.person, n: $1.n, order: $0) }
         }
 
-        Chart(bars) { b in
-            BarMark(x: .value("Period", store.label(b.bucket)), y: .value(unit, b.n), stacking: .standard)
-                .foregroundStyle(by: .value("Person", b.person))
-                .zIndex(Double(-b.order))
+        Chart {
+            ForEach(bars) { b in
+                BarMark(x: .value("Period", store.label(b.bucket)), y: .value(unit, b.n), stacking: .standard)
+                    .foregroundStyle(by: .value("Person", b.person))
+                    .zIndex(Double(-b.order))
+            }
+            if let selected {
+                RuleMark(x: .value("Period", selected))
+                    .foregroundStyle(.secondary.opacity(0.4))
+                    .zIndex(1)
+                    .annotation(position: .trailing, alignment: .top, spacing: 6, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                        tooltip(selected, bars.filter { store.label($0.bucket) == selected })
+                    }
+            }
         }
+        .chartXSelection(value: $selected)
         .chartXScale(domain: store.buckets.map(store.label))
         .chartForegroundStyleScale(domain: shown, range: shown.map { palette[store.colorIndex($0) % palette.count] })
         .chartLegend(position: .bottom, alignment: .leading)
         .frame(height: 200)
+    }
+
+    private func tooltip(_ period: String, _ bars: [Bar]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(period).font(.caption.weight(.semibold))
+            ForEach(bars) { b in
+                HStack(spacing: 6) {
+                    Circle().fill(palette[store.colorIndex(b.person) % palette.count]).frame(width: 7, height: 7)
+                    Text(b.person)
+                    Spacer(minLength: 12)
+                    Text("\(b.n)").monospacedDigit()
+                }
+            }
+            Divider()
+            HStack {
+                Text("Total")
+                Spacer(minLength: 12)
+                Text("\(bars.map(\.n).reduce(0, +)) \(unit)").monospacedDigit()
+            }
+            .fontWeight(.semibold)
+        }
+        .font(.caption)
+        .padding(8)
+        .frame(minWidth: 150)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+        .shadow(radius: 3)
     }
 }
 
