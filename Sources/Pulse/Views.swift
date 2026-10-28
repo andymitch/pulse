@@ -308,7 +308,8 @@ struct StackedChart: View {
             HStack {
                 Text("Total")
                 Spacer(minLength: 12)
-                Text("\(bars.map(\.n).reduce(0, +)) \(unit)").monospacedDigit()
+                let total = bars.map(\.n).reduce(0, +)
+                Text("\(total) \(total == 1 ? String(unit.dropLast()) : unit)").monospacedDigit()
             }
             .fontWeight(.semibold)
         }
