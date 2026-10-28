@@ -8,7 +8,11 @@ struct PrioritiesView: View {
         if let s = store.synthesis {
             ForEach(Array(s.focus.enumerated()), id: \.offset) { _, f in
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(markdown(f.headline)).font(.title3.weight(.semibold))
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(markdown(f.headline)).font(.title3.weight(.semibold))
+                        Spacer()
+                        SpeakButton(text: "\(f.headline). \(f.summary)")
+                    }
                     if !headlines {
                         Text(markdown(f.summary)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         let cards = f.sources.compactMap { id in s.sources.first { $0.id == id } }

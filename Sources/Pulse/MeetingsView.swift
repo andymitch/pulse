@@ -54,6 +54,7 @@ private struct MeetingCard: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(meeting.title).font(.headline)
                 Spacer()
+                SpeakButton(text: spoken)
                 Button { copy() } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc").foregroundStyle(.secondary) }
                     .buttonStyle(.plain)
                     .help("Copy the notes and transcript as Markdown")
@@ -85,6 +86,12 @@ private struct MeetingCard: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var spoken: String {
+        [meeting.title, meeting.summary, meeting.decisions.isEmpty ? "" : "Decisions. " + meeting.decisions.joined(separator: ".\n"),
+         meeting.points.isEmpty ? "" : "Important points. " + meeting.points.joined(separator: ".\n")]
+            .filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
     private func copy() {
