@@ -98,7 +98,7 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         }
         let briefed = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let db = try? DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true)
-        let day = Date().formatted(.iso8601.year().month().day())
+        let day = Date().formatted(localDay)
         let ids = { (key: String) in Set(db?.ids(key + "-" + day) ?? []) }
         let done = ids("done"), later = ids("later"), removed = ids("removed")
         let focus: [[String: Any]] = s.focus.map { f in

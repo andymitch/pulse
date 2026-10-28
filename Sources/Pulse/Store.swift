@@ -22,6 +22,7 @@ final class Store: ObservableObject {
     @Published var pinnedIDs: [String] = []
     @Published var laterIDs: Set<String> = []
     @Published var removedIDs: Set<String> = []
+    @Published var doneThisWeek: [DoneItem] = []
     @Published var workflow: [String: [WorkflowState]] = [:]
     private var localBranches: Set<String> = []
 
@@ -108,6 +109,8 @@ final class Store: ObservableObject {
         today = mergeTicketsAndPRs(github + linear)
         localBranches = localBranchNames()
         todayFetched = Date()
+        fetchedOK = errors.isEmpty
+        recordDone()
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
@@ -134,7 +137,7 @@ final class Store: ObservableObject {
         await refresh()
     }
 
-    private var day: String { Date().formatted(.iso8601.year().month().day()) }
+    private var day: String { Date().formatted(localDay) }
     private var loadedDay = ""
 
     private func loadDay() {
@@ -143,6 +146,29 @@ final class Store: ObservableObject {
         pinnedIDs = db.ids(pinKey)
         laterIDs = Set(db.ids(laterKey))
         removedIDs = Set(db.ids(removedKey))
+        doneThisWeek = db.decode(weekKey) ?? []
+    }
+
+    private var weekKey: String { "week-" + thisMonday.formatted(localDay) }
+    var fetchedOK = false
+
+    var earlierThisWeek: [DoneItem] {
+        let shown = Set(checklist.map(\.id))
+        return doneThisWeek.filter { $0.day != day && !shown.contains($0.id) }
+    }
+
+    func recordDone() {
+        guard fetchedOK else { return }
+        if loadedDay != day { loadDay() }
+        let rows = checklist
+        let done = Set(rows.filter { $0.done && ($0.item.state?.type ?? "completed") == "completed" }.map(\.id)), shown = Set(rows.map(\.id))
+        var log = doneThisWeek.filter { $0.day != day || done.contains($0.id) || !shown.contains($0.id) }
+        let logged = Set(log.map(\.id))
+        log += rows.filter { done.contains($0.id) && !logged.contains($0.id) }
+            .map { DoneItem(id: $0.id, title: $0.item.title, url: $0.item.url, source: $0.item.reason == "Done" ? "" : $0.item.reason, day: day) }
+        guard log != doneThisWeek else { return }
+        doneThisWeek = log
+        save(log, weekKey)
     }
     private var doneKey: String { "done-" + day }
     private var pinKey: String { "pinned-" + day }
@@ -150,33 +176,36 @@ final class Store: ObservableObject {
     private var removedKey: String { "removed-" + day }
 
 
-    private func saveIDs(_ ids: [String], _ key: String) {
-        if let json = try? JSONEncoder().encode(ids) { try? db.setMeta(key, String(decoding: json, as: UTF8.self)) }
+    private func save(_ value: some Encodable, _ key: String) {
+        if let json = try? JSONEncoder().encode(value) { try? db.setMeta(key, String(decoding: json, as: UTF8.self)) }
     }
 
     private func flip(_ ids: inout Set<String>, _ id: String, _ key: String) {
         if ids.remove(id) == nil { ids.insert(id) }
-        saveIDs(Array(ids), key)
+        save(Array(ids), key)
     }
 
-    func toggleDone(_ id: String) { flip(&doneIDs, id, doneKey) }
+    func toggleDone(_ id: String) {
+        flip(&doneIDs, id, doneKey)
+        recordDone()
+    }
 
     func toggleLater(_ id: String) { flip(&laterIDs, id, laterKey) }
 
     func remove(_ id: String) {
         removedIDs.insert(id)
-        saveIDs(Array(removedIDs), removedKey)
+        save(Array(removedIDs), removedKey)
     }
 
     func restoreRemoved() {
         removedIDs = []
-        saveIDs([], removedKey)
+        save([String](), removedKey)
     }
 
     func pin(_ id: String) {
         guard !pinnedIDs.contains(id), !checklist.contains(where: { $0.id == id }) else { return }
         pinnedIDs.append(id)
-        saveIDs(pinnedIDs, pinKey)
+        save(pinnedIDs, pinKey)
     }
 
     var checklist: [TodoRow] {
@@ -226,6 +255,7 @@ final class Store: ObservableObject {
                 today[i].state = state
                 today[i].started = state.type == "started"
             }
+            recordDone()
         } catch {
             lastError = "\(error)"
         }
@@ -293,6 +323,7 @@ final class Store: ObservableObject {
         do {
             synthesis = try await runSynthesis(dir: dir, candidates: today, me: me ?? "me")
             synthesizedAt = Date()
+            recordDone()
         } catch {
             synthesisError = "\(error)"
         }
