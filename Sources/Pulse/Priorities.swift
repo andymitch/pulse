@@ -2,22 +2,22 @@ import SwiftUI
 
 struct PrioritiesView: View {
     @ObservedObject var store: Store
+    var headlines = false
 
     var body: some View {
-        if let error = store.synthesisError {
-            Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled).lineLimit(12)
-        }
         if let s = store.synthesis {
             ForEach(Array(s.focus.enumerated()), id: \.offset) { _, f in
                 VStack(alignment: .leading, spacing: 10) {
                     Text(markdown(f.headline)).font(.title3.weight(.semibold))
-                    Text(markdown(f.summary)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    let cards = f.sources.compactMap { id in s.sources.first { $0.id == id } }
-                    Grid(alignment: .topLeading, horizontalSpacing: 8, verticalSpacing: 8) {
-                        ForEach(Array(stride(from: 0, to: cards.count, by: 2)), id: \.self) { i in
-                            GridRow {
-                                SourceCard(source: cards[i])
-                                if i + 1 < cards.count { SourceCard(source: cards[i + 1]) } else { Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]) }
+                    if !headlines {
+                        Text(markdown(f.summary)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        let cards = f.sources.compactMap { id in s.sources.first { $0.id == id } }
+                        Grid(alignment: .topLeading, horizontalSpacing: 8, verticalSpacing: 8) {
+                            ForEach(Array(stride(from: 0, to: cards.count, by: 2)), id: \.self) { i in
+                                GridRow {
+                                    SourceCard(source: cards[i])
+                                    if i + 1 < cards.count { SourceCard(source: cards[i + 1]) } else { Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]) }
+                                }
                             }
                         }
                     }

@@ -2,10 +2,12 @@ import SwiftUI
 
 struct MeetingsView: View {
     @ObservedObject private var meetings = Meetings.shared
+    var limit = Int.max
+    var open: (() -> Void)?
 
     var body: some View {
-        if settings.recordMeetings || !meetings.saved.isEmpty {
-            SectionHeader(title: "Meetings") {
+        if meetings.shown {
+            SectionHeader(title: "Meetings", open: open) {
                 if let recording = meetings.recording {
                     if meetings.noAudio {
                         Label("Recording \(recording.title), but some audio isn't coming in", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
@@ -24,11 +26,10 @@ struct MeetingsView: View {
                     }
                 }
             }
-            if let error = meetings.error { Text(error).font(.caption).foregroundStyle(.red) }
             if meetings.saved.isEmpty {
                 Panel(title: "Meetings") { Text("No recorded meetings yet.").foregroundStyle(.secondary) }
             }
-            let days = Dictionary(grouping: meetings.saved) { Calendar.current.startOfDay(for: $0.start) }
+            let days = Dictionary(grouping: meetings.saved.prefix(limit)) { Calendar.current.startOfDay(for: $0.start) }
             ForEach(days.keys.sorted(by: >), id: \.self) { day in
                 Text(dayLabel(day)).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                 ForEach(days[day]!) { MeetingCard(meeting: $0) }
