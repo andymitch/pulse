@@ -89,8 +89,8 @@ private struct MeetingCard: View {
     }
 
     private var spoken: String {
-        [meeting.title, meeting.summary, meeting.decisions.isEmpty ? "" : "Decisions. " + meeting.decisions.joined(separator: "\n"),
-         meeting.points.isEmpty ? "" : "Important points. " + meeting.points.joined(separator: "\n")]
+        [meeting.title, meeting.summary, meeting.decisions.isEmpty ? "" : "Decisions. " + meeting.decisions.joined(separator: ".\n"),
+         meeting.points.isEmpty ? "" : "Important points. " + meeting.points.joined(separator: ".\n")]
             .filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 

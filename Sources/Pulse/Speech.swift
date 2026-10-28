@@ -23,6 +23,7 @@ final class NaturalVoice: ObservableObject {
     @Published var progress = 0.0
     @Published var settingUp = false
     private var manager: Any?
+    private var loading: Any?
     private static let expectedBytes = 243_000_000.0
     private let dir = Settings.dir.appendingPathComponent("Voice")
     private var marker: URL { dir.appendingPathComponent(".ready") }
@@ -77,14 +78,20 @@ final class NaturalVoice: ObservableObject {
     @available(macOS 15, *)
     private func load() async throws -> KokoroAneManager {
         if let manager = manager as? KokoroAneManager { return manager }
-        if state == .ready { settingUp = true }
-        defer { if state == .ready { settingUp = false } }
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let kokoro = KokoroAneManager(directory: dir, version: .v3)
-        try await kokoro.initialize()
-        pruneSources()
-        manager = kokoro
-        return kokoro
+        if let loading = loading as? Task<KokoroAneManager, Error> { return try await loading.value }
+        let task = Task {
+            if state == .ready { settingUp = true }
+            defer { if state == .ready { settingUp = false } }
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let kokoro = KokoroAneManager(directory: dir, version: .v3)
+            try await kokoro.initialize()
+            pruneSources()
+            manager = kokoro
+            return kokoro
+        }
+        loading = task
+        defer { loading = nil }
+        return try await task.value
     }
 }
 
@@ -96,8 +103,7 @@ private func folderSize(_ url: URL) -> Int {
 @MainActor
 final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     static let shared = Speaker()
-    @Published var speaking = false
-    @Published var preparing = false
+    @Published private(set) var preparing = false
     @Published private(set) var text: String?
     private var utterance: AVSpeechUtterance?
     private let synth = AVSpeechSynthesizer()
@@ -118,7 +124,6 @@ final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AV
     private func start(_ text: String) {
         let plain = String(markdown(text).characters)
         self.text = text
-        speaking = true
         preparing = true
         guard settings.naturalVoice, NaturalVoice.shared.state == .ready else { return system(plain) }
         task = Task {
@@ -137,7 +142,7 @@ final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AV
     }
 
     func stop() {
-        guard speaking || preparing else { return }
+        guard text != nil else { return }
         text = nil
         utterance = nil
         preparing = false
@@ -145,7 +150,6 @@ final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AV
         player?.stop()
         player = nil
         synth.stopSpeaking(at: .immediate)
-        speaking = false
     }
 
     private func system(_ text: String) {
@@ -157,14 +161,6 @@ final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AV
         synth.speak(utterance)
     }
 
-    private func finished() {
-        text = nil
-        utterance = nil
-        player = nil
-        speaking = false
-        preparing = false
-    }
-
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didStart u: AVSpeechUtterance) {
         let id = ObjectIdentifier(u)
         Task { @MainActor in if self.utterance.map(ObjectIdentifier.init) == id { self.preparing = false } }
@@ -172,11 +168,11 @@ final class Speaker: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AV
 
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
         let id = ObjectIdentifier(u)
-        Task { @MainActor in if self.utterance.map(ObjectIdentifier.init) == id { self.finished() } }
+        Task { @MainActor in if self.utterance.map(ObjectIdentifier.init) == id { self.stop() } }
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully: Bool) {
         let id = ObjectIdentifier(p)
-        Task { @MainActor in if self.player.map(ObjectIdentifier.init) == id { self.finished() } }
+        Task { @MainActor in if self.player.map(ObjectIdentifier.init) == id { self.stop() } }
     }
 }

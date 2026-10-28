@@ -75,7 +75,7 @@ struct ContentView: View {
                 Text("Briefing \(at, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
             }
             if let focus = store.synthesis?.focus, !focus.isEmpty {
-                SpeakButton(text: focus.map { "\($0.headline). \($0.summary)" }.joined(separator: "\n\n"), help: "Read the whole focus aloud")
+                SpeakButton(text: (["Today's focus."] + focus.map { "\($0.headline). \($0.summary)" }).joined(separator: "\n\n"), help: "Read the whole focus aloud")
             }
             Button(store.synthesis == nil ? "Generate" : "Regenerate") { Task { await store.synthesize() } }
                 .disabled(store.synthesizing)
