@@ -46,18 +46,28 @@ struct MeetingsView: View {
 
 private struct MeetingCard: View {
     let meeting: SavedMeeting
+    @State private var copied = false
+    @State private var confirmDelete = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(meeting.title).font(.headline)
                 Spacer()
-                Button { open(meeting.file) } label: { Image(systemName: "doc.text").foregroundStyle(.secondary) }
+                Button { copy() } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc").foregroundStyle(.secondary) }
                     .buttonStyle(.plain)
-                    .help("Open the notes and transcript")
+                    .help("Copy the notes and transcript as Markdown")
+                Button { confirmDelete = true } label: { Image(systemName: "trash").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
+                    .help("Delete this meeting")
+                    .confirmationDialog("Delete \(meeting.title)?", isPresented: $confirmDelete) {
+                        Button("Move to Trash", role: .destructive) { Meetings.shared.delete(meeting) }
+                    } message: {
+                        Text("The notes and transcript move to the Trash.")
+                    }
             }
             Text(meeting.recorded).font(.caption).foregroundStyle(.secondary).lineLimit(1).help(meeting.recorded)
-            Text(meeting.summary.isEmpty ? "No summary. Open the file for the transcript." : meeting.summary)
+            Text(meeting.summary.isEmpty ? "No summary. Copy it for the transcript." : meeting.summary)
                 .foregroundStyle(meeting.summary.isEmpty ? .secondary : .primary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -75,6 +85,17 @@ private struct MeetingCard: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func copy() {
+        guard let markdown = try? String(contentsOf: meeting.file, encoding: .utf8) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(markdown, forType: .string)
+        copied = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            copied = false
+        }
     }
 
     @ViewBuilder private func list(_ title: String, _ items: [String]) -> some View {
