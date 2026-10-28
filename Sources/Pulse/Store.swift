@@ -44,10 +44,7 @@ final class Store: ObservableObject {
             synthesizedAt = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         }
         if demoMode { try? seedDemo(db) }
-        doneIDs = Set(savedIDs(doneKey))
-        pinnedIDs = savedIDs(pinKey)
-        laterIDs = Set(savedIDs(laterKey))
-        removedIDs = Set(savedIDs(removedKey))
+        loadDay()
         load()
         if demoMode { loadDemo() }
     }
@@ -101,6 +98,7 @@ final class Store: ObservableObject {
 
     @discardableResult
     func refreshToday() async -> String? {
+        if loadedDay != day { loadDay() }
         var errors: [String] = []
         var github: [ActionItem] = [], linear: [ActionItem] = []
         do { github = try await fetchGitHubToday(token: try ghToken()) } catch { errors.append("\(error)") }
@@ -137,6 +135,15 @@ final class Store: ObservableObject {
     }
 
     private var day: String { Date().formatted(.iso8601.year().month().day()) }
+    private var loadedDay = ""
+
+    private func loadDay() {
+        loadedDay = day
+        doneIDs = Set(savedIDs(doneKey))
+        pinnedIDs = savedIDs(pinKey)
+        laterIDs = Set(savedIDs(laterKey))
+        removedIDs = Set(savedIDs(removedKey))
+    }
     private var doneKey: String { "done-" + day }
     private var pinKey: String { "pinned-" + day }
     private var laterKey: String { "later-" + day }
@@ -150,15 +157,14 @@ final class Store: ObservableObject {
         if let json = try? JSONEncoder().encode(ids) { try? db.setMeta(key, String(decoding: json, as: UTF8.self)) }
     }
 
-    func toggleDone(_ id: String) {
-        if doneIDs.contains(id) { doneIDs.remove(id) } else { doneIDs.insert(id) }
-        saveIDs(Array(doneIDs), doneKey)
+    private func flip(_ ids: inout Set<String>, _ id: String, _ key: String) {
+        if ids.remove(id) == nil { ids.insert(id) }
+        saveIDs(Array(ids), key)
     }
 
-    func toggleLater(_ id: String) {
-        if laterIDs.contains(id) { laterIDs.remove(id) } else { laterIDs.insert(id) }
-        saveIDs(Array(laterIDs), laterKey)
-    }
+    func toggleDone(_ id: String) { flip(&doneIDs, id, doneKey) }
+
+    func toggleLater(_ id: String) { flip(&laterIDs, id, laterKey) }
 
     func remove(_ id: String) {
         removedIDs.insert(id)

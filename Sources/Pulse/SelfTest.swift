@@ -107,7 +107,7 @@ func selfTest() throws {
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
         store.remove("T2")
         store.toggleLater("T1")
-        check(store.checklist.map(\.id) == ["T3", "T4", "T5", "T6", "T7", "T1"], "a removed item is replaced and a later one moves to the bottom")
+        check(store.checklist.map(\.id) == ["T3", "T4", "T5", "T6", "T7", "T1"], "without a plan, a removed item is backfilled and a later one moves to the bottom")
         check(!store.moreItems.map(\.id).contains("T2"), "a removed item isn't in More either")
         store.restoreRemoved()
         check(store.checklist.map(\.id).first == "T2", "restoring brings removed items back")

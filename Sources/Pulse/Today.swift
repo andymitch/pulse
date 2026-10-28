@@ -344,7 +344,7 @@ private struct TodoRowView: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer()
-            if !row.done { Buttons(store: store, item: item, later: checkable) }
+            if !row.done { Buttons(store: store, item: item, canDefer: checkable) }
         }
     }
 }
@@ -424,10 +424,10 @@ private struct StatusMenu: View {
 private struct Buttons: View {
     @ObservedObject var store: Store
     let item: ActionItem
-    let later: Bool
+    let canDefer: Bool
 
     var body: some View {
-        let triage = Triage(store: store, id: item.id, later: later)
+        let triage = Triage(store: store, id: item.id, canDefer: canDefer)
         HStack(spacing: 6) {
             if item.ticket != nil, item.branch != nil {
                 TicketButton(store: store, item: item, triage: triage)
@@ -444,9 +444,14 @@ private struct Buttons: View {
 }
 
 private struct SplitButton<Title: View, Items: View>: View {
+    let help: String
     let action: () -> Void
     @ViewBuilder let title: Title
     @ViewBuilder let items: Items
+
+    private struct Pressable: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View { configuration.label.opacity(configuration.isPressed ? 0.6 : 1) }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -456,12 +461,15 @@ private struct SplitButton<Title: View, Items: View>: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(Pressable())
+            .help(help)
             Divider().padding(.vertical, 5)
             Menu { items } label: { Image(systemName: "chevron.down") }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .frame(width: 26)
+                .help("More actions")
+                .accessibilityLabel("More actions")
         }
         .frame(width: 104, height: 24)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
@@ -471,10 +479,10 @@ private struct SplitButton<Title: View, Items: View>: View {
 private struct Triage: View {
     @ObservedObject var store: Store
     let id: String
-    let later: Bool
+    let canDefer: Bool
 
     var body: some View {
-        if later { Button(store.laterIDs.contains(id) ? "Move back up" : "Do later") { store.toggleLater(id) } }
+        if canDefer || store.laterIDs.contains(id) { Button(store.laterIDs.contains(id) ? "Move back up" : "Do later") { store.toggleLater(id) } }
         Button("Remove for today") { store.remove(id) }
     }
 }
@@ -501,7 +509,7 @@ private struct TicketButton: View {
     }
 
     var body: some View {
-        SplitButton {
+        SplitButton(help: item.started ? "Open in \(primary.name)" : primary == .prompt ? "Copy the agent prompt" : isAgent(primary) ? "Start \(primary.name) in \(terminalName)" : "Start in \(primary.name)") {
             Task { await store.launch(primary, item: item) }
         } title: {
             Label { Text(label(primary)) } icon: { icon(primary) }
@@ -520,7 +528,6 @@ private struct TicketButton: View {
             Divider()
             triage
         }
-        .help(item.started ? "Open in \(primary.name)" : primary == .prompt ? "Copy the agent prompt" : isAgent(primary) ? "Start \(primary.name) in \(terminalName)" : "Start in \(primary.name)")
     }
 
     @ViewBuilder private func icon(_ l: Launch) -> some View {
@@ -569,8 +576,7 @@ private struct AppButton: View {
 
     var body: some View {
         if let menu {
-            SplitButton { Task { await action() } } title: { labelView } items: { menu }
-                .help(help)
+            SplitButton(help: help) { Task { await action() } } title: { labelView } items: { menu }
         } else {
             Button { Task { await action() } } label: { labelView }
                 .buttonStyle(.bordered)
