@@ -74,9 +74,6 @@ struct ContentView: View {
             } else if let at = store.synthesizedAt {
                 Text("Briefing \(at, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
             }
-            if let focus = store.synthesis?.focus, !focus.isEmpty {
-                SpeakButton(text: (["Today's focus."] + focus.map { "\($0.headline). \($0.summary)" }).joined(separator: "\n\n"), help: "Read the whole focus aloud")
-            }
             Button(store.synthesis == nil ? "Generate" : "Regenerate") { Task { await store.synthesize() } }
                 .disabled(store.synthesizing)
         }
@@ -346,7 +343,6 @@ struct LinearKeyForm: View {
 
 struct SpeakButton: View {
     let text: String
-    var help = "Read aloud"
     @ObservedObject private var speaker = Speaker.shared
     @ObservedObject private var voice = NaturalVoice.shared
     @State private var asking = false
@@ -371,8 +367,8 @@ struct SpeakButton: View {
                 Image(systemName: active ? "stop.fill" : "speaker.wave.2.fill").font(.system(size: 13)).foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(active ? "Stop reading" : help)
-            .accessibilityLabel(active ? "Stop reading" : help)
+            .help(active ? "Stop reading" : "Read aloud")
+            .accessibilityLabel(active ? "Stop reading" : "Read aloud")
             .popover(isPresented: $asking, arrowEdge: .bottom) { prompt }
         }
     }
