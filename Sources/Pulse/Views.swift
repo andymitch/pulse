@@ -10,6 +10,7 @@ struct ContentView: View {
     @ObservedObject private var voice = NaturalVoice.shared
     @State private var askVoice = false
     @ObservedObject private var updater = Updater.shared
+    @ObservedObject private var meetings = Meetings.shared
 
     var body: some View {
         Group {
@@ -24,77 +25,109 @@ struct ContentView: View {
     }
 
     private var main: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                header
-                if let error = store.lastError {
-                    Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
-                }
-                TodayView(store: store)
-                SectionHeader(title: "Focus") {
-                    if store.synthesizing {
-                        ProgressView().controlSize(.small)
-                        Text("Reading your sources…").font(.caption).foregroundStyle(.secondary)
-                    } else if let at = store.synthesizedAt {
-                        Text("Briefing \(at, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let focus = store.synthesis?.focus, !focus.isEmpty {
-                        let text = focus.map { "\($0.headline). \($0.summary)" }.joined(separator: "\n\n")
-                        if voice.state == .downloading && !voice.settingUp {
-                            HStack(spacing: 6) {
-                                ProgressView(value: voice.progress).progressViewStyle(.circular).controlSize(.small)
-                                Text("Downloading voice \(Int(voice.progress * 100))%").font(.caption).foregroundStyle(.secondary)
-                            }
-                        } else if voice.settingUp {
-                            HStack(spacing: 6) {
-                                ProgressView().controlSize(.small)
-                                Text("Setting up voice…").font(.caption).foregroundStyle(.secondary)
-                            }
-                        } else if speaker.preparing {
-                            ProgressView().controlSize(.small).help("Preparing speech")
-                        } else {
-                            Button {
-                                if !settings.naturalVoice && !settings.voiceAsked && voice.supported && !speaker.speaking {
-                                    askVoice = true
-                                } else {
-                                    speaker.toggle(text)
-                                }
-                            } label: {
-                                Image(systemName: speaker.speaking ? "stop.fill" : "speaker.wave.2.fill").font(.system(size: 13)).foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help(speaker.speaking ? "Stop reading" : "Read the focus aloud")
-                            .popover(isPresented: $askVoice, arrowEdge: .bottom) { voicePrompt(text) }
-                        }
-                    }
-                    Button(store.synthesis == nil ? "Generate" : "Regenerate") { Task { await store.synthesize() } }
-                        .disabled(store.synthesizing)
-                }
-                PrioritiesView(store: store)
-                MeetingsView()
-                SectionHeader(title: "Trends") {
-                    Picker("", selection: $metric) {
-                        ForEach(TrendMetric.allCases.filter { $0 == .prs || store.hasLinearKey }, id: \.self) { m in
-                            Label { Text(m.rawValue) } icon: { Image(nsImage: m.brand.padded(size: 13, trailing: 5)) }.tag(m)
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                    Picker("", selection: $store.range) {
-                        ForEach(TrendRange.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                    PeoplePicker(store: store)
-                }
-                trends
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            ForEach(Array([store.lastError, store.synthesisError, meetings.error].compactMap { $0 }.enumerated()), id: \.offset) { _, error in
+                Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled).lineLimit(4).help(error).padding(.horizontal, 16)
             }
-            .padding(16)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    switch store.page {
+                    case .home: home
+                    case .focus:
+                        focusHeader()
+                        PrioritiesView(store: store)
+                    case .meetings: MeetingsView()
+                    case .trends: trends
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+            }
+            .id(store.page)
+            .overlayScrollers()
+        }
+        .padding(.top, 16)
+        .onChange(of: meetings.shown) { _, shown in
+            if !shown, store.page == .meetings { store.page = .home }
+        }
+    }
+
+    @ViewBuilder private var home: some View {
+        TodayView(store: store)
+        focusHeader { store.page = .focus }
+        PrioritiesView(store: store, headlines: true)
+        MeetingsView(limit: 1) { store.page = .meetings }
+        SectionHeader(title: "Trends", open: { store.page = .trends }) {
+            Text("Last \(store.range.rawValue): \(trendsSummary)").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var trendsSummary: String {
+        let prs = store.trends.prs.filter { store.includes($0.person) }.count
+        let tickets = store.trends.completed.filter { store.includes($0.person) }.map(\.n).reduce(0, +)
+        return "\(prs) PRs merged" + (store.hasLinearKey ? ", \(tickets) tickets closed" : "")
+    }
+
+    private func focusHeader(open: (() -> Void)? = nil) -> some View {
+        SectionHeader(title: "Focus", open: open) {
+            if store.synthesizing {
+                ProgressView().controlSize(.small)
+                Text("Reading your sources…").font(.caption).foregroundStyle(.secondary)
+            } else if let at = store.synthesizedAt {
+                Text("Briefing \(at, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
+            }
+            if let focus = store.synthesis?.focus, !focus.isEmpty {
+                let text = focus.map { "\($0.headline). \($0.summary)" }.joined(separator: "\n\n")
+                if voice.state == .downloading && !voice.settingUp {
+                    HStack(spacing: 6) {
+                        ProgressView(value: voice.progress).progressViewStyle(.circular).controlSize(.small)
+                        Text("Downloading voice \(Int(voice.progress * 100))%").font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if voice.settingUp {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Setting up voice…").font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if speaker.preparing {
+                    ProgressView().controlSize(.small).help("Preparing speech")
+                } else {
+                    Button {
+                        if !settings.naturalVoice && !settings.voiceAsked && voice.supported && !speaker.speaking {
+                            askVoice = true
+                        } else {
+                            speaker.toggle(text)
+                        }
+                    } label: {
+                        Image(systemName: speaker.speaking ? "stop.fill" : "speaker.wave.2.fill").font(.system(size: 13)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(speaker.speaking ? "Stop reading" : "Read the focus aloud")
+                    .popover(isPresented: $askVoice, arrowEdge: .bottom) { voicePrompt(text) }
+                }
+            }
+            Button(store.synthesis == nil ? "Generate" : "Regenerate") { Task { await store.synthesize() } }
+                .disabled(store.synthesizing)
         }
     }
 
     @ViewBuilder private var trends: some View {
+        SectionHeader(title: "Trends") {
+            Picker("", selection: $metric) {
+                ForEach(TrendMetric.allCases.filter { $0 == .prs || store.hasLinearKey }, id: \.self) { m in
+                    Label { Text(m.rawValue) } icon: { Image(nsImage: m.brand.padded(size: 13, trailing: 5)) }.tag(m)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            Picker("", selection: $store.range) {
+                ForEach(TrendRange.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            PeoplePicker(store: store)
+        }
         VStack(alignment: .leading, spacing: 10) {
             switch metric {
             case .prs:
@@ -150,6 +183,13 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             Text("Pulse").font(.title3.bold())
+            Picker("", selection: $store.page) {
+                ForEach(PulseTab.allCases.filter { $0 != .meetings || meetings.shown }, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .padding(.leading, 8)
             Spacer()
             if store.syncing {
                 ProgressView().controlSize(.small)
@@ -172,7 +212,12 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .help("Settings")
         }
+        .padding(.horizontal, 16)
     }
+}
+
+enum PulseTab: String, CaseIterable {
+    case home = "Home", focus = "Focus", meetings = "Meetings", trends = "Trends"
 }
 
 enum TrendMetric: String, CaseIterable {
@@ -183,11 +228,23 @@ enum TrendMetric: String, CaseIterable {
 
 struct SectionHeader<Accessory: View>: View {
     let title: String
+    var open: (() -> Void)?
     @ViewBuilder var accessory: Accessory
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(title).font(.headline)
+            if let open {
+                Button(action: open) {
+                    HStack(spacing: 4) {
+                        Text(title).font(.headline)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Open \(title)")
+            } else {
+                Text(title).font(.headline)
+            }
             Spacer()
             accessory
         }

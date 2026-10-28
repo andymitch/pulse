@@ -27,6 +27,7 @@ final class Meetings: ObservableObject {
     @Published private(set) var noAudio = false
     @Published private(set) var saved: [SavedMeeting] = []
     @Published var error: String?
+    var shown: Bool { settings.recordMeetings || !saved.isEmpty }
     private var capture: Capture?
     private var quietPolls = 0
     private var dismissed = false

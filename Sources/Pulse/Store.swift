@@ -12,6 +12,7 @@ final class Store: ObservableObject {
     @Published var me: String?
     @Published var today: [ActionItem] = []
     @Published var showingSettings = false
+    @Published var page = PulseTab.home
     private var todayFetched = Date.distantPast
     @Published var synthesis: Synthesis?
     @Published var synthesizedAt: Date?
@@ -280,7 +281,10 @@ final class Store: ObservableObject {
             while true {
                 await refresh()
                 Updater.shared.checkIfDue()
-                if synthesisDue { await synthesize() }
+                if synthesisDue {
+                    await synthesize()
+                    if synthesisError == nil { page = .home }
+                }
                 try? await Task.sleep(for: .seconds(3600))
             }
         }

@@ -2,14 +2,16 @@
 
 A macOS menu-bar app that tells you what to work on today, what your team is focused on, and how shipping is trending. Pulse pulls together GitHub, Linear, Slack, Mail and the meetings it records for you.
 
+Pulse opens on **Home**: today's checklist, the focus headlines, the latest meeting and a trends summary, with Focus, Meetings and Trends each on their own tab.
+
 - **Today**: a short checklist planned each morning to fit about 5 hours, covering reviews to unblock, replies you owe, and the tickets that matter most. Linear tickets show their real status, which you can change from the list. **Start** creates a git worktree on the ticket's branch, moves the ticket to In Progress, and opens it in your IDE's agent panel (Zed, Cursor, VS Code) or in a terminal agent (pi, Claude Code, or your own).
 - **Focus**: one distilled summary of what the team is pushing on, with source cards and a button that reads it aloud.
 - **Meetings**: Pulse notices Google Meet calls, Slack huddles and calendar meetings, records them, transcribes them on your Mac, and saves a summary with the decisions and important points. The briefing reads them.
 - **Trends**: PRs merged and Linear tickets closed per person, over 7 days, 5 weeks or 12 months.
 
 <p align="center">
-  <img src="docs/screenshot-today.png" alt="Today's checklist with start and open buttons, and the team focus" width="49%">
-  <img src="docs/screenshot-trends.png" alt="The focus source cards and the PRs merged trend, stacked by teammate" width="49%">
+  <img src="docs/screenshot-today.png" alt="The Home tab: today's checklist, the focus headlines, meetings and a trends summary" width="49%">
+  <img src="docs/screenshot-trends.png" alt="The Trends tab: PRs merged per month, stacked by teammate" width="49%">
 </p>
 
 Everything runs on your Mac. Pulse has no server and sends no telemetry. Your data goes only to the services you connect and to the AI agent you choose for the briefing and meeting summaries.
