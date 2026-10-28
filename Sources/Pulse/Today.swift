@@ -282,7 +282,7 @@ struct TodayView: View {
 
     var body: some View {
         let rows = store.checklist
-        let left = rows.filter { !$0.done }.compactMap(\.minutes).reduce(0, +)
+        let left = rows.filter { !$0.done && !store.laterIDs.contains($0.id) }.compactMap(\.minutes).reduce(0, +)
         Panel(title: "Today · \(rows.filter(\.done).count) of \(rows.count) done", accessory: {
             if left > 0 { Text("about \(duration(left)) left").font(.caption).foregroundStyle(.secondary) }
         }) {
@@ -307,6 +307,12 @@ struct TodayView: View {
             .padding(.horizontal, 14)
             .foregroundStyle(.secondary)
         }
+        if !store.removedIDs.isEmpty {
+            Button("Restore \(store.removedIDs.count) removed today") { store.restoreRemoved() }
+                .buttonStyle(.link)
+                .font(.caption)
+                .padding(.horizontal, 14)
+        }
     }
 }
 
@@ -321,6 +327,7 @@ private struct TodoRowView: View {
 
     var body: some View {
         let item = row.item
+        let later = store.laterIDs.contains(item.id)
         HStack(alignment: .top, spacing: 10) {
             if let state = item.state, let team = item.teamID {
                 StatusMenu(store: store, item: item, state: state, states: store.workflow[team] ?? [state]).frame(width: 16, height: 17)
@@ -333,11 +340,11 @@ private struct TodoRowView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).lineLimit(2).strikethrough(row.done).foregroundStyle(row.done ? .secondary : .primary)
-                Text([row.why, item.reason, row.minutes.map { "~" + duration($0) }].compactMap { $0 }.joined(separator: " · "))
+                Text([later ? "Later" : nil, row.why, item.reason, row.minutes.map { "~" + duration($0) }].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer()
-            if !row.done { Buttons(store: store, item: item) }
+            if !row.done { Buttons(store: store, item: item, later: checkable) }
         }
     }
 }
@@ -417,26 +424,65 @@ private struct StatusMenu: View {
 private struct Buttons: View {
     @ObservedObject var store: Store
     let item: ActionItem
+    let later: Bool
 
     var body: some View {
+        let triage = Triage(store: store, id: item.id, later: later)
         HStack(spacing: 6) {
             if item.ticket != nil, item.branch != nil {
-                TicketButton(store: store, item: item)
+                TicketButton(store: store, item: item, triage: triage)
             } else if let pr = item.pr {
-                AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR") { store.pin(item.id); open(pr) }
+                AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { store.pin(item.id); open(pr) }
             } else {
                 let slack = item.url.host?.hasSuffix("slack.com") == true
                 let linear = item.url.host == "linear.app"
-                AppButton(slack ? .slack : linear ? .linear : nil, "Open", symbol: item.url.scheme == "message" ? "envelope" : "arrow.up.right.square") { store.pin(item.id); open(item.url, in: slack ? .slack : linear ? .linear : nil) }
+                AppButton(slack ? .slack : linear ? .linear : item.url.host == "github.com" ? .github : nil, "Open", symbol: item.url.scheme == "message" ? "envelope" : "arrow.up.right.square", menu: triage) { store.pin(item.id); open(item.url, in: slack ? .slack : linear ? .linear : nil) }
             }
             if let id = item.notificationID { AppButton(nil, "Mark read", icon: false) { await store.markRead(id) } }
         }
     }
 }
 
+private struct SplitButton<Title: View, Items: View>: View {
+    let action: () -> Void
+    @ViewBuilder let title: Title
+    @ViewBuilder let items: Items
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: action) {
+                title.labelStyle(.titleAndIcon)
+                    .padding(.leading, 9)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Divider().padding(.vertical, 5)
+            Menu { items } label: { Image(systemName: "chevron.down") }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 26)
+        }
+        .frame(width: 104, height: 24)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+private struct Triage: View {
+    @ObservedObject var store: Store
+    let id: String
+    let later: Bool
+
+    var body: some View {
+        if later { Button(store.laterIDs.contains(id) ? "Move back up" : "Do later") { store.toggleLater(id) } }
+        Button("Remove for today") { store.remove(id) }
+    }
+}
+
 private struct TicketButton: View {
     @ObservedObject var store: Store
     let item: ActionItem
+    let triage: Triage
 
     private var ides: [Launch] { settings.enabledIDEs.map { .ide($0) } }
     private var agents: [Launch] { settings.enabledAgents.map { .agent($0.name) } }
@@ -451,36 +497,30 @@ private struct TicketButton: View {
     }
 
     private func label(_ l: Launch) -> String {
-        l == .prompt ? "Copy prompt" : item.started || l == .linear ? "Open" : "Start"
+        l == .prompt ? "Copy" : item.started || l == .linear ? "Open" : "Start"
     }
 
     var body: some View {
-        ControlGroup {
-            Button { Task { await store.launch(primary, item: item) } } label: {
-                Label { Text(label(primary)) } icon: { icon(primary) }
+        SplitButton {
+            Task { await store.launch(primary, item: item) }
+        } title: {
+            Label { Text(label(primary)) } icon: { icon(primary) }
+        } items: {
+            if item.started {
+                Section("Open in") { ForEach(choices, id: \.self) { menuItem($0) } }
+                Divider()
+                menuItem(.prompt)
+            } else {
+                menuItem(.prompt)
+                if !ides.isEmpty { Section("Start in") { ForEach(ides, id: \.self) { menuItem($0) } } }
+                if !agents.isEmpty { Section("Start in \(terminalName)") { ForEach(agents, id: \.self) { menuItem($0) } } }
+                Divider()
+                menuItem(.linear)
             }
-            .labelStyle(.titleAndIcon)
-            .help(item.started ? "Open in \(primary.name)" : primary == .prompt ? "Copy the agent prompt" : isAgent(primary) ? "Start \(primary.name) in \(terminalName)" : "Start in \(primary.name)")
-            Menu {
-                if item.started {
-                    Section("Open in") { ForEach(choices, id: \.self) { menuItem($0) } }
-                    Divider()
-                    menuItem(.prompt)
-                } else {
-                    menuItem(.prompt)
-                    if !ides.isEmpty { Section("Start in") { ForEach(ides, id: \.self) { menuItem($0) } } }
-                    if !agents.isEmpty { Section("Start in \(terminalName)") { ForEach(agents, id: \.self) { menuItem($0) } } }
-                    Divider()
-                    menuItem(.linear)
-                }
-            } label: {
-                Image(systemName: "chevron.down")
-            }
-            .menuIndicator(.hidden)
-            .help("More ways to \(item.started ? "open" : "start")")
+            Divider()
+            triage
         }
-        .controlGroupStyle(.navigation)
-        .fixedSize()
+        .help(item.started ? "Open in \(primary.name)" : primary == .prompt ? "Copy the agent prompt" : isAgent(primary) ? "Start \(primary.name) in \(terminalName)" : "Start in \(primary.name)")
     }
 
     @ViewBuilder private func icon(_ l: Launch) -> some View {
@@ -504,16 +544,18 @@ private struct AppButton: View {
     let label: String?
     let help: String
     let icon: Bool
+    let menu: Triage?
     let action: () async -> Void
 
     var symbol = "arrow.up.right.square"
 
-    init(_ brand: Brand?, _ label: String? = nil, help: String = "", icon: Bool = true, symbol: String = "arrow.up.right.square", action: @escaping () async -> Void) {
+    init(_ brand: Brand?, _ label: String? = nil, help: String = "", icon: Bool = true, symbol: String = "arrow.up.right.square", menu: Triage? = nil, action: @escaping () async -> Void) {
         self.symbol = symbol
         self.brand = brand
         self.label = label
         self.help = help
         self.icon = icon
+        self.menu = menu
         self.action = action
     }
 
@@ -521,16 +563,19 @@ private struct AppButton: View {
         if let brand { Image(nsImage: brand.image(size: 13)) } else if icon { Image(systemName: symbol).font(.system(size: 12)).frame(width: 13, height: 13) }
     }
 
+    @ViewBuilder private var labelView: some View {
+        if let label { Label { Text(label) } icon: { iconView } } else { iconView }
+    }
+
     var body: some View {
-        Button { Task { await action() } } label: {
-            if let label {
-                Label { Text(label) } icon: { iconView }
-            } else {
-                iconView
-            }
+        if let menu {
+            SplitButton { Task { await action() } } title: { labelView } items: { menu }
+                .help(help)
+        } else {
+            Button { Task { await action() } } label: { labelView }
+                .buttonStyle(.bordered)
+                .help(help)
         }
-        .buttonStyle(.bordered)
-        .help(help)
     }
 }
 

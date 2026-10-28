@@ -102,5 +102,15 @@ func selfTest() throws {
     check(spokenWords("[0:26] Andrew Mitchell: Uh") == 1 && spokenWords("[61:02] Jane: Note: ship it\n[61:05] Speaker 1: Sure") == 4, "spoken words skip timestamps and speakers")
     let reply = { (title: String) in Synthesis.Todo(ref: nil, title: title, why: "", url: "message://%3Cm1%3E", source: "mail", minutes: 5) }
     check(reply("Reply to Dana").id == reply("Reply to Dana about the date").id, "a reworded briefing item keeps its done state")
+    try MainActor.assumeIsolated {
+        let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
+        store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
+        store.remove("T2")
+        store.toggleLater("T1")
+        check(store.checklist.map(\.id) == ["T3", "T4", "T5", "T6", "T7", "T1"], "a removed item is replaced and a later one moves to the bottom")
+        check(!store.moreItems.map(\.id).contains("T2"), "a removed item isn't in More either")
+        store.restoreRemoved()
+        check(store.checklist.map(\.id).first == "T2", "restoring brings removed items back")
+    }
     print("self-test ok")
 }
