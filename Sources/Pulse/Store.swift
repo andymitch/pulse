@@ -181,9 +181,7 @@ final class Store: ObservableObject {
     private var removedKey: String { "removed-" + day }
 
 
-    private func save(_ value: some Encodable, _ key: String) {
-        if let json = try? JSONEncoder().encode(value) { try? db.setMeta(key, String(decoding: json, as: UTF8.self)) }
-    }
+    private func save(_ value: some Encodable, _ key: String) { try? db.set(value, key) }
 
     private func flip(_ ids: inout Set<String>, _ id: String, _ key: String) {
         if ids.remove(id) == nil { ids.insert(id) }

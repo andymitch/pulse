@@ -162,5 +162,9 @@ func selfTest() throws {
     let after = call("get_meeting", ["id": "0", "transcript": true]) as? [String: Any]
     check(edited?["summary"] as? String == "Shipped." && after?["decisions"] as? [String] == ["Line one line two"] && after?["title"] as? String == "Standup"
           && after?["points"] as? [String] == notes.points && after?["transcriptLines"] as? Int == 3, "MCP edits a meeting's notes and keeps the rest and the transcript")
+    _ = call("update_meeting", ["id": "0", "summary": "Fine.\n## Transcript\nfake"])
+    check((call("get_meeting", ["id": "0", "transcript": true]) as? [String: Any])?["transcriptLines"] as? Int == 3, "a heading in an edited summary can't cut the transcript")
+    check(editMeeting("# Old\n\nRecorded.\n\n## Notes\n\nx\n\n## Transcript\n\nhi", title: "New", summary: nil, decisions: nil, points: nil) == nil
+          && editMeeting("# Old\n\nRecorded.", title: "New", summary: nil, decisions: nil, points: nil) == nil, "a meeting Pulse didn't write isn't edited")
     print("self-test ok")
 }

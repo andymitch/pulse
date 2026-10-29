@@ -82,6 +82,10 @@ final class DB: @unchecked Sendable {
         meta(key).flatMap { try? JSONDecoder().decode(T.self, from: Data($0.utf8)) }
     }
 
+    func set(_ value: some Encodable, _ key: String) throws {
+        try setMeta(key, String(decoding: try JSONEncoder().encode(value), as: UTF8.self))
+    }
+
     func setMeta(_ key: String, _ value: String) throws {
         try query("INSERT OR REPLACE INTO meta VALUES (?, ?)", [key, value])
     }

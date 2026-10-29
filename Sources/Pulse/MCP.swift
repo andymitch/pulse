@@ -33,21 +33,22 @@ private let mcpTools: [[String: Any]] = [
     tool("update_task", "Mark one of today's tasks done or not done, move it to later or back up, or remove it for the day or restore it. Uses the ids from today. Only the fields given change.", [
         "id": ["type": "string", "description": "The task id from today"],
         "done": ["type": "boolean"], "later": ["type": "boolean"], "removed": ["type": "boolean"],
-    ], required: ["id"], hints: ["readOnlyHint": false, "idempotentHint": true]),
+    ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": false, "idempotentHint": true]),
     tool("update_meeting", "Change a meeting's title, summary, decisions or important points. Only the fields given change; the transcript is kept.", [
         "id": ["type": "string", "description": "The meeting id from list_meetings"],
         "title": ["type": "string"], "summary": ["type": "string"],
         "decisions": ["type": "array", "items": ["type": "string"]], "points": ["type": "array", "items": ["type": "string"]],
-    ], required: ["id"], hints: ["readOnlyHint": false, "idempotentHint": true]),
+    ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": true, "idempotentHint": true]),
     tool("delete_meeting", "Move a meeting's notes and transcript to the Trash.", [
         "id": ["type": "string", "description": "The meeting id from list_meetings"],
     ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": true]),
-    tool("regenerate_briefing", "Ask the running Pulse app to rebuild today's briefing. It runs in the background and takes a few minutes; read today afterwards.", [:],
-         hints: ["readOnlyHint": false]),
+    tool("regenerate_briefing", "Ask the running Pulse app to rebuild today's briefing. It runs in the background and takes a few minutes; check briefedAt in today afterwards.", [:],
+         hints: ["readOnlyHint": false, "destructiveHint": false]),
 ]
 
 private func tool(_ name: String, _ description: String, _ properties: [String: Any], required: [String] = [], hints: [String: Bool] = ["readOnlyHint": true]) -> [String: Any] {
-    ["name": name, "description": description, "inputSchema": ["type": "object", "properties": properties, "required": required], "annotations": hints]
+    ["name": name, "description": description, "inputSchema": ["type": "object", "properties": properties, "required": required],
+     "annotations": hints.merging(["openWorldHint": false]) { a, _ in a }]
 }
 
 private func meetingFile(_ args: [String: Any], in archive: URL) throws -> (id: String, file: URL, markdown: String) {
@@ -57,7 +58,15 @@ private func meetingFile(_ args: [String: Any], in archive: URL) throws -> (id: 
     return (id, file, markdown)
 }
 
-private func changed() {
+private func briefing(_ dir: URL) throws -> Synthesis {
+    guard let data = try? Data(contentsOf: dir.appendingPathComponent("synthesis.json")), let s = try? JSONDecoder().decode(Synthesis.self, from: data) else {
+        throw SyncError(description: "No briefing yet")
+    }
+    return s
+}
+
+private func changed(_ dir: URL) {
+    guard dir == Settings.dir else { return }
     DistributedNotificationCenter.default().postNotificationName(pulseChanged, object: nil, userInfo: nil, deliverImmediately: true)
 }
 
@@ -117,10 +126,8 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         }
         return out
     case "today":
+        let s = try briefing(dir)
         let file = dir.appendingPathComponent("synthesis.json")
-        guard let data = try? Data(contentsOf: file), let s = try? JSONDecoder().decode(Synthesis.self, from: data) else {
-            throw SyncError(description: "No briefing yet")
-        }
         let briefed = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let db = try? DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true)
         let day = Date().formatted(localDay)
@@ -156,40 +163,49 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
                     "medianHoursToMerge": s.medianHours, "medianLinesAdded": s.medianAdditions, "prsOver500Lines": s.over500] as [String: Any]
         }
     case "update_task":
-        guard let id = args["id"] as? String, let data = try? Data(contentsOf: dir.appendingPathComponent("synthesis.json")),
-              let s = try? JSONDecoder().decode(Synthesis.self, from: data), let task = s.today.first(where: { $0.id == id }) else {
+        let s = try briefing(dir)
+        let briefed = (try? dir.appendingPathComponent("synthesis.json").resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        guard briefed.map(Calendar.current.isDateInToday) == true else { throw SyncError(description: "The briefing isn't from today, so its tasks aren't on the list.") }
+        guard let id = args["id"] as? String, let task = s.today.first(where: { $0.id == id }) else {
             throw SyncError(description: "Unknown task id. Use the ids from today.")
         }
         let db = try DB(path: dir.appendingPathComponent("pulse.db").path)
         let day = Date().formatted(localDay)
-        for key in ["done", "later", "removed"] {
-            guard let on = args[key] as? Bool else { continue }
-            var ids = Set(db.ids(key + "-" + day))
-            if on { ids.insert(id) } else { ids.remove(id) }
-            try db.setMeta(key + "-" + day, String(decoding: try JSONEncoder().encode(Array(ids)), as: UTF8.self))
+        var out: [String: Any] = ["id": id, "title": task.title]
+        try db.transaction {
+            for key in ["done", "later", "removed"] {
+                var ids = Set(db.ids(key + "-" + day))
+                if let on = args[key] as? Bool {
+                    if on { ids.insert(id) } else { ids.remove(id) }
+                    try db.set(Array(ids), key + "-" + day)
+                }
+                out[key] = ids.contains(id)
+            }
         }
-        changed()
-        return ["id": id, "title": task.title, "done": db.ids("done-" + day).contains(id), "later": db.ids("later-" + day).contains(id), "removed": db.ids("removed-" + day).contains(id)]
+        changed(dir)
+        return out
     case "update_meeting":
         let (id, file, markdown) = try meetingFile(args, in: archive)
-        let line = { (key: String) in (args[key] as? String).map { $0.split(whereSeparator: \.isNewline).joined(separator: " ") } }
-        let items = { (key: String) in (args[key] as? [String]).map { $0.map { $0.split(whereSeparator: \.isNewline).joined(separator: " ") } } }
-        let edited = editMeeting(markdown, title: line("title"), summary: args["summary"] as? String, decisions: items("decisions"), points: items("points"))
+        let flat = { (s: String) in s.split(whereSeparator: \.isNewline).joined(separator: " ") }
+        guard let edited = editMeeting(markdown, title: (args["title"] as? String).map(flat), summary: args["summary"] as? String,
+                                       decisions: (args["decisions"] as? [String])?.map(flat), points: (args["points"] as? [String])?.map(flat)) else {
+            throw SyncError(description: "Meeting \(id) isn't in the format Pulse writes, so it wasn't changed.")
+        }
         try edited.write(to: file, atomically: true, encoding: .utf8)
-        changed()
+        changed(dir)
         let m = parseMeeting(edited, file: file, start: Date(timeIntervalSince1970: TimeInterval(id) ?? 0))
         return ["id": id, "title": m.title, "summary": m.summary, "decisions": m.decisions, "points": m.points]
     case "delete_meeting":
         let (id, file, _) = try meetingFile(args, in: archive)
         try FileManager.default.trashItem(at: file, resultingItemURL: nil)
-        changed()
+        changed(dir)
         return ["id": id, "deleted": true]
     case "regenerate_briefing":
-        guard NSRunningApplication.runningApplications(withBundleIdentifier: "com.andymitch.pulse").contains(where: { $0.processIdentifier != getpid() }) else {
+        guard NSRunningApplication.runningApplications(withBundleIdentifier: "com.andymitch.pulse").contains(where: { $0.processIdentifier != getpid() && $0.activationPolicy == .accessory }) else {
             throw SyncError(description: "Pulse isn't running. Open it to regenerate the briefing.")
         }
         DistributedNotificationCenter.default().postNotificationName(pulseRegenerate, object: nil, userInfo: nil, deliverImmediately: true)
-        return ["requested": true]
+        return ["asked": true]
     default:
         throw SyncError(description: "Unknown tool \(name)")
     }
