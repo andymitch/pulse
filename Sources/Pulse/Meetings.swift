@@ -28,6 +28,11 @@ final class Meetings: ObservableObject {
     @Published private(set) var saved: [SavedMeeting] = []
     @Published var error: String?
     var shown: Bool { settings.recordMeetings || !saved.isEmpty }
+
+    func reload() {
+        guard !demoMode else { return }
+        saved = savedMeetings(in: archive)
+    }
     private var capture: Capture?
     private var quietPolls = 0
     private var dismissed = false
@@ -481,16 +486,32 @@ func parseMeeting(_ markdown: String, file: URL, start: Date) -> SavedMeeting {
     return m
 }
 
+func editMeeting(_ markdown: String, title: String?, summary: String?, decisions: [String]?, points: [String]?) -> String? {
+    let parts = markdown.components(separatedBy: "\n## Transcript\n")
+    let known: Set<String> = ["Summary", "Decisions", "Important points"]
+    guard parts.count > 1, parts[0].split(separator: "\n").allSatisfy({ !$0.hasPrefix("## ") || known.contains(String($0.dropFirst(3))) }) else { return nil }
+    var m = parseMeeting(markdown, file: URL(fileURLWithPath: "/"), start: Date())
+    if let title { m.title = title }
+    if let summary { m.summary = summary.split(separator: "\n", omittingEmptySubsequences: false).map { $0.drop { $0 == "#" || $0 == " " } }.joined(separator: "\n") }
+    if let decisions { m.decisions = decisions }
+    if let points { m.points = points }
+    return notesLines(title: m.title, recorded: m.recorded, summary: m.summary.isEmpty ? nil : m.summary, decisions: m.decisions, points: m.points)
+        .joined(separator: "\n") + "\n\n## Transcript\n" + parts.dropFirst().joined(separator: "\n## Transcript\n")
+}
+
+private func notesLines(title: String, recorded: String, summary: String?, decisions: [String], points: [String]) -> [String] {
+    var lines = ["# \(title)", "", recorded]
+    if let summary { lines += ["", "## Summary", "", summary] }
+    if !decisions.isEmpty { lines += ["", "## Decisions", ""] + decisions.map { "- " + $0 } }
+    if !points.isEmpty { lines += ["", "## Important points", ""] + points.map { "- " + $0 } }
+    return lines
+}
+
 func meetingMarkdown(_ m: Meeting, notes: MeetingNotes?, transcript: String) -> String {
-    var lines = ["# \(notes?.title ?? m.title)", ""]
     let length = m.minutes.map { " (\($0) min)" } ?? ""
     let with = m.attendees.isEmpty ? "" : ". With \(([m.me] + m.attendees).joined(separator: ", "))"
-    lines.append("Recorded \(m.start.formatted(date: .abbreviated, time: .shortened))\(length)\(with).")
-    if let notes {
-        lines += ["", "## Summary", "", notes.summary]
-        if !notes.decisions.isEmpty { lines += ["", "## Decisions", ""] + notes.decisions.prefix(5).map { "- " + $0 } }
-        if !notes.points.isEmpty { lines += ["", "## Important points", ""] + notes.points.prefix(5).map { "- " + $0 } }
-    }
-    lines += ["", "## Transcript", "", transcript, ""]
-    return lines.joined(separator: "\n")
+    let recorded = "Recorded \(m.start.formatted(date: .abbreviated, time: .shortened))\(length)\(with)."
+    let lines = notesLines(title: notes?.title ?? m.title, recorded: recorded, summary: notes?.summary,
+                           decisions: Array((notes?.decisions ?? []).prefix(5)), points: Array((notes?.points ?? []).prefix(5)))
+    return (lines + ["", "## Transcript", "", transcript, ""]).joined(separator: "\n")
 }

@@ -152,6 +152,11 @@ final class Store: ObservableObject {
     private var weekKey: String { "week-" + thisMonday.formatted(localDay) }
     var fetchedOK = false
 
+    func reloadDay() {
+        loadDay()
+        recordDone()
+    }
+
     var earlierThisWeek: [DoneItem] {
         let shown = Set(checklist.map(\.id))
         return doneThisWeek.filter { $0.day != day && !shown.contains($0.id) }
@@ -176,9 +181,7 @@ final class Store: ObservableObject {
     private var removedKey: String { "removed-" + day }
 
 
-    private func save(_ value: some Encodable, _ key: String) {
-        if let json = try? JSONEncoder().encode(value) { try? db.setMeta(key, String(decoding: json, as: UTF8.self)) }
-    }
+    private func save(_ value: some Encodable, _ key: String) { try? db.set(value, key) }
 
     private func flip(_ ids: inout Set<String>, _ id: String, _ key: String) {
         if ids.remove(id) == nil { ids.insert(id) }

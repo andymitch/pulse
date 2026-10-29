@@ -63,6 +63,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self?.statusItem.button?.image = image
         }
         Meetings.shared.watch { [weak self] in self?.store.me }
+        let center = DistributedNotificationCenter.default()
+        center.addObserver(forName: pulseChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.store.reloadDay()
+                Meetings.shared.reload()
+            }
+        }
+        center.addObserver(forName: pulseRegenerate, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.store.synthesize() }
+        }
 
         popover.contentViewController = NSHostingController(rootView: ContentView(store: store))
         popover.behavior = .transient

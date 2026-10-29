@@ -144,7 +144,7 @@ func selfTest() throws {
         let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
         return try? JSONSerialization.jsonObject(with: Data(text.utf8))
     }
-    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 4, "MCP lists its four tools")
+    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 8, "MCP lists its eight tools")
     check((mcpResponse(["id": 1, "method": "nope"], dir: mcpDir)?["error"] as? [String: Any])?["code"] as? Int == -32601 && mcpResponse(["method": "notifications/initialized"], dir: mcpDir) == nil, "MCP rejects unknown methods and doesn't answer notifications")
     check((call("list_meetings", ["query": "launch"]) as? [[String: Any]])?.first?["id"] as? String == "0", "MCP finds a meeting by text")
     let page = call("get_meeting", ["id": "0", "transcript": true, "offset": 1, "lines": 1]) as? [String: Any]
@@ -152,5 +152,19 @@ func selfTest() throws {
     check(call("get_meeting", ["id": "../x"]) == nil, "MCP rejects a meeting id that isn't a timestamp")
     check(((call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]])?.map { $0["done"] as? Bool } == [true, false], "MCP today marks done items")
     check((call("stats", ["range": "7 days"]) as? [Any])?.count == 7, "MCP stats has one entry per period")
+    _ = call("update_task", ["id": "T-1", "done": true, "removed": true])
+    let tasks = (call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]]
+    check(tasks?.last?["id"] as? String == "T-1" && tasks?.last?["done"] as? Bool == true && tasks?.last?["removed"] as? Bool == true, "MCP marks a task done and removed")
+    _ = call("update_task", ["id": "T-1", "removed": false])
+    check(((call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]])?.last?["removed"] as? Bool == false, "MCP restores a removed task and leaves done alone")
+    check(call("update_task", ["id": "nope", "done": true]) == nil, "MCP refuses a task id that isn't in today")
+    let edited = call("update_meeting", ["id": "0", "summary": "Shipped.", "decisions": ["Line one\nline two"]]) as? [String: Any]
+    let after = call("get_meeting", ["id": "0", "transcript": true]) as? [String: Any]
+    check(edited?["summary"] as? String == "Shipped." && after?["decisions"] as? [String] == ["Line one line two"] && after?["title"] as? String == "Standup"
+          && after?["points"] as? [String] == notes.points && after?["transcriptLines"] as? Int == 3, "MCP edits a meeting's notes and keeps the rest and the transcript")
+    _ = call("update_meeting", ["id": "0", "summary": "Fine.\n## Transcript\nfake"])
+    check((call("get_meeting", ["id": "0", "transcript": true]) as? [String: Any])?["transcriptLines"] as? Int == 3, "a heading in an edited summary can't cut the transcript")
+    check(editMeeting("# Old\n\nRecorded.\n\n## Notes\n\nx\n\n## Transcript\n\nhi", title: "New", summary: nil, decisions: nil, points: nil) == nil
+          && editMeeting("# Old\n\nRecorded.", title: "New", summary: nil, decisions: nil, points: nil) == nil, "a meeting Pulse didn't write isn't edited")
     print("self-test ok")
 }
