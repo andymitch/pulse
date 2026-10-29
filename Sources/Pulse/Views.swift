@@ -31,9 +31,6 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     switch store.page {
                     case .home: home
-                    case .focus:
-                        focusHeader()
-                        PrioritiesView(store: store)
                     case .meetings: MeetingsView()
                     case .trends: trends
                     }
@@ -52,8 +49,8 @@ struct ContentView: View {
 
     @ViewBuilder private var home: some View {
         TodayView(store: store)
-        focusHeader { store.page = .focus }
-        PrioritiesView(store: store, headlines: true)
+        focusHeader
+        PrioritiesView(store: store)
         MeetingsView(todayOnly: true) { store.page = .meetings }
         SectionHeader(title: "Trends", open: { store.page = .trends }) {
             Text("Last \(store.range.rawValue): \(trendsSummary)").font(.caption).foregroundStyle(.secondary)
@@ -66,8 +63,8 @@ struct ContentView: View {
         return "\(prs) PRs merged" + (store.hasLinearKey ? ", \(tickets) tickets closed" : "")
     }
 
-    private func focusHeader(open: (() -> Void)? = nil) -> some View {
-        SectionHeader(title: "Focus", open: open) {
+    private var focusHeader: some View {
+        SectionHeader(title: "Focus") {
             if store.synthesizing {
                 ProgressView().controlSize(.small)
                 Text("Reading your sources…").font(.caption).foregroundStyle(.secondary)
@@ -153,7 +150,7 @@ struct ContentView: View {
 }
 
 enum PulseTab: String, CaseIterable {
-    case home = "Home", focus = "Focus", meetings = "Meetings", trends = "Trends"
+    case home = "Home", meetings = "Meetings", trends = "Trends"
 }
 
 enum TrendMetric: String, CaseIterable {
