@@ -363,7 +363,7 @@ private struct ReplySuggestion: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(markdown(text)).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            Text(verbatim: text).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 Button(copied ? "Copied" : "Copy") {
                     NSPasteboard.general.clearContents()
@@ -419,7 +419,7 @@ private struct TodoRowView: View {
                 Text(item.title).lineLimit(2).strikethrough(row.done).foregroundStyle(row.done ? .secondary : .primary)
                 Text([later ? "Later" : nil, row.why, item.reason, row.minutes.map { "~" + duration($0) }].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                if let reply = row.reply, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
+                if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
             }
             Spacer()
             if !row.done { Buttons(store: store, item: item, canDefer: checkable) }

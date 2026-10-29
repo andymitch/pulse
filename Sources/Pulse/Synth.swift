@@ -106,14 +106,17 @@ func runSynthesis(dir: URL, candidates: [ActionItem], me: String) async throws -
 
 func slackThread(_ url: URL) -> (channel: String, thread: String)? {
     let parts = url.pathComponents
-    guard url.host?.hasSuffix("slack.com") == true, let i = parts.firstIndex(of: "archives"), i + 2 < parts.count else { return nil }
+    guard url.scheme == "https", let host = url.host, host == "slack.com" || host.hasSuffix(".slack.com"),
+          let i = parts.firstIndex(of: "archives"), i + 2 < parts.count else { return nil }
+    let channel = parts[i + 1]
+    guard channel.count >= 7, "CDG".contains(channel.first!), channel.allSatisfy({ $0.isASCII && ($0.isUppercase || $0.isNumber) }) else { return nil }
     let message = parts[i + 2]
     guard message.hasPrefix("p"), message.count == 17, message.dropFirst().allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
     let digits = message.dropFirst()
     let ts = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "thread_ts" }?.value ?? "\(digits.prefix(10)).\(digits.dropFirst(10))"
     let halves = ts.split(separator: ".", omittingEmptySubsequences: false)
     guard halves.map(\.count) == [10, 6], halves.joined().allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
-    return (parts[i + 1], ts)
+    return (channel, ts)
 }
 
 func draftSlackReply(_ text: String, to url: URL) async throws {
@@ -122,7 +125,9 @@ func draftSlackReply(_ text: String, to url: URL) async throws {
     let run = UUID().uuidString
     let message = Settings.dir.appendingPathComponent("draft-\(run).json")
     let out = Settings.dir.appendingPathComponent("draft-\(run)-result.json")
-    defer { try? FileManager.default.removeItem(at: message); try? FileManager.default.removeItem(at: out) }
+    defer {
+        for file in [message, out, Settings.dir.appendingPathComponent("draft-\(run)-prompt.md")] { try? FileManager.default.removeItem(at: file) }
+    }
     try JSONEncoder().encode(["channel": thread.channel, "thread_ts": thread.thread, "text": text]).write(to: message)
     let prompt = """
     Using your Slack tools (MCP servers; in pi, call them through codemode), save one draft reply in a Slack thread. Do not send it.
@@ -131,12 +136,11 @@ func draftSlackReply(_ text: String, to url: URL) async throws {
 
     Call only the draft tool (slack_send_message_draft) once, with that channel, that thread_ts and exactly that text. Never call slack_send_message, slack_schedule_message or any other tool that posts, reacts, creates or changes anything. If there is no draft tool, save nothing.
 
-    Then write one JSON file to \(out.path) with exactly {"error": null} if the draft was saved, or {"error": string} saying what went wrong.
+    Then write one JSON file to \(out.path) with exactly {"saved": true} if the draft was saved, or {"saved": false, "error": string} saying what went wrong.
     """
-    struct Result: Decodable { let error: String? }
+    struct Result: Decodable { let saved: Bool; let error: String? }
     let result = try JSONDecoder().decode(Result.self, from: try await runAgent(prompt, output: out, name: "draft-\(run)"))
-    try? FileManager.default.removeItem(at: Settings.dir.appendingPathComponent("draft-\(run)-prompt.md"))
-    if let error = result.error { throw SyncError(description: error) }
+    if !result.saved { throw SyncError(description: result.error ?? "The agent couldn't save the draft.") }
 }
 
 func runAgent(prompt: URL) async throws -> String {

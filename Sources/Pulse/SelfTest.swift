@@ -102,9 +102,9 @@ func selfTest() throws {
     check(spokenWords("[0:26] Andrew Mitchell: Uh") == 1 && spokenWords("[61:02] Jane: Note: ship it\n[61:05] Speaker 1: Sure") == 4, "spoken words skip timestamps and speakers")
     let reply = { (title: String) in Synthesis.Todo(ref: nil, title: title, why: "", url: "message://%3Cm1%3E", source: "mail", minutes: 5) }
     check(reply("Reply to Dana").id == reply("Reply to Dana about the date").id, "a reworded briefing item keeps its done state")
-    let thread = slackThread(URL(string: "https://acme.slack.com/archives/C1ABC/p1761234567123456")!)
-    let inThread = slackThread(URL(string: "https://acme.slack.com/archives/C1ABC/p1761234999000100?thread_ts=1761234567.123456&cid=C1ABC")!)
-    check(thread?.channel == "C1ABC" && thread?.thread == "1761234567.123456" && inThread?.thread == "1761234567.123456" && slackThread(URL(string: "https://x.com/archives/C1/p1761234567123456")!) == nil
+    let thread = slackThread(URL(string: "https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456")!)
+    let inThread = slackThread(URL(string: "https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB")!)
+    check(thread?.channel == "C08QBJ75EUB" && thread?.thread == "1761234567.123456" && inThread?.thread == "1761234567.123456" && slackThread(URL(string: "https://x.com/archives/C1/p1761234567123456")!) == nil
           && slackThread(URL(string: "https://acme.slack.com/archives/C1/p1")!) == nil, "Slack links give the channel and thread to reply in, and others are refused")
     let old = try JSONDecoder().decode(Synthesis.Todo.self, from: Data(#"{"ref": null, "title": "Reply", "why": "", "url": null, "source": "slack", "minutes": 5}"#.utf8))
     check(old.reply == nil, "a briefing from before suggested replies still loads")
