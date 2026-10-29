@@ -286,6 +286,7 @@ struct TodoRow: Identifiable {
     let why: String?
     let minutes: Int?
     let done: Bool
+    var reply: String?
     var id: String { item.id }
 }
 
@@ -352,6 +353,50 @@ private func duration(_ minutes: Int) -> String {
     minutes < 60 ? "\(minutes)m" : minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
 }
 
+private struct ReplySuggestion: View {
+    @ObservedObject var store: Store
+    let text: String
+    let url: URL
+    @State private var copied = false
+    @State private var drafting = false
+    @State private var drafted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(verbatim: text).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                Button(copied ? "Copied" : "Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    copied = true
+                }
+                if slackThread(url) != nil {
+                    Button(drafting ? "Drafting…" : drafted ? "Draft saved" : "Draft in Slack") {
+                        Task {
+                            drafting = true
+                            do {
+                                try await draftSlackReply(text, to: url)
+                                drafted = true
+                            } catch {
+                                store.lastError = "Couldn't save the Slack draft: \(error)"
+                            }
+                            drafting = false
+                        }
+                    }
+                    .disabled(drafting || drafted || demoMode)
+                    .help(demoMode ? "Not available in the demo" : "Save this as an unsent draft in the Slack thread")
+                }
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        .padding(.top, 4)
+    }
+}
+
 private struct TodoRowView: View {
     @ObservedObject var store: Store
     let row: TodoRow
@@ -374,6 +419,7 @@ private struct TodoRowView: View {
                 Text(item.title).lineLimit(2).strikethrough(row.done).foregroundStyle(row.done ? .secondary : .primary)
                 Text([later ? "Later" : nil, row.why, item.reason, row.minutes.map { "~" + duration($0) }].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
             }
             Spacer()
             if !row.done { Buttons(store: store, item: item, canDefer: checkable) }

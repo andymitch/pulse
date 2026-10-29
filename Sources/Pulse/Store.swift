@@ -227,14 +227,14 @@ final class Store: ObservableObject {
             .map { TodoRow(item: $0, why: "New since the briefing", minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
         let rows = plan.compactMap { p -> TodoRow? in
             if let ref = p.ref, let item = live[ref] {
-                return TodoRow(item: item, why: p.why, minutes: p.minutes, done: item.closed || doneIDs.contains(item.id))
+                return TodoRow(item: item, why: p.why, minutes: p.minutes, done: item.closed || doneIDs.contains(item.id), reply: p.reply)
             }
             guard let url = URL(string: p.url ?? "") ?? (p.ref.flatMap { URL(string: "https://linear.app/\(db.meta("linear_workspace") ?? "")/issue/\($0)") }) else { return nil }
             let id = p.id
             let resolved = p.ref != nil
             let item = ActionItem(id: id, kind: .followUp, title: p.title, reason: resolved ? "Done" : (p.source ?? "").capitalized,
                                   url: url, since: planned)
-            return TodoRow(item: item, why: resolved ? nil : p.why, minutes: p.minutes, done: resolved || doneIDs.contains(id))
+            return TodoRow(item: item, why: resolved ? nil : p.why, minutes: p.minutes, done: resolved || doneIDs.contains(id), reply: p.reply)
         }
         let shown = Set((arrived + rows).map(\.id))
         let pinned = pinnedIDs.compactMap { live[$0] }.filter { !shown.contains($0.id) }

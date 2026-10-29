@@ -126,6 +126,7 @@ private let keychainQuery: [String: Any] = [
 ]
 
 func linearKey() -> String? {
+    guard !CommandLine.arguments.contains("--self-test") else { return nil }
     var query = keychainQuery
     query[kSecReturnData as String] = true
     var out: AnyObject?
