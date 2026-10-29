@@ -28,6 +28,11 @@ final class Meetings: ObservableObject {
     @Published private(set) var saved: [SavedMeeting] = []
     @Published var error: String?
     var shown: Bool { settings.recordMeetings || !saved.isEmpty }
+
+    func reload() {
+        guard !demoMode else { return }
+        saved = savedMeetings(in: archive)
+    }
     private var capture: Capture?
     private var quietPolls = 0
     private var dismissed = false
@@ -479,6 +484,20 @@ func parseMeeting(_ markdown: String, file: URL, start: Date) -> SavedMeeting {
         }
     }
     return m
+}
+
+func editMeeting(_ markdown: String, title: String?, summary: String?, decisions: [String]?, points: [String]?) -> String {
+    var m = parseMeeting(markdown, file: URL(fileURLWithPath: "/"), start: Date())
+    if let title { m.title = title }
+    if let summary { m.summary = summary }
+    if let decisions { m.decisions = decisions }
+    if let points { m.points = points }
+    var lines = ["# \(m.title)", "", m.recorded]
+    if !m.summary.isEmpty { lines += ["", "## Summary", "", m.summary] }
+    if !m.decisions.isEmpty { lines += ["", "## Decisions", ""] + m.decisions.map { "- " + $0 } }
+    if !m.points.isEmpty { lines += ["", "## Important points", ""] + m.points.map { "- " + $0 } }
+    let transcript = markdown.components(separatedBy: "\n## Transcript\n").dropFirst().joined(separator: "\n## Transcript\n")
+    return lines.joined(separator: "\n") + "\n\n## Transcript\n" + transcript
 }
 
 func meetingMarkdown(_ m: Meeting, notes: MeetingNotes?, transcript: String) -> String {

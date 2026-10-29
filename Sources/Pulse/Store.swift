@@ -152,6 +152,11 @@ final class Store: ObservableObject {
     private var weekKey: String { "week-" + thisMonday.formatted(localDay) }
     var fetchedOK = false
 
+    func reloadDay() {
+        loadDay()
+        recordDone()
+    }
+
     var earlierThisWeek: [DoneItem] {
         let shown = Set(checklist.map(\.id))
         return doneThisWeek.filter { $0.day != day && !shown.contains($0.id) }
