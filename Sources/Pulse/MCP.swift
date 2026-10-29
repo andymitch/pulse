@@ -85,6 +85,9 @@ func mcpResponse(_ request: [String: Any], dir: URL) -> [String: Any]? {
         result = ["tools": mcpTools]
     case "tools/call":
         let args = params["arguments"] as? [String: Any] ?? [:]
+        guard Settings.load(try? Data(contentsOf: dir.appendingPathComponent("settings.json"))).agentAccess else {
+            return ["jsonrpc": "2.0", "id": id, "result": ["content": [["type": "text", "text": "Agent access is off. Turn it on in Pulse → Settings → Agents."]], "isError": true]]
+        }
         guard mcpTools.contains(where: { $0["name"] as? String == params["name"] as? String }) else {
             return ["jsonrpc": "2.0", "id": id, "error": ["code": -32602, "message": "Unknown tool \(params["name"] ?? "")"]]
         }

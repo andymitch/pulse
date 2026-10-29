@@ -166,5 +166,7 @@ func selfTest() throws {
     check((call("get_meeting", ["id": "0", "transcript": true]) as? [String: Any])?["transcriptLines"] as? Int == 3, "a heading in an edited summary can't cut the transcript")
     check(editMeeting("# Old\n\nRecorded.\n\n## Notes\n\nx\n\n## Transcript\n\nhi", title: "New", summary: nil, decisions: nil, points: nil) == nil
           && editMeeting("# Old\n\nRecorded.", title: "New", summary: nil, decisions: nil, points: nil) == nil, "a meeting Pulse didn't write isn't edited")
+    try Data(#"{"agentAccess": false}"#.utf8).write(to: mcpDir.appendingPathComponent("settings.json"))
+    check(call("list_meetings", [:]) == nil, "MCP refuses tool calls while agent access is off")
     print("self-test ok")
 }

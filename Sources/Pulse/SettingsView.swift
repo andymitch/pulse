@@ -109,6 +109,19 @@ struct SettingsView: View {
             } header: { header("Updates", nil, symbol: "arrow.down.circle") }
 
             Section {
+                Toggle(isOn: $draft.agentAccess) {
+                    Text("Agent access (MCP)")
+                    Text("Let Claude Code, pi and other MCP clients on this Mac read your meetings, briefing and stats, and update tasks and meetings. Changes show in Pulse at once.")
+                }
+                if draft.agentAccess {
+                    CopyRow(title: "Claude Code", text: "claude mcp add pulse -- \(mcpCommand) --mcp")
+                    CopyRow(title: "pi and other clients", text: #"{"pulse": {"command": "\#(mcpCommand)", "args": ["--mcp"]}}"#)
+                }
+            } header: { header("Agents", nil, symbol: "point.3.connected.trianglepath.dotted") } footer: {
+                if draft.agentAccess { note("Run the command once, or add the JSON under mcpServers in the client's config.") }
+            }
+
+            Section {
                 Toggle(isOn: $draft.solidBackground) {
                     Text("Solid background")
                     Text("Turns off the see-through popover background, for better contrast.")
@@ -167,6 +180,8 @@ struct SettingsView: View {
             Text(title)
         }
     }
+
+    private var mcpCommand: String { Bundle.main.executablePath ?? "/Applications/Pulse.app/Contents/MacOS/Pulse" }
 
     private func note(_ text: String) -> some View {
         Text(text).font(.caption).foregroundStyle(.secondary)
@@ -505,6 +520,27 @@ struct UpdatesRow: View {
         Toggle(isOn: $beta) {
             Text("Beta updates")
             Text("Also offer pre-releases. You move back to stable when the next stable release ships.")
+        }
+    }
+}
+
+private struct CopyRow: View {
+    let title: String
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(text).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(text)
+            }
+            Spacer()
+            Button(copied ? "Copied" : "Copy") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                copied = true
+            }
         }
     }
 }
