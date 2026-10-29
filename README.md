@@ -69,12 +69,9 @@ The briefing only reads: the prompt tells the agent never to post or change anyt
 
 ### Pulse as an MCP server
 
-Other agents can read what Pulse knows through its own MCP server. It runs over stdio and works whether or not the app is open:
+Other agents on this Mac can read what Pulse knows, and keep it current, through its own MCP server. Open **Settings → Agents**, leave **Agent access (MCP)** on, and copy the Claude Code command or the JSON for pi and other clients. The server runs over stdio and works whether or not the app is open. Turning agent access off makes every tool call fail with a note to turn it back on.
 
-- **Claude Code**: `claude mcp add pulse -- /Applications/Pulse.app/Contents/MacOS/Pulse --mcp`
-- **pi** and other clients: add `{"pulse": {"command": "/Applications/Pulse.app/Contents/MacOS/Pulse", "args": ["--mcp"]}}` under `mcpServers`.
-
-It offers read tools: `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and task list) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `update_task` (done, later or removed), `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never reads or changes settings, tokens or keys.
+It offers read tools: `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and task list) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `update_task` (done, later or removed), `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never changes settings, tokens or keys.
 
 ## Data
 

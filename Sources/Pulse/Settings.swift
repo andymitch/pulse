@@ -71,6 +71,7 @@ struct Settings: Codable, Equatable {
     var voiceAsked = false
     var solidBackground = false
     var betaUpdates = false
+    var agentAccess = true
     var hotkey = Hotkey.standard
 
     static let agentPresets = [
