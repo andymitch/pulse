@@ -25,6 +25,16 @@ private let mcpTools: [[String: Any]] = [
         "offset": ["type": "integer", "description": "First transcript line to return, default 0"],
         "lines": ["type": "integer", "description": "Transcript lines to return, default 200, at most 500"],
     ], required: ["id"]),
+    tool("search", "Search what Pulse has learned about my work: short dated facts (decisions, status, blockers, owners, commitments, open questions, preferences) from Slack, Linear, GitHub, mail and meetings, each with its sources. Newest first; when facts disagree, the newer one is the truth. Leave out query and give since to see what changed since a date. A fact that replaced older ones lists them in replaces.", [
+        "query": ["type": "string", "description": "Words to find in the fact or its subject (a project, ticket ID, person or topic)"],
+        "since": ["type": "string", "description": "Only facts observed on or after this date, YYYY-MM-DD"],
+        "kind": ["type": "string", "enum": factKinds],
+        "superseded": ["type": "boolean", "description": "Also return facts that newer ones replaced, default false"],
+        "limit": ["type": "integer", "description": "Most facts to return, default 30, at most 100"],
+    ]),
+    tool("subject", "Where one project, ticket, person or topic stands: its current facts newest first, and the history of facts newer ones replaced. Without a name, lists the subjects Pulse knows, most recently active first.", [
+        "name": ["type": "string", "description": "The subject's name or an alias, such as a ticket ID or project name"],
+    ]),
     tool("today", "Today's briefing: the team focus (the current priorities) with its sources, and the task list with ids, refs, links and estimates. done, later and removed reflect what was marked in Pulse today; live ticket and PR status isn't fetched. stale is true when the briefing wasn't made today.", [:]),
     tool("stats", "PRs merged and tickets closed per person per period, plus PR stats (median hours to merge, median lines added, PRs over 500 lines), as shown on Trends.", [
         "range": ["type": "string", "enum": TrendRange.allCases.map(\.rawValue), "description": "Period, default 5 weeks"],
@@ -128,6 +138,11 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
             out["transcriptLines"] = lines.count
         }
         return out
+    case "search":
+        return try searchFacts(try DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true), query: args["query"] as? String ?? "",
+                               since: args["since"] as? String, kind: args["kind"] as? String, superseded: args["superseded"] as? Bool ?? false, limit: args["limit"] as? Int ?? 30)
+    case "subject":
+        return try subjectFacts(try DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true), name: args["name"] as? String)
     case "today":
         let s = try briefing(dir)
         let file = dir.appendingPathComponent("synthesis.json")

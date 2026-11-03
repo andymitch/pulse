@@ -38,6 +38,12 @@ final class DB: @unchecked Sendable {
                 fact_id INTEGER NOT NULL REFERENCES facts(id), source_id INTEGER NOT NULL REFERENCES sources(id), PRIMARY KEY (fact_id, source_id));
             CREATE INDEX IF NOT EXISTS facts_subject ON facts (subject_id, superseded_by);
             """)
+        guard try query("SELECT 1 FROM sqlite_master WHERE name = 'facts_fts'").isEmpty else { return }
+        try exec("""
+            CREATE VIRTUAL TABLE facts_fts USING fts5(text, content = 'facts', content_rowid = 'id', tokenize = 'porter unicode61');
+            CREATE TRIGGER facts_fts_insert AFTER INSERT ON facts BEGIN INSERT INTO facts_fts (rowid, text) VALUES (new.id, new.text); END;
+            INSERT INTO facts_fts (facts_fts) VALUES ('rebuild');
+            """)
     }
 
     deinit { sqlite3_close(handle) }

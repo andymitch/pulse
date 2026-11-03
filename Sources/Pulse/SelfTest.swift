@@ -132,6 +132,17 @@ func selfTest() throws {
     check(future == FactCounts(added: 1) && dated == "2026-11-03", "a fact dated in the future is dated today, and a shared alias doesn't merge two tickets")
     let counts = try mem.query("SELECT (SELECT count(*) FROM subjects), (SELECT count(*) FROM sources)")[0]
     check(counts[0] as? Int == 2 && counts[1] as? Int == 1, "subjects and sources are reused")
+    let texts = { (facts: [[String: Any]]) in facts.map { $0["text"] as? String ?? "" } }
+    let invites = try searchFacts(mem, query: "invite")
+    check(texts(invites) == ["Due Friday", "Invites merged"] && (invites[1]["replaces"] as? [[String: Any]])?.count == 2, "search finds current facts by word stem or subject alias, with what they replaced")
+    let replaced = (try searchFacts(mem, query: "invites are"), try searchFacts(mem, query: "invites are", superseded: true))
+    check(replaced.0.isEmpty && texts(replaced.1) == ["Invites are in review", "Invites are blocked"], "replaced facts are only returned when asked for, newest first")
+    check(texts(try searchFacts(mem, query: "KLE-3")) == ["Due Friday"], "search matches a subject name")
+    check(texts(try searchFacts(mem, since: "2026-11-03")) == ["Due Friday", "Invites merged"], "search since a date lists what changed")
+    check(texts(try searchFacts(mem, query: "\"merged* (")) == ["Invites merged"], "search treats quotes, stars and brackets in the query as plain words")
+    let ticket = try subjectFacts(mem, name: "invite teammates") as? [String: Any]
+    check(ticket?["name"] as? String == "KLE-1" && (ticket?["current"] as? [Any])?.count == 1 && (ticket?["history"] as? [Any])?.count == 2, "a subject by alias shows current facts and history")
+    check((try subjectFacts(mem, name: nil) as? [[String: Any]])?.map { $0["name"] as? String } == ["KLE-1", "KLE-3"], "subjects list most recently active first, then by name")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
@@ -180,7 +191,7 @@ func selfTest() throws {
         let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
         return try? JSONSerialization.jsonObject(with: Data(text.utf8))
     }
-    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 8, "MCP lists its eight tools")
+    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 10, "MCP lists its ten tools")
     check((mcpResponse(["id": 1, "method": "nope"], dir: mcpDir)?["error"] as? [String: Any])?["code"] as? Int == -32601 && mcpResponse(["method": "notifications/initialized"], dir: mcpDir) == nil, "MCP rejects unknown methods and doesn't answer notifications")
     check((call("list_meetings", ["query": "launch"]) as? [[String: Any]])?.first?["id"] as? String == "0", "MCP finds a meeting by text")
     let page = call("get_meeting", ["id": "0", "transcript": true, "offset": 1, "lines": 1]) as? [String: Any]
@@ -188,6 +199,9 @@ func selfTest() throws {
     check(call("get_meeting", ["id": "../x"]) == nil, "MCP rejects a meeting id that isn't a timestamp")
     check(((call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]])?.map { $0["done"] as? Bool } == [true, false], "MCP today marks done items")
     check((call("stats", ["range": "7 days"]) as? [Any])?.count == 7, "MCP stats has one entry per period")
+    _ = try applyFacts(try JSONDecoder().decode(FactChanges.self, from: Data("{\(slack), \"add\": [\(fact("KLE-1", "Invites merged", "2026-11-03", ""))]}".utf8)), to: mcpDB)
+    check(((call("search", ["query": "merged"]) as? [[String: Any]])?.first?["sources"] as? [[String: Any]])?.first?["url"] as? String == "https://x.slack.com/archives/C1/p1", "MCP search returns facts with their sources")
+    check((call("subject", ["name": "KLE-1"]) as? [String: Any])?["name"] as? String == "KLE-1" && call("subject", ["name": "nope"]) == nil, "MCP subject finds one by name and errors on an unknown one")
     _ = call("update_task", ["id": "T-1", "done": true, "removed": true])
     let tasks = (call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]]
     check(tasks?.last?["id"] as? String == "T-1" && tasks?.last?["done"] as? Bool == true && tasks?.last?["removed"] as? Bool == true, "MCP marks a task done and removed")
