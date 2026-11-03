@@ -114,6 +114,24 @@ func selfTest() throws {
     let now = Int(Date().timeIntervalSince1970)
     for t in [now - 86400, now - 3600, now - 30 * 86400] { try Data().write(to: archive.appendingPathComponent("\(t).md")) }
     check(meetingTranscripts(in: archive).map { URL(fileURLWithPath: $0).lastPathComponent } == ["\(now - 3600).md", "\(now - 86400).md"], "briefing meetings are newest first and skip old ones")
+    let mem = try DB(path: ":memory:")
+    let changes = { (json: String) in try applyFacts(try JSONDecoder().decode(FactChanges.self, from: Data(json.utf8)), to: mem, now: iso.date(from: "2026-11-03T12:00:00Z")!) }
+    let slack = #""sources": [{"id": 1, "kind": "slack", "url": "https://x.slack.com/archives/C1/p1", "title": "Maya in #eng"}, {"id": 2, "kind": "doc", "url": "javascript:alert(1)", "title": "Bad"}]"#
+    let fact = { (subject: String, text: String, observed: String, extra: String) in
+        #"{"subject": {"kind": "ticket", "name": "\#(subject)", "aliases": ["Invite teammates"]}, "kind": "status", "text": "\#(text)", "observed": "\#(observed)", "sources": [1]\#(extra)}"#
+    }
+    check(try changes("{\(slack), \"add\": [\(fact("KLE-1", "Invites are in review", "2026-11-01", ""))]}") == FactCounts(added: 1), "a new fact is added with its subject and source")
+    check(try changes("{\(slack), \"add\": [\(fact("invite teammates", "Invites are in review", "2026-11-02", ""))]}") == FactCounts(confirmed: 1), "the same fact under a subject alias confirms it instead of adding it again")
+    check(try changes("{\(slack), \"add\": [\(fact("KLE-1", "Invites merged", "2026-11-03", ", \"supersedes\": [1]"))]}") == FactCounts(added: 1, superseded: 1), "a newer fact supersedes the old one")
+    check(try changes("{\(slack), \"add\": [\(fact("KLE-1", "Invites are blocked", "2026-10-20", ", \"supersedes\": [2]"))]}") == FactCounts(added: 1), "an older fact can't supersede a newer one")
+    check(try currentFacts(mem).map { $0["text"] as? String } == ["Invites merged"], "only the newest fact is current")
+    check(try changes("{\(slack), \"add\": [\(fact("KLE-2", "Uncited", "2026-11-03", "").replacingOccurrences(of: "[1]", with: "[2]")), \(fact("KLE-2", "Soon", "2027-01-01", "").replacingOccurrences(of: "status", with: "rumor"))], \"confirm\": [{\"id\": 1, \"sources\": [1]}]}") == FactCounts(),
+          "facts without a real source or a known kind, and confirmations of superseded facts, are skipped")
+    let future = try changes("{\(slack), \"add\": [\(fact("KLE-3", "Due Friday", "2027-01-01", ""))]}")
+    let dated = try mem.query("SELECT observed_at FROM facts WHERE text = 'Due Friday'")[0][0] as? String
+    check(future == FactCounts(added: 1) && dated == "2026-11-03", "a fact dated in the future is dated today, and a shared alias doesn't merge two tickets")
+    let counts = try mem.query("SELECT (SELECT count(*) FROM subjects), (SELECT count(*) FROM sources)")[0]
+    check(counts[0] as? Int == 2 && counts[1] as? Int == 1, "subjects and sources are reused")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
