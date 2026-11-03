@@ -108,6 +108,12 @@ func selfTest() throws {
           && slackThread(URL(string: "https://acme.slack.com/archives/C1/p1")!) == nil, "Slack links give the channel and thread to reply in, and others are refused")
     let old = try JSONDecoder().decode(Synthesis.Todo.self, from: Data(#"{"ref": null, "title": "Reply", "why": "", "url": null, "source": "slack", "minutes": 5}"#.utf8))
     check(old.reply == nil, "a briefing from before suggested replies still loads")
+    let archive = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-meetings-\(UUID())")
+    try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: archive) }
+    let now = Int(Date().timeIntervalSince1970)
+    for t in [now - 86400, now - 3600, now - 30 * 86400] { try Data().write(to: archive.appendingPathComponent("\(t).md")) }
+    check(meetingTranscripts(in: archive).map { URL(fileURLWithPath: $0).lastPathComponent } == ["\(now - 3600).md", "\(now - 86400).md"], "briefing meetings are newest first and skip old ones")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }

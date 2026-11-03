@@ -234,7 +234,7 @@ func ticketContext(key: String, ticket: String, branch: String) async throws -> 
     struct D: Decodable {
         struct Issue: Decodable {
             struct Parent: Decodable { let identifier, title: String }
-            struct Comment: Decodable { let body: String; let user: Named? }
+            struct Comment: Decodable { let body, createdAt: String; let user: Named? }
             struct State: Decodable { let id, name: String; let position: Double }
             struct Team: Decodable { let states: Nodes<State> }
             let id, identifier, title, url: String
@@ -247,15 +247,15 @@ func ticketContext(key: String, ticket: String, branch: String) async throws -> 
     }
     let d: D = try await gql(linearURL, auth: key, """
         query($id: String!) { issue(id: $id) { id identifier title url description parent { identifier title }
-          comments(last: 10) { nodes { body user { name } } }
+          comments(last: 10) { nodes { body createdAt user { name } } }
           team { states(filter: {type: {eq: "started"}}) { nodes { id name position } } } } }
         """, ["id": ticket])
     let i = d.issue
     var parts = ["Implement \(i.identifier): \(i.title)\n\(i.url)"]
     if let p = i.parent { parts.append("Parent: \(p.identifier) \(p.title)") }
     if let desc = i.description, !desc.isEmpty { parts.append("## Description\n\(desc)") }
-    let comments = i.comments.nodes.map { "- \($0.user?.name ?? "Someone"): \($0.body)" }
-    if !comments.isEmpty { parts.append("## Comments\n" + comments.joined(separator: "\n")) }
+    let comments = i.comments.nodes.sorted { $0.createdAt < $1.createdAt }.map { "- \($0.createdAt.prefix(10)), \($0.user?.name ?? "Someone"): \($0.body)" }
+    if !comments.isEmpty { parts.append("## Comments, oldest first\nLater comments override the description and earlier comments.\n" + comments.joined(separator: "\n")) }
     parts.append("Work on branch \(branch) in its own worktree of the \(settings.repoName) repo.")
     let states = i.team.states.nodes
     let started = states.first { $0.name == "In Progress" } ?? states.min { $0.position < $1.position }
