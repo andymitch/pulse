@@ -24,6 +24,19 @@ final class DB: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS users (name TEXT PRIMARY KEY, email TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS github_users (login TEXT PRIMARY KEY, name TEXT);
+            CREATE TABLE IF NOT EXISTS subjects (
+                id INTEGER PRIMARY KEY, project TEXT NOT NULL DEFAULT 'default', kind TEXT NOT NULL, name TEXT NOT NULL,
+                aliases TEXT NOT NULL DEFAULT '[]');
+            CREATE TABLE IF NOT EXISTS sources (
+                id INTEGER PRIMARY KEY, project TEXT NOT NULL DEFAULT 'default', kind TEXT NOT NULL, url TEXT NOT NULL,
+                title TEXT NOT NULL, author TEXT, date TEXT, excerpt TEXT, UNIQUE (project, url));
+            CREATE TABLE IF NOT EXISTS facts (
+                id INTEGER PRIMARY KEY, project TEXT NOT NULL DEFAULT 'default', subject_id INTEGER NOT NULL REFERENCES subjects(id),
+                kind TEXT NOT NULL, text TEXT NOT NULL, observed_at TEXT NOT NULL, last_seen TEXT NOT NULL, recorded_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'confirmed', origin TEXT NOT NULL DEFAULT 'briefing', superseded_by INTEGER REFERENCES facts(id));
+            CREATE TABLE IF NOT EXISTS fact_sources (
+                fact_id INTEGER NOT NULL REFERENCES facts(id), source_id INTEGER NOT NULL REFERENCES sources(id), PRIMARY KEY (fact_id, source_id));
+            CREATE INDEX IF NOT EXISTS facts_subject ON facts (subject_id, superseded_by);
             """)
     }
 

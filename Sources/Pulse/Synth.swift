@@ -32,7 +32,8 @@ func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
         .sorted(by: >)
 }
 
-func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem]) -> String {
+func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem],
+                     facts: String, factsOutput: String, since: String?) -> String {
     let s = settings
     var who = ["Linear \"\(me)\""]
     if s.slack { who.append("the Slack user your Slack tools are logged in as") }
@@ -71,13 +72,30 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     - reply: only for a today item that answers someone in Slack (source "slack"). If their question or request has a clear answer from what you read, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
     - sources: every cited item, numbered from 1. url must be a link you actually saw; never invent one, and drop any claim you cannot link. For a meeting transcript file, url is "file://" followed by its path, author is null, and title is just the meeting's title. title is what the item is (a ticket title, a doc name, an email subject, or "Maya in #engineering"). excerpt is the most telling one or two sentences, quoted or closely paraphrased. author and date are who wrote it and when, if known.
     - Write plainly. No hype, no filler.
+
+    Last, update Pulse's memory. \(facts) holds the facts Pulse already knows, as JSON, each with an id. \(since.map { "Pulse last learned from these sources at \($0). Everything older was already read, so take new facts only from items after that and use older ones as context." } ?? "This is the first time, so learn from everything you read.") Write a second JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
+    {
+      "sources": [{"id": int, "kind": \(kindList), "url": string, "title": string, "author": string | null, "date": "YYYY-MM-DD" | null, "excerpt": string | null}],
+      "add": [{"subject": {"kind": "project" | "ticket" | "person" | "topic", "name": string, "aliases": [string]}, "kind": \(factKinds.map { "\"\($0)\"" }.joined(separator: " | ")), "text": string, "observed": "YYYY-MM-DD", "sources": [int], "supersedes": [int]}],
+      "confirm": [{"id": int, "sources": [int]}]
+    }
+
+    Rules for facts:
+    - A fact is one short sentence that still makes sense on its own a month from now: name the people, tickets and dates instead of saying "he" or "tomorrow". Keep what someone on the team would want to know later: decisions and why, where work stands, blockers, who owns what, who promised what by when, open questions, and \(me)'s own preferences. Skip chatter and anything only true for an hour.
+    - subject is what the fact is about. Reuse the exact subject of a known fact when it's the same thing. Name tickets by their ID (KLE-123) with the title as an alias, and people by full name.
+    - observed is the date the source said it, not today.
+    - When a new fact replaces a known one (a status moved on, a decision changed, a blocker cleared, an owner changed), put the old id in supersedes. When a source only restates a known fact, confirm it instead of adding it again.
+    - Every fact and confirmation cites at least one source you actually saw, with the same url rules as the briefing. sources here are numbered on their own, from 1.
     """
 }
 
-func runSynthesis(dir: URL, candidates: [ActionItem], me: String) async throws -> Synthesis {
+func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async throws -> Synthesis {
     let out = dir.appendingPathComponent("synthesis.next.json")
     let prompt = dir.appendingPathComponent("synthesis-prompt.md")
-    try? FileManager.default.removeItem(at: out)
+    let facts = dir.appendingPathComponent("facts.json"), factsOut = dir.appendingPathComponent("facts.next.json")
+    let started = Date()
+    for file in [out, factsOut] { try? FileManager.default.removeItem(at: file) }
+    try JSONSerialization.data(withJSONObject: try currentFacts(db), options: [.prettyPrinted, .withoutEscapingSlashes]).write(to: facts)
     let day = Date().formatted(date: .complete, time: .omitted)
     var mail: String?
     var mailError: String?
@@ -91,10 +109,20 @@ func runSynthesis(dir: URL, candidates: [ActionItem], me: String) async throws -
         }
     }
     let transcripts = settings.recordMeetings ? meetingTranscripts(in: dir.appendingPathComponent("meetings")) : []
-    try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates)
+    try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
+                        facts: facts.path, factsOutput: factsOut.path, since: db.meta("facts_since"))
         .write(to: prompt, atomically: true, encoding: .utf8)
 
     let log = try await runAgent(prompt: prompt)
+    do {
+        let changes = try JSONDecoder().decode(FactChanges.self, from: Data(contentsOf: factsOut))
+        _ = try applyFacts(changes, to: db)
+        try db.setMeta("facts_since", iso.string(from: started))
+        try db.setMeta("facts_error", "")
+        try? FileManager.default.removeItem(at: factsOut)
+    } catch {
+        try? db.setMeta("facts_error", "\(error)")
+    }
 
     guard let data = try? Data(contentsOf: out) else {
         throw SyncError(description: [mailError, "The briefing agent did not write its file. Last output:\n\(log)"].compactMap { $0 }.joined(separator: "\n"))

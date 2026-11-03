@@ -329,7 +329,7 @@ final class Store: ObservableObject {
         synthesizing = true
         synthesisError = nil
         do {
-            synthesis = try await runSynthesis(dir: dir, candidates: today, me: me ?? "me")
+            synthesis = try await runSynthesis(dir: dir, db: db, candidates: today, me: me ?? "me")
             synthesizedAt = Date()
             recordDone()
         } catch {
