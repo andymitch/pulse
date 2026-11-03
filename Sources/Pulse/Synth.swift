@@ -29,7 +29,7 @@ func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
     return ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
         .filter { (TimeInterval($0.deletingPathExtension().lastPathComponent) ?? 0) > cutoff.timeIntervalSince1970 }
         .map(\.path)
-        .sorted()
+        .sorted(by: >)
 }
 
 func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem]) -> String {
@@ -44,7 +44,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
         gather.append("Slack messages that need \(me): mentions of them and DMs to them from the last 7 days, keeping only those not yet answered.")
     }
     if let mail { gather.append("Email from the last \(s.mailDays) days, as JSON with a url for each message: \(mail). Keep only email that needs \(me) to reply or act; ignore newsletters and notifications.") }
-    if s.recordMeetings { gather.append("Meetings Pulse recorded, each a file with its summary, decisions, important points and the transcript: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", ")).") }
+    if s.recordMeetings { gather.append("Meetings Pulse recorded, each a file with its summary, decisions, important points and the transcript, newest first: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", ")).") }
     gather.append("\(me)'s open work right now, from GitHub and Linear. Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
     let kinds = ["github", "linear"] + (s.slack ? ["slack"] : []) + (mail != nil ? ["mail"] : []) + ["meeting", "doc"]
     let kindList = kinds.map { "\"\($0)\"" }.joined(separator: " | ")
@@ -65,6 +65,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     }
 
     Rules:
+    - newest wins: work backwards from the most recent messages, meetings and updates to find where things stand now. When sources disagree, trust the newest one. Use older items only for background that nothing newer contradicts, and never present something as current if a later source changed or settled it.
     - focus: cut through the noise. Usually exactly one entry: the single thing the team is pushing on right now. Add a second or third only if there are genuinely separate efforts in flight that matter as much; never more than 3. headline is one short line. summary is 3 to 5 plain sentences distilled from everything you read: what the goal is, where it stands, what is blocking it, and what \(me)'s part is. Leave out minor threads. Use inline Markdown to make it scannable: **bold** for the goal, the blocker and \(me)'s part, *italics* for people and docs, and `code` for ticket IDs and endpoints. No headings or lists. Each entry cites the 2 to 4 sources that best back it up.
     - today: \(me)'s checklist for today, at most 7 items that fit in about 5 hours of focused work, in the order to do them. Put first what unblocks other people (reviews, replies, merges), then work that is nearly done, then the most important work for the focus. For an item from the open work list, set ref to its ref exactly and keep its title. Other items are unanswered questions or requests, or meeting action items assigned to \(me) by name: set ref to null, title starts with a verb, and url points at the thread, message, email or doc. why is one short line. minutes is an honest estimate.
     - reply: only for a today item that answers someone in Slack (source "slack"). If their question or request has a clear answer from what you read, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
