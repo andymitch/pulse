@@ -135,6 +135,18 @@ func selfTest() throws {
                               DoneItem(id: "T4", title: "T4", url: URL(string: "https://x")!, source: "", day: "2000-01-03")]
         store.recordDone()
         check(store.earlierThisWeek.map(\.id) == ["old"], "earlier days show unless the item is back on today's list")
+        let todo = { (ref: String) in Synthesis.Todo(ref: ref, title: ref, why: "", url: nil, source: "linear", minutes: 30) }
+        let state = { (type: String) in WorkflowState(id: type, name: type, type: type, color: "#000000", position: 0) }
+        store.doneThisWeek = []
+        store.synthesis = Synthesis(focus: [], today: ["K-1", "K-2", "K-3", "https://github.com/o/r/pull/1"].map(todo), sources: [])
+        store.synthesizedAt = Date()
+        store.closedTickets = nil
+        check(store.checklist.filter { $0.id.hasPrefix("K-") }.allSatisfy { !$0.done }, "briefing tickets stay unchecked when Linear couldn't be read")
+        store.closedTickets = ["K-2": state("completed"), "K-3": state("canceled")]
+        let rows = store.checklist.filter { !$0.id.hasPrefix("T") }
+        check(rows.map(\.id) == ["K-2", "K-3", "https://github.com/o/r/pull/1"] && rows.allSatisfy(\.done), "a briefing ticket that left the list for the backlog drops off, closed ones and merged PRs are done")
+        store.recordDone()
+        check(store.doneThisWeek.map(\.id) == ["K-2", "https://github.com/o/r/pull/1"], "only completed tickets and merged PRs go in the week's done log")
     }
     let mcpDir = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-mcp-\(UUID())")
     defer { try? FileManager.default.removeItem(at: mcpDir) }

@@ -24,6 +24,7 @@ final class Store: ObservableObject {
     @Published var removedIDs: Set<String> = []
     @Published var doneThisWeek: [DoneItem] = []
     @Published var workflow: [String: [WorkflowState]] = [:]
+    var closedTickets: [String: WorkflowState]?
     private var localBranches: Set<String> = []
 
     let db: DB
@@ -101,11 +102,12 @@ final class Store: ObservableObject {
     func refreshToday() async -> String? {
         if loadedDay != day { loadDay() }
         var errors: [String] = []
-        var github: [ActionItem] = [], linear: [ActionItem] = []
+        var github: [ActionItem] = [], linear: [ActionItem] = [], closed: [String: WorkflowState]?
         do { github = try await fetchGitHubToday(token: try ghToken()) } catch { errors.append("\(error)") }
         if let key = linearKey() {
-            do { (linear, workflow) = try await fetchLinearToday(key: key) } catch { errors.append("\(error)") }
+            do { (linear, workflow, closed) = try await fetchLinearToday(key: key) } catch { errors.append("\(error)") }
         }
+        closedTickets = closed
         today = mergeTicketsAndPRs(github + linear)
         localBranches = localBranchNames()
         todayFetched = Date()
@@ -234,9 +236,12 @@ final class Store: ObservableObject {
             }
             guard let url = URL(string: p.url ?? "") ?? (p.ref.flatMap { URL(string: "https://linear.app/\(db.meta("linear_workspace") ?? "")/issue/\($0)") }) else { return nil }
             let id = p.id
-            let resolved = p.ref != nil
-            let item = ActionItem(id: id, kind: .followUp, title: p.title, reason: resolved ? "Done" : (p.source ?? "").capitalized,
-                                  url: url, since: planned)
+            let ticket = p.ref.map { !$0.hasPrefix("http") } ?? false
+            let state = ticket ? p.ref.flatMap { closedTickets?[$0] } : nil
+            if ticket, closedTickets != nil, state == nil { return nil }
+            let resolved = p.ref != nil && (!ticket || state != nil)
+            let item = ActionItem(id: id, kind: .followUp, title: p.title, reason: resolved ? state?.name ?? "Done" : (p.source ?? "").capitalized,
+                                  url: url, state: state, since: planned)
             return TodoRow(item: item, why: resolved ? nil : p.why, minutes: p.minutes, done: resolved || doneIDs.contains(id), reply: p.reply)
         }
         let shown = Set((arrived + rows).map(\.id))

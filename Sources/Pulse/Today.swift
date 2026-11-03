@@ -36,7 +36,8 @@ query($review: String!, $mine: String!) {
 """
 
 private let linearToday = """
-{ viewer { assignedIssues(first: 100, filter: {state: {type: {in: ["started", "unstarted"]}}}) { nodes { id identifier title url priority createdAt branchName state { id name type color position } team { id } cycle { isActive } } } }
+{ viewer { assignedIssues(first: 100, filter: {state: {type: {in: ["started", "unstarted"]}}}) { nodes { id identifier title url priority createdAt branchName state { id name type color position } team { id } cycle { isActive } } }
+    closed: assignedIssues(first: 50, filter: {state: {type: {in: ["completed", "canceled", "duplicate"]}}, updatedAt: {gt: "-P7D"}}) { nodes { identifier state { id name type color position } } } }
   teams(first: 50) { nodes { id states { nodes { id name type color position } } } }
   notifications(first: 50) { nodes { id type readAt createdAt actor { name } ... on IssueNotification { issue { identifier title url } } } } }
 """
@@ -84,7 +85,8 @@ private struct LinearToday: Decodable {
         let actor: Named?
         let issue: Ref?
     }
-    struct Viewer: Decodable { let assignedIssues: Nodes<Issue> }
+    struct Closed: Decodable { let identifier: String; let state: WorkflowState }
+    struct Viewer: Decodable { let assignedIssues: Nodes<Issue>; let closed: Nodes<Closed> }
     let viewer: Viewer
     let teams: Nodes<TeamStates>
     let notifications: Nodes<Notification>
@@ -174,7 +176,7 @@ func fetchGitHubToday(token: String) async throws -> [ActionItem] {
     return items
 }
 
-func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflow: [String: [WorkflowState]]) {
+func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflow: [String: [WorkflowState]], closed: [String: WorkflowState]) {
     let d: LinearToday = try await gql(linearURL, auth: key, linearToday)
     let tickets = d.viewer.assignedIssues.nodes
         .filter { $0.state.type == "started" || $0.cycle?.isActive == true }
@@ -196,7 +198,7 @@ func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflo
     let workflow = Dictionary(uniqueKeysWithValues: d.teams.nodes.map { team in
         (team.id, team.states.nodes.sorted { (WorkflowState.order.firstIndex(of: $0.type) ?? 9, $0.position) < (WorkflowState.order.firstIndex(of: $1.type) ?? 9, $1.position) })
     })
-    return (tickets + notes, workflow)
+    return (tickets + notes, workflow, Dictionary(d.viewer.closed.nodes.map { ($0.identifier, $0.state) }) { a, _ in a })
 }
 
 func mergeTicketsAndPRs(_ items: [ActionItem]) -> [ActionItem] {
