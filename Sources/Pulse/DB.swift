@@ -37,12 +37,21 @@ final class DB: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS fact_sources (
                 fact_id INTEGER NOT NULL REFERENCES facts(id), source_id INTEGER NOT NULL REFERENCES sources(id), PRIMARY KEY (fact_id, source_id));
             CREATE INDEX IF NOT EXISTS facts_subject ON facts (subject_id, superseded_by);
+            CREATE TABLE IF NOT EXISTS pending_replaces (
+                fact_id INTEGER NOT NULL REFERENCES facts(id), replaces_id INTEGER NOT NULL REFERENCES facts(id), PRIMARY KEY (fact_id, replaces_id));
             """)
-        guard try query("SELECT 1 FROM sqlite_master WHERE name = 'facts_fts'").isEmpty else { return }
+        if try query("SELECT 1 FROM sqlite_master WHERE name = 'facts_fts'").isEmpty {
+            try exec("""
+                CREATE VIRTUAL TABLE facts_fts USING fts5(text, content = 'facts', content_rowid = 'id', tokenize = 'porter unicode61');
+                INSERT INTO facts_fts (facts_fts) VALUES ('rebuild');
+                """)
+        }
         try exec("""
-            CREATE VIRTUAL TABLE facts_fts USING fts5(text, content = 'facts', content_rowid = 'id', tokenize = 'porter unicode61');
-            CREATE TRIGGER facts_fts_insert AFTER INSERT ON facts BEGIN INSERT INTO facts_fts (rowid, text) VALUES (new.id, new.text); END;
-            INSERT INTO facts_fts (facts_fts) VALUES ('rebuild');
+            CREATE TRIGGER IF NOT EXISTS facts_fts_insert AFTER INSERT ON facts BEGIN INSERT INTO facts_fts (rowid, text) VALUES (new.id, new.text); END;
+            CREATE TRIGGER IF NOT EXISTS facts_fts_update AFTER UPDATE OF text ON facts BEGIN
+                INSERT INTO facts_fts (facts_fts, rowid, text) VALUES ('delete', old.id, old.text);
+                INSERT INTO facts_fts (rowid, text) VALUES (new.id, new.text);
+            END;
             """)
     }
 

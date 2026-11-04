@@ -86,3 +86,50 @@ private struct SourceCard: View {
         .help(source.url)
     }
 }
+
+struct ConfirmFactsView: View {
+    @ObservedObject var store: Store
+
+    var body: some View {
+        let facts = store.pendingFacts
+        if !facts.isEmpty {
+            Panel(title: "Agents noted · \(facts.count) to confirm") {
+                ForEach(facts) { fact in
+                    PendingFactRow(store: store, fact: fact)
+                    if fact.id != facts.last?.id { Divider() }
+                }
+            }
+        }
+    }
+}
+
+private struct PendingFactRow: View {
+    @ObservedObject var store: Store
+    let fact: PendingFact
+    @State private var draft: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let draft {
+                TextField("Fact", text: Binding(get: { draft }, set: { self.draft = $0 }), axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { store.confirm(fact, text: draft) }
+            } else {
+                Text(fact.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("\(fact.subject) · \(fact.kind) · \(fact.observed)").font(.caption).foregroundStyle(.secondary)
+            ForEach(fact.replaces, id: \.self) { old in
+                Text("Replaces: \(old)").font(.caption).foregroundStyle(.secondary).strikethrough().lineLimit(2)
+            }
+            HStack(spacing: 12) {
+                Button("Confirm") { store.confirm(fact, text: draft) }
+                    .disabled(draft?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true)
+                if draft == nil { Button("Edit") { draft = fact.text } } else { Button("Cancel") { draft = nil } }
+                Button("Reject") { store.reject(fact) }
+                if let source = fact.source { Button("Source") { open(source) }.help(source.absoluteString) }
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+        }
+    }
+}

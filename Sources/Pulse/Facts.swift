@@ -20,7 +20,36 @@ private func day(_ s: String?, upTo today: String) -> String? {
     return min(d, today)
 }
 
-func applyFacts(_ changes: FactChanges, to db: DB, now: Date = Date()) throws -> FactCounts {
+private let live = "superseded_by IS NULL AND status != 'rejected'"
+
+private func current(_ db: DB, _ id: Int) throws -> String? {
+    try db.query("SELECT observed_at FROM facts WHERE id = ? AND \(live)", [id]).first?[0] as? String
+}
+
+private func supersede(_ db: DB, new: Int, observed: String, olds: [Int]) throws -> Int {
+    var n = 0
+    for old in olds where old != new {
+        guard let oldObserved = try current(db, old), try current(db, new) != nil else { continue }
+        if oldObserved <= observed {
+            try db.query("UPDATE facts SET superseded_by = ? WHERE id = ?", [new, old])
+            n += 1
+        } else {
+            try db.query("UPDATE facts SET superseded_by = ? WHERE id = ?", [old, new])
+        }
+    }
+    return n
+}
+
+private func confirm(_ db: DB, _ id: Int, seen: String) throws {
+    guard let observed = try current(db, id) else { return }
+    try db.query("UPDATE facts SET status = 'confirmed', last_seen = max(last_seen, ?) WHERE id = ?", [seen, id])
+    let olds = try db.query("SELECT replaces_id FROM pending_replaces WHERE fact_id = ?", [id]).compactMap { $0[0] as? Int }
+    _ = try supersede(db, new: id, observed: observed, olds: olds)
+    try db.query("DELETE FROM pending_replaces WHERE fact_id = ?", [id])
+}
+
+func applyFacts(_ changes: FactChanges, to db: DB, now: Date = Date(), origin: String = "briefing") throws -> FactCounts {
+    let agent = origin == "agent"
     let today = now.formatted(localDay)
     var counts = FactCounts()
     try db.transaction {
@@ -36,39 +65,34 @@ func applyFacts(_ changes: FactChanges, to db: DB, now: Date = Date()) throws ->
         func cite(_ fact: Int, _ ids: [Int]) throws {
             for id in ids.compactMap({ sources[$0] }) { try db.query("INSERT OR IGNORE INTO fact_sources VALUES (?, ?)", [fact, id]) }
         }
-        func current(_ id: Int) throws -> String? {
-            try db.query("SELECT observed_at FROM facts WHERE id = ? AND superseded_by IS NULL", [id]).first?[0] as? String
-        }
         for a in changes.add ?? [] {
             let text = a.text.trimmingCharacters(in: .whitespacesAndNewlines), name = a.subject.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard factKinds.contains(a.kind), subjectKinds.contains(a.subject.kind), !text.isEmpty, text.count <= 600, !name.isEmpty,
-                  let observed = day(a.observed, upTo: today), a.sources.contains(where: { sources[$0] != nil }) else { continue }
+                  let observed = day(a.observed, upTo: today), agent || a.sources.contains(where: { sources[$0] != nil }) else { continue }
             let subject = try subjectID(kind: a.subject.kind, names: [name] + (a.subject.aliases ?? []), in: db)
-            if let same = try db.query("SELECT id FROM facts WHERE subject_id = ? AND text = ? AND superseded_by IS NULL", [subject, text]).first?[0] as? Int {
+            if let same = try db.query("SELECT id FROM facts WHERE subject_id = ? AND text = ? AND \(live)", [subject, text]).first?[0] as? Int {
                 try cite(same, a.sources)
                 try db.query("UPDATE facts SET last_seen = max(last_seen, ?) WHERE id = ?", [observed, same])
                 counts.confirmed += 1
                 continue
             }
             let fact = try db.query("""
-                INSERT INTO facts (subject_id, kind, text, observed_at, last_seen, recorded_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id
-                """, [subject, a.kind, text, observed, observed, iso.string(from: now)])[0][0] as! Int
+                INSERT INTO facts (subject_id, kind, text, observed_at, last_seen, recorded_at, status, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                """, [subject, a.kind, text, observed, observed, iso.string(from: now), agent ? "unconfirmed" : "confirmed", origin])[0][0] as! Int
             try cite(fact, a.sources)
             counts.added += 1
-            for old in a.supersedes ?? [] {
-                guard let oldObserved = try current(old) else { continue }
-                if oldObserved <= observed {
-                    try db.query("UPDATE facts SET superseded_by = ? WHERE id = ?", [fact, old])
-                    counts.superseded += 1
-                } else {
-                    try db.query("UPDATE facts SET superseded_by = ? WHERE id = ?", [old, fact])
+            if agent {
+                for old in a.supersedes ?? [] {
+                    if try current(db, old) != nil { try db.query("INSERT OR IGNORE INTO pending_replaces VALUES (?, ?)", [fact, old]) }
                 }
+            } else {
+                counts.superseded += try supersede(db, new: fact, observed: observed, olds: a.supersedes ?? [])
             }
         }
         for c in changes.confirm ?? [] {
-            guard try current(c.id) != nil, c.sources.contains(where: { sources[$0] != nil }) else { continue }
+            guard try current(db, c.id) != nil, c.sources.contains(where: { sources[$0] != nil }) else { continue }
             try cite(c.id, c.sources)
-            try db.query("UPDATE facts SET status = 'confirmed', last_seen = max(last_seen, ?) WHERE id = ?", [today, c.id])
+            try confirm(db, c.id, seen: today)
             counts.confirmed += 1
         }
     }
@@ -96,7 +120,7 @@ private func subjectID(kind: String, names: [String], in db: DB) throws -> Int {
 func currentFacts(_ db: DB) throws -> [[String: Any]] {
     try db.query("""
         SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status FROM facts f JOIN subjects s ON s.id = f.subject_id
-        WHERE f.superseded_by IS NULL ORDER BY s.kind, s.name, f.observed_at DESC
+        WHERE f.\(live) ORDER BY s.kind, s.name, f.observed_at DESC
         """).map { r in
         ["id": r[0]!, "subject": "\(r[1]!): \(r[2]!)", "kind": r[3]!, "text": r[4]!, "observed": r[5]!, "lastSeen": r[6]!, "status": r[7]!]
     }
@@ -109,7 +133,7 @@ private func factJSON(_ db: DB, _ r: [Any?]) throws -> [String: Any] {
         """, [id]).map { s in
         (["kind": s[0], "url": s[1], "title": s[2], "author": s[3], "date": s[4], "excerpt": s[5]] as [String: Any?]).compactMapValues { $0 }
     }
-    let replaces = try db.query("SELECT id, text, observed_at FROM facts WHERE superseded_by = ? ORDER BY observed_at DESC", [id])
+    let replaces = try db.query("SELECT id, text, observed_at FROM facts WHERE superseded_by = ? AND status != 'rejected' ORDER BY observed_at DESC", [id])
         .map { ["id": $0[0]!, "text": $0[1]!, "observed": $0[2]!] }
     return ([
         "id": id, "subject": ["kind": r[1]!, "name": r[2]!], "kind": r[3], "text": r[4], "observed": r[5], "lastSeen": r[6], "status": r[7],
@@ -120,7 +144,7 @@ private func factJSON(_ db: DB, _ r: [Any?]) throws -> [String: Any] {
 private let factColumns = "SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status, f.superseded_by FROM facts f JOIN subjects s ON s.id = f.subject_id"
 
 func searchFacts(_ db: DB, query: String = "", since: String? = nil, kind: String? = nil, superseded: Bool = false, limit: Int = 30) throws -> [[String: Any]] {
-    var conditions = ["1"], args: [Any?] = []
+    var conditions = ["f.status != 'rejected'"], args: [Any?] = []
     let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
     let words = q.split { !$0.isLetter && !$0.isNumber }
     if !words.isEmpty {
@@ -137,7 +161,7 @@ func searchFacts(_ db: DB, query: String = "", since: String? = nil, kind: Strin
 func subjectFacts(_ db: DB, name: String?) throws -> Any {
     guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
         return try db.query("""
-            SELECT s.kind, s.name, count(f.id), max(f.observed_at) FROM subjects s JOIN facts f ON f.subject_id = s.id AND f.superseded_by IS NULL
+            SELECT s.kind, s.name, count(f.id), max(f.observed_at) FROM subjects s JOIN facts f ON f.subject_id = s.id AND f.\(live)
             GROUP BY s.id ORDER BY max(f.observed_at) DESC, s.name
             """).map { ["kind": $0[0]!, "name": $0[1]!, "facts": $0[2]!, "latest": $0[3]!] }
     }
@@ -149,9 +173,48 @@ func subjectFacts(_ db: DB, name: String?) throws -> Any {
         let close = try db.query("SELECT name FROM subjects WHERE name LIKE ? OR aliases LIKE ? ORDER BY name LIMIT 10", ["%\(name)%", "%\(name)%"]).compactMap { $0[0] as? String }
         throw SyncError(description: "No subject named \(name)." + (close.isEmpty ? " Call subject with no name to list them." : " Close: \(close.joined(separator: ", "))."))
     }
-    let facts = try db.query("\(factColumns) WHERE f.subject_id = ? ORDER BY f.observed_at DESC, f.id DESC", [s[0]]).map { try factJSON(db, $0) }
+    let facts = try db.query("\(factColumns) WHERE f.subject_id = ? AND f.status != 'rejected' ORDER BY f.observed_at DESC, f.id DESC", [s[0]]).map { try factJSON(db, $0) }
     return [
         "kind": s[1]!, "name": s[2]!, "aliases": (try? JSONDecoder().decode([String].self, from: Data((s[3] as? String ?? "[]").utf8))) ?? [],
         "current": facts.filter { $0["supersededBy"] == nil }, "history": facts.filter { $0["supersededBy"] != nil },
     ]
+}
+
+func confirmFact(_ db: DB, id: Int, text: String? = nil) throws {
+    let text = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let text, text.isEmpty || text.count > 600 { throw SyncError(description: "A fact is one sentence of up to 600 characters.") }
+    try db.transaction {
+        guard try current(db, id) != nil else { throw SyncError(description: "No current fact \(id)") }
+        if let text { try db.query("UPDATE facts SET text = ? WHERE id = ?", [text, id]) }
+        try confirm(db, id, seen: Date().formatted(localDay))
+    }
+}
+
+func rejectFact(_ db: DB, id: Int) throws {
+    try db.transaction {
+        guard try current(db, id) != nil else { throw SyncError(description: "No current fact \(id)") }
+        try db.query("UPDATE facts SET status = 'rejected' WHERE id = ?", [id])
+        try db.query("UPDATE facts SET superseded_by = NULL WHERE superseded_by = ?", [id])
+        try db.query("DELETE FROM pending_replaces WHERE fact_id = ?", [id])
+    }
+}
+
+struct PendingFact: Identifiable, Equatable {
+    let id: Int
+    let subject, kind, text, observed: String
+    let source: URL?
+    let replaces: [String]
+}
+
+func unconfirmedFacts(_ db: DB) throws -> [PendingFact] {
+    try db.query("""
+        SELECT f.id, s.name, f.kind, f.text, f.observed_at,
+               (SELECT so.url FROM sources so JOIN fact_sources fs ON fs.source_id = so.id WHERE fs.fact_id = f.id LIMIT 1)
+        FROM facts f JOIN subjects s ON s.id = f.subject_id WHERE f.status = 'unconfirmed' AND f.superseded_by IS NULL ORDER BY f.recorded_at DESC, f.id DESC
+        """).map { r in
+        let id = r[0] as! Int
+        let replaces = try db.query("SELECT o.text FROM pending_replaces p JOIN facts o ON o.id = p.replaces_id WHERE p.fact_id = ? AND o.\(live)", [id]).compactMap { $0[0] as? String }
+        return PendingFact(id: id, subject: r[1] as! String, kind: r[2] as! String, text: r[3] as! String, observed: r[4] as! String,
+                           source: (r[5] as? String).flatMap(URL.init), replaces: replaces)
+    }
 }
