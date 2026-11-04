@@ -523,7 +523,7 @@ private struct Buttons: View {
     }
 }
 
-private struct SplitButton<Title: View, Items: View>: View {
+struct SplitButton<Title: View, Items: View>: View {
     let help: String
     let action: () -> Void
     @ViewBuilder let title: Title

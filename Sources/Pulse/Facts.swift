@@ -269,3 +269,29 @@ func changedFacts(_ db: DB, since: String, limit: Int = 100) throws -> [[String:
     try db.query("\(factColumns) WHERE f.recorded_at > ? AND f.\(live) AND f.status = 'confirmed' ORDER BY f.recorded_at DESC, f.observed_at DESC, f.id DESC LIMIT ?",
                  [since, limit]).map { try factJSON(db, $0) }
 }
+
+private let stopwords: Set<String> = ["the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are", "was", "were", "be", "it", "its",
+    "what", "whats", "who", "whom", "when", "where", "why", "how", "which", "does", "do", "did", "has", "have", "had", "there", "about", "any", "anything",
+    "me", "my", "we", "our", "us", "this", "that", "these", "those", "can", "could", "should", "would", "will", "s", "left", "now", "tell", "know", "pulse"]
+
+func factsFor(question: String, in db: DB, limit: Int = 8) throws -> [[String: Any]] {
+    let lower = question.lowercased()
+    var ids: [Int] = []
+    let named = try db.query("SELECT s.id, s.name, s.aliases FROM subjects s").filter { r in
+        let names = [r[1] as? String ?? ""] + ((try? JSONDecoder().decode([String].self, from: Data((r[2] as? String ?? "[]").utf8))) ?? [])
+        return names.contains { $0.count >= 4 && lower.contains($0.lowercased()) }
+    }.compactMap { $0[0] as? Int }
+    for subject in named {
+        ids += try db.query("SELECT id FROM facts WHERE subject_id = ? AND \(live) ORDER BY observed_at DESC LIMIT 4", [subject]).compactMap { $0[0] as? Int }
+    }
+    let words = question.split { !$0.isLetter && !$0.isNumber }.map { $0.lowercased() }.filter { !stopwords.contains($0) && $0.count > 1 }
+    if !words.isEmpty {
+        ids += try db.query("""
+            SELECT f.id FROM facts_fts JOIN facts f ON f.id = facts_fts.rowid WHERE facts_fts MATCH ? AND f.\(live)
+            ORDER BY bm25(facts_fts), f.observed_at DESC LIMIT ?
+            """, [words.map { "\"\($0)\"*" }.joined(separator: " OR "), limit]).compactMap { $0[0] as? Int }
+    }
+    var seen = Set<Int>()
+    let picked = ids.filter { seen.insert($0).inserted }.prefix(limit)
+    return try picked.compactMap { id in try db.query("\(factColumns) WHERE f.id = ?", [id]).first.map { try factJSON(db, $0) } }
+}

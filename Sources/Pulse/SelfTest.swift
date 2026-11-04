@@ -180,6 +180,11 @@ func selfTest() throws {
     let before = try changedFacts(mem, since: "2026-11-03T00:00:00Z"), afterwards = try changedFacts(mem, since: "2026-11-03T13:00:00Z")
     check(before.map { $0["text"] as? String } == ["Due Friday", "Invites merged"] && afterwards.isEmpty && (before[1]["replaces"] as? [Any])?.count == 2,
           "since you last looked lists confirmed facts learned after that time, newest first, with what they replaced, and skips agents' unconfirmed ones")
+    let picked = try factsFor(question: "When is KLE-3 due?", in: mem).map { $0["text"] as? String ?? "" }
+    let worded = try factsFor(question: "What about the invites?", in: mem).map { $0["text"] as? String ?? "" }
+    let filler = try factsFor(question: "what is the", in: mem)
+    check(picked.first == "Due Friday" && worded.contains("Invites merged") && !worded.contains("Invites are in review") && filler.isEmpty,
+          "a question gets the current facts about the subjects it names and the words it uses, not replaced facts or filler words")
     let pending = try unconfirmedFacts(mem)
     check(pending.map(\.text) == ["Invites shipped to everyone"] && pending[0].replaces == ["Invites merged"], "unconfirmed facts are listed with what they'd replace")
     try confirmFact(mem, id: pending[0].id, text: "Invites shipped to all workspaces")

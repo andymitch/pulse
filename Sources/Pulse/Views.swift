@@ -50,7 +50,7 @@ struct ContentView: View {
 
     @ViewBuilder private var home: some View {
         TodayView(store: store)
-        focusHeader
+        FocusHeader(store: store)
         PrioritiesView(store: store)
         MeetingsView(todayOnly: true) { store.page = .meetings }
         SectionHeader(title: "Trends", open: { store.page = .trends }) {
@@ -62,19 +62,6 @@ struct ContentView: View {
         let prs = store.trends.prs.filter { store.includes($0.person) }.count
         let tickets = store.trends.completed.filter { store.includes($0.person) }.map(\.n).reduce(0, +)
         return "\(prs) PRs merged" + (store.hasLinearKey ? ", \(tickets) tickets closed" : "")
-    }
-
-    private var focusHeader: some View {
-        SectionHeader(title: "Focus") {
-            if store.synthesizing {
-                ProgressView().controlSize(.small)
-                Text("Reading your sources…").font(.caption).foregroundStyle(.secondary)
-            } else if let at = store.synthesizedAt {
-                Text("Briefing \(at, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
-            }
-            Button(store.synthesis == nil ? "Generate" : "Regenerate") { Task { await store.synthesize() } }
-                .disabled(store.synthesizing)
-        }
     }
 
     @ViewBuilder private var trends: some View {
@@ -451,5 +438,22 @@ struct SpeakButton: View {
         settings.voiceAsked = true
         settings.naturalVoice = natural
         try? settings.save()
+    }
+}
+
+struct FocusHeader: View {
+    @ObservedObject var store: Store
+
+    var body: some View {
+        SectionHeader(title: "Focus") {
+            if store.synthesizing {
+                ProgressView().controlSize(.small)
+                Text("Reading your sources…").font(.caption).foregroundStyle(.secondary)
+            } else if let at = store.synthesizedAt {
+                Text("Briefing \(at, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
+            }
+            Button(store.synthesis == nil ? "Generate" : "Regenerate") { Task { await store.synthesize() } }
+                .disabled(store.synthesizing)
+        }
     }
 }

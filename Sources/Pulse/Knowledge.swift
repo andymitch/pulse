@@ -57,46 +57,130 @@ func friendlyDay(_ day: String, now: Date = Date()) -> String {
 
 struct KnowledgeView: View {
     @ObservedObject var store: Store
-    @State private var query = ""
-    @State private var results: [KnownFact] = []
+    @State private var question = ""
+    @State private var answers: [Answer] = []
+    @State private var asking = false
+    @AppStorage("askOnThisMac") private var onThisMac = true
 
     var body: some View {
-        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         VStack(alignment: .leading, spacing: 12) {
-            TextField("Ask what Pulse knows, like KLE-1209 or auto-close", text: $query).textFieldStyle(.roundedBorder)
-            if searching {
-                Panel(title: "What Pulse knows") {
-                    if results.isEmpty { Text("Nothing about that yet.").foregroundStyle(.secondary) }
-                    FactLines(store: store, facts: results)
+            FocusHeader(store: store)
+            PrioritiesView(store: store)
+            Panel(title: "Ask", accessory: {
+                if !answers.isEmpty { Button("Clear") { answers = [] }.buttonStyle(.link).font(.caption).disabled(asking) }
+            }) {
+                ForEach(answers) { a in
+                    AnswerView(store: store, answer: a, askAgent: asking || demoMode ? nil : { ask(a.question, local: false) })
+                    Divider()
                 }
-            } else {
-                if !store.pendingFacts.isEmpty {
-                    Panel(title: "Agents noted · confirm or reject") {
-                        ForEach(store.pendingFacts) { fact in
-                            PendingFactRow(store: store, fact: fact)
-                            if fact.id != store.pendingFacts.last?.id { Divider() }
+                HStack(spacing: 8) {
+                    TextField("Ask about your work, like when Requests v1 launches", text: $question)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { ask(question, local: local) }
+                        .disabled(asking)
+                    if asking { ProgressView().controlSize(.small) }
+                    if localModelReady {
+                        SplitButton(help: local ? "Answer on this Mac from what Pulse knows" : "Ask \(agent), which can also look in Linear, Slack and GitHub") {
+                            ask(question, local: local)
+                        } title: {
+                            Text(local ? "Ask" : "Ask \(agent)")
+                        } items: {
+                            Button("Ask on this Mac") { onThisMac = true; ask(question, local: true) }
+                            Button("Ask \(agent)") { onThisMac = false; ask(question, local: false) }.disabled(demoMode)
                         }
+                        .disabled(asking || blank)
+                    } else {
+                        Button("Ask \(agent)") { ask(question, local: false) }.disabled(asking || blank || demoMode)
+                            .help("Ask \(agent), which can also look in Linear, Slack and GitHub")
                     }
                 }
-                let changed = store.changed.map(KnownFact.init)
-                Panel(title: "Since you last looked", accessory: {
-                    if !changed.isEmpty { Button("Mark all reviewed") { store.markReviewed() }.buttonStyle(.link).font(.caption) }
-                }) {
-                    if changed.isEmpty {
-                        Text("You're caught up. New and changed facts show up here after each briefing.").foregroundStyle(.secondary)
+            }
+            if !store.pendingFacts.isEmpty {
+                Panel(title: "Agents noted") {
+                    ForEach(store.pendingFacts) { fact in
+                        PendingFactRow(store: store, fact: fact)
+                        if fact.id != store.pendingFacts.last?.id { Divider() }
                     }
+                }
+            }
+            let changed = store.changed.map(KnownFact.init)
+            if !changed.isEmpty {
+                Panel(title: "Pulse changed its mind", accessory: {
+                    Button("Mark all reviewed") { store.markReviewed() }.buttonStyle(.link).font(.caption)
+                }) {
                     FactLines(store: store, facts: changed, reviewing: true)
                 }
             }
+            if changed.isEmpty && store.pendingFacts.isEmpty {
+                Text("Nothing to resolve. Facts that agents note, or that replace something Pulse knew, show up here.").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14)
+            }
         }
-        .onAppear(perform: search)
-        .onChange(of: query) { _, _ in search() }
-        .onChange(of: store.factsVersion) { _, _ in search() }
     }
 
-    private func search() {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return results = [] }
-        results = ((try? searchFacts(store.db, query: query, limit: 50)) ?? []).map(KnownFact.init)
+    private var blank: Bool { question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var local: Bool { localModelReady && (onThisMac || demoMode) }
+    private var agent: String { BriefingAgent.current.name }
+
+    private func ask(_ text: String, local: Bool) {
+        let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, !asking else { return }
+        if text == question { question = "" }
+        asking = true
+        let previous = answers.last
+        let facts = (try? factsFor(question: q, in: store.db)) ?? []
+        answers.append(Answer(question: q, by: local ? "On this Mac" : BriefingAgent.current.name, facts: local ? facts.map(KnownFact.init) : []))
+        let me = store.me ?? "me"
+        Task {
+            var a = answers[answers.count - 1]
+            do {
+                a.text = local ? try await localAnswer(q, facts: facts, previous: previous) : try await agentAnswer(q, me: me)
+            } catch {
+                a.error = "\(error)"
+            }
+            answers[answers.count - 1] = a
+            asking = false
+        }
+    }
+}
+
+private struct AnswerView: View {
+    @ObservedObject var store: Store
+    let answer: Answer
+    let askAgent: (() -> Void)?
+    @State private var showFacts = false
+
+    private var stuck: Bool {
+        answer.by == "On this Mac" && (answer.error != nil || answer.text?.contains("doesn't know") == true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(answer.question).font(.callout.weight(.medium))
+            if let text = answer.text {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(markdown(text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if stuck, let askAgent { Button("Ask \(BriefingAgent.current.name)", action: askAgent).controlSize(.small).help("Ask the same question of \(BriefingAgent.current.name), which can also look in Linear, Slack and GitHub") }
+                }
+            } else if let error = answer.error {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(error).font(.caption).foregroundStyle(.red).lineLimit(4)
+                    Spacer(minLength: 8)
+                    if stuck, let askAgent { Button("Ask \(BriefingAgent.current.name)", action: askAgent).controlSize(.small) }
+                }
+            } else {
+                Text("Thinking…").foregroundStyle(.secondary)
+            }
+            if !answer.facts.isEmpty {
+                DisclosureGroup(isExpanded: $showFacts) {
+                    VStack(alignment: .leading, spacing: 8) { FactLines(store: store, facts: answer.facts, numbered: true) }.padding(.top, 4)
+                } label: {
+                    Text("\(answer.by) · from \(answer.facts.count) fact\(answer.facts.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                }
+            } else if answer.text != nil {
+                Text(answer.by).font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -104,10 +188,11 @@ struct FactLines: View {
     @ObservedObject var store: Store
     let facts: [KnownFact]
     var reviewing = false
+    var numbered = false
 
     var body: some View {
         ForEach(Array(facts.enumerated()), id: \.element.id) { i, fact in
-            FactLine(store: store, fact: fact, reviewing: reviewing)
+            FactLine(store: store, fact: fact, reviewing: reviewing, number: numbered ? i + 1 : nil)
             if i < facts.count - 1 { Divider() }
         }
     }
@@ -129,11 +214,12 @@ private struct FactLine: View {
     @ObservedObject var store: Store
     let fact: KnownFact
     let reviewing: Bool
+    var number: Int?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text([[fact.subject, fact.subjectTitle].compactMap { $0 }.joined(separator: " "), friendlyDay(fact.observed)].joined(separator: " · "))
+                Text(([number.map { "[\($0)]" }, [fact.subject, fact.subjectTitle].compactMap { $0 }.joined(separator: " "), friendlyDay(fact.observed)] as [String?]).compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 ForEach(fact.replaces, id: \.self) { old in
                     Text(old).strikethrough().foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

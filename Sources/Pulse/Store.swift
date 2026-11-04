@@ -161,7 +161,7 @@ final class Store: ObservableObject {
         pendingFacts = (try? unconfirmedFacts(db)) ?? []
         let since = db.meta("facts_reviewed_at") ?? iso.string(from: Date().addingTimeInterval(-3 * 86400))
         let reviewed = Set(db.ids("facts_reviewed_ids").compactMap(Int.init))
-        changed = ((try? changedFacts(db, since: since)) ?? []).filter { !reviewed.contains($0["id"] as? Int ?? 0) }
+        changed = ((try? changedFacts(db, since: since)) ?? []).filter { $0["replaces"] != nil && !reviewed.contains($0["id"] as? Int ?? 0) }
         factsVersion += 1
     }
 
