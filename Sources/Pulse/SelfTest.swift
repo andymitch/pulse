@@ -164,6 +164,60 @@ func selfTest() throws {
     let checked = try changes("{\(slack), \"confirm\": [{\"id\": \(try unconfirmedFacts(mem)[0].id), \"sources\": [1]}]}")
     let due = try searchFacts(mem, query: "KLE-3")
     check(checked == FactCounts(confirmed: 1) && texts(due) == ["Due next Friday"], "a briefing run confirming an agent's fact applies what it replaces")
+    let piLog = [
+        #"{"type":"session","cwd":"/code/app","timestamp":"2026-11-03T10:00:00Z"}"#,
+        #"{"type":"message","message":{"role":"user","content":[{"type":"text","text":"Ship the invite flow"}]}}"#,
+        #"{"type":"message","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"Done, PR #9 is open."},{"type":"toolCall","name":"bash"}]}}"#,
+        #"{"type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"tool output"}]}}"#,
+        #"{"type":"message","message":{"role":"user","content":[{"type":"text","text":"Keep the flag on for now"}]}}"#,
+    ].joined(separator: "\n")
+    let claudeLog = [
+        #"{"type":"user","cwd":"/code/api","message":{"role":"user","content":"Fix the retry bug"}}"#,
+        #"{"type":"user","isSidechain":true,"message":{"role":"user","content":"subagent prompt"}}"#,
+        #"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"output"}]}}"#,
+        #"{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>"}}"#,
+        #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Fixed in #12."},{"type":"tool_use","name":"Edit"}]}}"#,
+        #"{"type":"user","message":{"role":"user","content":"Thanks, merge it"}}"#,
+    ].joined(separator: "\n")
+    let pi = sessionTurns(Data(piLog.utf8)), claude = sessionTurns(Data(claudeLog.utf8))
+    check(pi.cwd == "/code/app" && pi.turns == [SessionTurn(you: true, text: "Ship the invite flow"), SessionTurn(you: false, text: "Done, PR #9 is open."), SessionTurn(you: true, text: "Keep the flag on for now")],
+          "a pi session keeps what was said, without thinking, tool calls or tool output")
+    check(claude.cwd == "/code/api" && claude.turns.map(\.text) == ["Fix the retry bug", "Fixed in #12.", "Thanks, merge it"], "a Claude Code session skips subagents, tool results and slash commands")
+    let at = iso.date(from: "2026-11-03T10:00:00Z")!
+    check(sessionDigest(tool: "pi", cwd: nil, start: at, end: at, turns: [SessionTurn(you: true, text: "One shot")]) == nil, "a session with one message from me isn't worth a digest")
+    let chatty = (1...60).map { SessionTurn(you: $0 % 2 == 1, text: "turn \($0) " + String(repeating: "x", count: 1000)) }
+    let digest = sessionDigest(tool: "pi", cwd: "/code/app", start: at, end: at, turns: chatty) ?? ""
+    check(digest.hasPrefix("# turn 1 x") && digest.contains("turn 60 ") && !digest.contains("turn 2 ") && digest.contains("earlier messages left out") && digest.count < 42_000,
+          "a long session keeps its first message and the latest ones under the cap")
+    let roots = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-sessions-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: roots) }
+    let project = roots.appendingPathComponent("pi/--code-app--"), digests = roots.appendingPathComponent("out")
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    let log = { (name: String, body: String, ago: Double) throws in
+        let url = project.appendingPathComponent(name)
+        try body.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-ago)], ofItemAtPath: url.path)
+    }
+    try log("old.jsonl", piLog, 3 * 3600)
+    try log("new.jsonl", piLog.replacingOccurrences(of: "invite flow", with: "billing page"), 3600)
+    try log("live.jsonl", piLog, 60)
+    try log("oneshot.jsonl", #"{"type":"message","message":{"role":"user","content":"Just once"}}"#, 3600)
+    let lookalike = roots.appendingPathComponent("pi/--code-application--")
+    try FileManager.default.createDirectory(at: lookalike, withIntermediateDirectories: true)
+    try piLog.replacingOccurrences(of: "/code/app", with: "/code/application").write(to: lookalike.appendingPathComponent("other.jsonl"), atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: lookalike.appendingPathComponent("other.jsonl").path)
+    try FileManager.default.createDirectory(at: digests, withIntermediateDirectories: true)
+    try "# Résumé\n\npi session in /Users/me, 2026-11-01T00:00:00Z to 2026-11-01T01:00:00Z.\n".write(to: digests.appendingPathComponent("pi-personal.md"), atomically: true, encoding: .utf8)
+    let found = digestSessions(into: digests, folders: ["/code/app"], roots: [("pi", roots.appendingPathComponent("pi"))])
+    check(found.map { URL(fileURLWithPath: $0).lastPathComponent } == ["pi-new.md", "pi-old.md"], "finished sessions in the repo get digests, newest first; live and one-message sessions don't")
+    check(!FileManager.default.fileExists(atPath: digests.appendingPathComponent("pi-other.md").path) && !FileManager.default.fileExists(atPath: digests.appendingPathComponent("pi-personal.md").path),
+          "sessions outside the repo, even in a folder with a similar name, aren't digested, and old digests from outside it are deleted")
+    check(digestSessions(into: digests, folders: [], roots: [("pi", roots.appendingPathComponent("pi"))]).isEmpty, "without a repo in Settings, no sessions are used")
+    try log("old.jsonl", piLog.replacingOccurrences(of: "invite flow", with: "invite page"), 1800)
+    let again = digestSessions(into: digests, folders: ["/code/app/"], roots: [("pi", roots.appendingPathComponent("pi"))])
+    let refreshed = try String(contentsOfFile: again[0], encoding: .utf8)
+    check(again.first.map { URL(fileURLWithPath: $0).lastPathComponent } == "pi-old.md" && refreshed.contains("invite page"),
+          "a session picked up again gets a fresh digest")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }

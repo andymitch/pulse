@@ -49,6 +49,7 @@ private struct SourceCard: View {
         switch source.kind {
         case "meeting": "waveform"
         case "mail": "envelope"
+        case "session": "terminal"
         default: "doc.text"
         }
     }
