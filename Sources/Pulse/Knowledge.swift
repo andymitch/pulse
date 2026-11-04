@@ -72,7 +72,7 @@ struct KnowledgeView: View {
                     .disabled(asking)
                 if asking { ProgressView().controlSize(.small) }
                 if localModelReady {
-                    SplitButton(help: local ? "Answer on this Mac from what Pulse knows" : "Ask \(agent), which can also look in Linear, Slack and GitHub") {
+                    SplitButton(help: local ? "Answer on this Mac from what Pulse knows" : "Ask \(agent), which can also look in Linear, Slack and GitHub", width: nil) {
                         ask(question, local: local)
                     } title: {
                         Text(local ? "Ask" : "Ask \(agent)")
@@ -87,13 +87,13 @@ struct KnowledgeView: View {
                     Button("Ask \(agent)") { ask(question, local: false) }.disabled(asking || blank || demoMode)
                         .help("Ask \(agent), which can also look in Linear, Slack and GitHub")
                 }
+                if !answers.isEmpty {
+                    Button("Clear") { answers = []; save() }.disabled(asking).help("Clear the questions and answers")
+                }
             }
             ForEach(answers) { a in
                 AnswerView(store: store, answer: a, askAgent: asking || demoMode ? nil : { ask(a.question, local: false) })
                     .padding(.horizontal, 14)
-            }
-            if !answers.isEmpty {
-                Button("Clear") { answers = []; save() }.buttonStyle(.link).font(.caption).disabled(asking).padding(.horizontal, 14)
             }
             FocusHeader(store: store)
             PrioritiesView(store: store)
@@ -166,7 +166,7 @@ private struct AnswerView: View {
             Text(answer.question).font(.callout.weight(.medium))
             if let text = answer.text {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(markdown(text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    Text(markdown(answer.by == "On this Mac" ? withoutCitations(text) : text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     if stuck, let askAgent { Button("Ask \(BriefingAgent.current.name)", action: askAgent).controlSize(.small).help("Ask the same question of \(BriefingAgent.current.name), which can also look in Linear, Slack and GitHub") }
                 }
@@ -182,7 +182,7 @@ private struct AnswerView: View {
             if !answer.factIDs.isEmpty {
                 DisclosureGroup(isExpanded: $showFacts) {
                     VStack(alignment: .leading, spacing: 8) {
-                        FactLines(store: store, facts: ((try? factsByID(store.db, answer.factIDs)) ?? []).map(KnownFact.init), numbered: true)
+                        FactLines(store: store, facts: ((try? factsByID(store.db, answer.factIDs)) ?? []).map(KnownFact.init))
                     }
                     .padding(.top, 4)
                 } label: {
@@ -199,11 +199,10 @@ struct FactLines: View {
     @ObservedObject var store: Store
     let facts: [KnownFact]
     var reviewing = false
-    var numbered = false
 
     var body: some View {
         ForEach(Array(facts.enumerated()), id: \.element.id) { i, fact in
-            FactLine(store: store, fact: fact, reviewing: reviewing, number: numbered ? i + 1 : nil)
+            FactLine(store: store, fact: fact, reviewing: reviewing)
             if i < facts.count - 1 { Divider() }
         }
     }
@@ -225,12 +224,11 @@ private struct FactLine: View {
     @ObservedObject var store: Store
     let fact: KnownFact
     let reviewing: Bool
-    var number: Int?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(([number.map { "[\($0)]" }, [fact.subject, fact.subjectTitle].compactMap { $0 }.joined(separator: " "), friendlyDay(fact.observed)] as [String?]).compactMap { $0 }.joined(separator: " · "))
+                Text([[fact.subject, fact.subjectTitle].compactMap { $0 }.joined(separator: " "), friendlyDay(fact.observed)].joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 ForEach(fact.replaces, id: \.self) { old in
                     Text(old).strikethrough().foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

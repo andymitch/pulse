@@ -540,6 +540,7 @@ private struct Buttons: View {
 
 struct SplitButton<Title: View, Items: View>: View {
     let help: String
+    var width: CGFloat? = 104
     let action: () -> Void
     @ViewBuilder let title: Title
     @ViewBuilder let items: Items
@@ -553,7 +554,8 @@ struct SplitButton<Title: View, Items: View>: View {
             Button(action: action) {
                 title.labelStyle(.titleAndIcon)
                     .padding(.leading, 9)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .padding(.trailing, width == nil ? 7 : 0)
+                    .frame(maxWidth: width == nil ? nil : .infinity, maxHeight: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(Pressable())
@@ -566,7 +568,8 @@ struct SplitButton<Title: View, Items: View>: View {
                 .help("More actions")
                 .accessibilityLabel("More actions")
         }
-        .frame(width: 104, height: 24)
+        .frame(width: width, height: 24)
+        .fixedSize(horizontal: width == nil, vertical: false)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
     }
 }
