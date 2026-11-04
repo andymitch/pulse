@@ -118,12 +118,7 @@ private func subjectID(kind: String, names: [String], in db: DB) throws -> Int {
 }
 
 func currentFacts(_ db: DB) throws -> [[String: Any]] {
-    try db.query("""
-        SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status FROM facts f JOIN subjects s ON s.id = f.subject_id
-        WHERE f.\(live) ORDER BY s.kind, s.name, f.observed_at DESC
-        """).map { r in
-        ["id": r[0]!, "subject": "\(r[1]!): \(r[2]!)", "kind": r[3]!, "text": r[4]!, "observed": r[5]!, "lastSeen": r[6]!, "status": r[7]!]
-    }
+    try db.query("\(factColumns) WHERE f.\(live) ORDER BY s.kind, s.name, f.observed_at DESC").map { try factJSON(db, $0) }
 }
 
 private func factJSON(_ db: DB, _ r: [Any?]) throws -> [String: Any] {

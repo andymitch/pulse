@@ -37,15 +37,16 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     let s = settings
     var who = ["Linear \"\(me)\""]
     if s.slack { who.append("the Slack user your Slack tools are logged in as") }
+    let window = since.map { "since \($0)" } ?? "in the last 14 days"
     var gather: [String] = []
-    gather.append("Linear: the active cycles and what is in them, projects and initiatives with their latest status updates, and documents created in the last 14 days (meeting minutes).")
+    gather.append("Linear: the active cycles and what is in them right now, project and initiative status updates posted \(window), and documents created \(window) (meeting minutes).")
     if s.slack {
         let channels = s.slackChannels.map { "#\($0.name) (\($0.id))" }.joined(separator: ", ")
-        gather.append("Slack, the last 14 days of " + (channels.isEmpty ? "the up to 12 busiest channels \(me) is a member of, skipping channels that are mostly bots or alerts." : "these channels: \(channels)."))
+        gather.append("Slack messages \(window) in " + (channels.isEmpty ? "the up to 12 busiest channels \(me) is a member of, skipping channels that are mostly bots or alerts." : "these channels: \(channels)."))
         gather.append("Slack messages that need \(me): mentions of them and DMs to them from the last 7 days, keeping only those not yet answered.")
     }
     if let mail { gather.append("Email from the last \(s.mailDays) days, as JSON with a url for each message: \(mail). Keep only email that needs \(me) to reply or act; ignore newsletters and notifications.") }
-    if s.recordMeetings { gather.append("Meetings Pulse recorded, each a file with its summary, decisions, important points and the transcript, newest first: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", ")).") }
+    if s.recordMeetings { gather.append("Meetings Pulse recorded \(window), each a file with its summary, decisions, important points and the transcript, newest first: \(transcripts.isEmpty ? "none" : transcripts.joined(separator: ", ")).") }
     if !sessions.isEmpty { gather.append("\(me)'s sessions with coding agents (pi, Claude Code) in the \(s.repoName) repo, newest first, each a file with the folder it ran in and the conversation without tool output: \(sessions.joined(separator: ", ")). Use them for what was decided, done and left open; skip the mechanics of the work, and anything personal that isn't about the work, such as a job search, a résumé or health.") }
     gather.append("\(me)'s open work right now, from GitHub and Linear. Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
     let kinds = ["github", "linear"] + (s.slack ? ["slack"] : []) + (mail != nil ? ["mail"] : []) + ["meeting", "doc"] + (sessions.isEmpty ? [] : ["session"])
@@ -56,25 +57,14 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
 
     This is read-only. Never post, react, comment, create, or change anything anywhere.
 
+    \(facts) holds what Pulse already knows, as JSON: short dated facts, each with an id, its subject, its status and its sources, learned on earlier runs and from other agents. Read it first. \(since.map { "Pulse last read your sources at \($0), and the facts cover what came before, so gather only what's new since then (unanswered messages and email excepted). Take new facts only from items after that time." } ?? "Pulse knows little so far, so gather the last 14 days and learn from everything you read.")
+
     Gather, using your Linear and Slack tools (MCP servers; in pi, call them through codemode):
     \(gather.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n"))
 
-    Then write one JSON file to \(output) with exactly this shape and nothing else:
-    {
-      "focus": [{"headline": string, "summary": string, "sources": [int]}],
-      "today": [{"ref": string | null, "title": string, "why": string, "url": string | null, "source": \(kindList) | null, "minutes": int, "reply": string | null}],
-      "sources": [{"id": int, "title": string, "url": string, "kind": \(kindList), "author": string | null, "date": "YYYY-MM-DD" | null, "excerpt": string | null}]
-    }
+    Work in this order.
 
-    Rules:
-    - newest wins: work backwards from the most recent messages, meetings and updates to find where things stand now. When sources disagree, trust the newest one. Use older items only for background that nothing newer contradicts, and never present something as current if a later source changed or settled it.
-    - focus: cut through the noise. Usually exactly one entry: the single thing the team is pushing on right now. Add a second or third only if there are genuinely separate efforts in flight that matter as much; never more than 3. headline is one short line. summary is 3 to 5 plain sentences distilled from everything you read: what the goal is, where it stands, what is blocking it, and what \(me)'s part is. Leave out minor threads. Use inline Markdown to make it scannable: **bold** for the goal, the blocker and \(me)'s part, *italics* for people and docs, and `code` for ticket IDs and endpoints. No headings or lists. Each entry cites the 2 to 4 sources that best back it up.
-    - today: \(me)'s checklist for today, at most 7 items that fit in about 5 hours of focused work, in the order to do them. Put first what unblocks other people (reviews, replies, merges), then work that is nearly done, then the most important work for the focus. For an item from the open work list, set ref to its ref exactly and keep its title. Other items are unanswered questions or requests, or meeting action items assigned to \(me) by name: set ref to null, title starts with a verb, and url points at the thread, message, email or doc. why is one short line. minutes is an honest estimate.
-    - reply: only for a today item that answers someone in Slack (source "slack"). If their question or request has a clear answer from what you read, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
-    - sources: every cited item, numbered from 1. url must be a link you actually saw; never invent one, and drop any claim you cannot link. For a meeting transcript or agent session file, url is "file://" followed by its path, author is null, and title is just the meeting's title or the session's first line. title is what the item is (a ticket title, a doc name, an email subject, or "Maya in #engineering"). excerpt is the most telling one or two sentences, quoted or closely paraphrased. author and date are who wrote it and when, if known.
-    - Write plainly. No hype, no filler.
-
-    Last, update Pulse's memory. \(facts) holds the facts Pulse already knows, as JSON, each with an id. \(since.map { "Pulse last learned from these sources at \($0). Everything older was already read, so take new facts only from items after that and use older ones as context." } ?? "This is the first time, so learn from everything you read.") Write a second JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
+    First, update Pulse's memory from what you gathered. Write a JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
     {
       "sources": [{"id": int, "kind": \(kindList), "url": string, "title": string, "author": string | null, "date": "YYYY-MM-DD" | null, "excerpt": string | null}],
       "add": [{"subject": {"kind": "project" | "ticket" | "person" | "topic", "name": string, "aliases": [string]}, "kind": \(factKinds.map { "\"\($0)\"" }.joined(separator: " | ")), "text": string, "observed": "YYYY-MM-DD", "sources": [int], "supersedes": [int]}],
@@ -87,7 +77,22 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     - observed is the date the source said it, not today.
     - Facts with status "unconfirmed" were noted by other agents and haven't been checked. Confirm one when a source you read backs it up, and supersede it with a new fact when a source contradicts it. Otherwise leave it alone.
     - When a new fact replaces a known one (a status moved on, a decision changed, a blocker cleared, an owner changed), put the old id in supersedes. When a source only restates a known fact, confirm it instead of adding it again.
-    - Every fact and confirmation cites at least one source you actually saw, with the same url rules as the briefing. sources here are numbered on their own, from 1.
+    - Every fact and confirmation cites at least one source you actually saw. sources here are numbered on their own, from 1, with the same url rules as the briefing.
+
+    Then write the briefing, from the facts as they stand after your changes plus what you gathered, as one JSON file to \(output) with exactly this shape and nothing else:
+    {
+      "focus": [{"headline": string, "summary": string, "sources": [int]}],
+      "today": [{"ref": string | null, "title": string, "why": string, "url": string | null, "source": \(kindList) | null, "minutes": int, "reply": string | null}],
+      "sources": [{"id": int, "title": string, "url": string, "kind": \(kindList), "author": string | null, "date": "YYYY-MM-DD" | null, "excerpt": string | null}]
+    }
+
+    Rules for the briefing:
+    - newest wins: work backwards from the most recent facts, messages, meetings and updates to find where things stand now. When they disagree, trust the newest one. A fact you superseded no longer counts, an unconfirmed fact is only a lead, and older items are only background that nothing newer contradicts. Never present something as current if a later source changed or settled it.
+    - focus: cut through the noise. Usually exactly one entry: the single thing the team is pushing on right now. Add a second or third only if there are genuinely separate efforts in flight that matter as much; never more than 3. headline is one short line. summary is 3 to 5 plain sentences distilled from everything you know: what the goal is, where it stands, what is blocking it, and what \(me)'s part is. Leave out minor threads. Use inline Markdown to make it scannable: **bold** for the goal, the blocker and \(me)'s part, *italics* for people and docs, and `code` for ticket IDs and endpoints. No headings or lists. Each entry cites the 2 to 4 sources that best back it up.
+    - today: \(me)'s checklist for today, at most 7 items that fit in about 5 hours of focused work, in the order to do them. Put first what unblocks other people (reviews, replies, merges), then work that is nearly done, then the most important work for the focus. For an item from the open work list, set ref to its ref exactly and keep its title. Other items are unanswered questions or requests, open commitments \(me) made, or meeting action items assigned to \(me) by name: set ref to null, title starts with a verb, and url points at the thread, message, email or doc. why is one short line. minutes is an honest estimate.
+    - reply: only for a today item that answers someone in Slack (source "slack"). If their question or request has a clear answer from what you know, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
+    - sources: every cited item, numbered from 1. When you rely on a known fact, cite its own sources. url must be a link you actually saw; never invent one, and drop any claim you cannot link. For a meeting transcript or agent session file, url is "file://" followed by its path, author is null, and title is just the meeting's title or the session's first line. title is what the item is (a ticket title, a doc name, an email subject, or "Maya in #engineering"). excerpt is the most telling one or two sentences, quoted or closely paraphrased. author and date are who wrote it and when, if known.
+    - Write plainly. No hype, no filler.
     """
 }
 
@@ -97,7 +102,10 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
     let facts = dir.appendingPathComponent("facts.json"), factsOut = dir.appendingPathComponent("facts.next.json")
     let started = Date()
     for file in [out, factsOut] { try? FileManager.default.removeItem(at: file) }
-    try JSONSerialization.data(withJSONObject: try currentFacts(db), options: [.prettyPrinted, .withoutEscapingSlashes]).write(to: facts)
+    let known = try currentFacts(db)
+    try JSONSerialization.data(withJSONObject: known, options: [.prettyPrinted, .withoutEscapingSlashes]).write(to: facts)
+    let last = db.meta("facts_since").flatMap(iso.date(from:))
+    let since = known.isEmpty ? nil : last.flatMap { $0 > Date().addingTimeInterval(-14 * 86400) ? $0 : nil }
     let day = Date().formatted(date: .complete, time: .omitted)
     var mail: String?
     var mailError: String?
@@ -110,13 +118,13 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
             mailError = "Mail export failed: \(error)"
         }
     }
-    let transcripts = settings.recordMeetings ? meetingTranscripts(in: dir.appendingPathComponent("meetings")) : []
-    let newSince = db.meta("facts_since").flatMap(iso.date(from:)) ?? Date().addingTimeInterval(-3 * 86400)
-    let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions"), folders: settings.codeReady ? [settings.repo, settings.worktrees] : []) }.value.filter {
-        ((try? URL(fileURLWithPath: $0).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast) > newSince
-    }
+    let changedSince = { (path: String, date: Date) in ((try? URL(fileURLWithPath: path).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast) > date }
+    let transcripts = settings.recordMeetings ? meetingTranscripts(in: dir.appendingPathComponent("meetings")).filter { path in since.map { changedSince(path, $0) } ?? true } : []
+    let newSince = since ?? Date().addingTimeInterval(-3 * 86400)
+    let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions"), folders: settings.codeReady ? [settings.repo, settings.worktrees] : []) }.value
+        .filter { changedSince($0, newSince) }
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
-                        facts: facts.path, factsOutput: factsOut.path, since: db.meta("facts_since"), sessions: sessions)
+                        facts: facts.path, factsOutput: factsOut.path, since: since.map(iso.string(from:)), sessions: sessions)
         .write(to: prompt, atomically: true, encoding: .utf8)
 
     let log = try await runAgent(prompt: prompt)
