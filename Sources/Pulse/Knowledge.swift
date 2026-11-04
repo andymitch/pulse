@@ -64,37 +64,33 @@ struct KnowledgeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            FocusHeader(store: store)
-            PrioritiesView(store: store)
-            Panel(title: "Ask", accessory: {
-                if !answers.isEmpty { Button("Clear") { answers = [] }.buttonStyle(.link).font(.caption).disabled(asking) }
-            }) {
-                ForEach(answers) { a in
-                    AnswerView(store: store, answer: a, askAgent: asking || demoMode ? nil : { ask(a.question, local: false) })
-                    Divider()
-                }
-                HStack(spacing: 8) {
-                    TextField("Ask about your work, like when Requests v1 launches", text: $question)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { ask(question, local: local) }
-                        .disabled(asking)
-                    if asking { ProgressView().controlSize(.small) }
-                    if localModelReady {
-                        SplitButton(help: local ? "Answer on this Mac from what Pulse knows" : "Ask \(agent), which can also look in Linear, Slack and GitHub") {
-                            ask(question, local: local)
-                        } title: {
-                            Text(local ? "Ask" : "Ask \(agent)")
-                        } items: {
-                            Button("Ask on this Mac") { onThisMac = true; ask(question, local: true) }
-                            Button("Ask \(agent)") { onThisMac = false; ask(question, local: false) }.disabled(demoMode)
-                        }
-                        .disabled(asking || blank)
-                    } else {
-                        Button("Ask \(agent)") { ask(question, local: false) }.disabled(asking || blank || demoMode)
-                            .help("Ask \(agent), which can also look in Linear, Slack and GitHub")
+            HStack(spacing: 8) {
+                TextField("Ask about your work, like when Requests v1 launches", text: $question)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { ask(question, local: local) }
+                    .disabled(asking)
+                if asking { ProgressView().controlSize(.small) }
+                if localModelReady {
+                    SplitButton(help: local ? "Answer on this Mac from what Pulse knows" : "Ask \(agent), which can also look in Linear, Slack and GitHub") {
+                        ask(question, local: local)
+                    } title: {
+                        Text(local ? "Ask" : "Ask \(agent)")
+                    } items: {
+                        Button("Ask on this Mac") { onThisMac = true; ask(question, local: true) }
+                        Button("Ask \(agent)") { onThisMac = false; ask(question, local: false) }.disabled(demoMode)
                     }
+                    .disabled(asking || blank)
+                } else {
+                    Button("Ask \(agent)") { ask(question, local: false) }.disabled(asking || blank || demoMode)
+                        .help("Ask \(agent), which can also look in Linear, Slack and GitHub")
                 }
             }
+            ForEach(answers) { a in
+                AnswerView(store: store, answer: a, askAgent: asking || demoMode ? nil : { ask(a.question, local: false) })
+                    .padding(.horizontal, 14)
+            }
+            FocusHeader(store: store)
+            PrioritiesView(store: store)
             if !store.pendingFacts.isEmpty {
                 Panel(title: "Agents noted") {
                     ForEach(store.pendingFacts) { fact in
@@ -115,6 +111,7 @@ struct KnowledgeView: View {
                 Text("Nothing to resolve. Facts that agents note, or that replace something Pulse knew, show up here.").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14)
             }
         }
+        .onChange(of: store.askVersion) { _, _ in answers = [] }
     }
 
     private var blank: Bool { question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }

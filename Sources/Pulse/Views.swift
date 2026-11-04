@@ -106,7 +106,7 @@ struct ContentView: View {
             Text("Pulse").font(.title3.bold())
             Picker("", selection: $store.page) {
                 ForEach(PulseTab.allCases.filter { $0 != .meetings || meetings.shown }, id: \.self) { tab in
-                    Text(tab == .knowledge && store.reviewCount > 0 ? "\(tab.rawValue) · \(store.reviewCount)" : tab.rawValue).tag(tab)
+                    Text(tab.rawValue).tag(tab)
                 }
             }
             .pickerStyle(.segmented)

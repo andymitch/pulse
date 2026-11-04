@@ -303,7 +303,22 @@ struct TodayView: View {
         Panel(title: "Tasks · \(rows.filter(\.done).count) of \(rows.count) done today", accessory: {
             if left > 0 { Text("about \(duration(left)) left").font(.caption).foregroundStyle(.secondary) }
         }) {
-            if rows.isEmpty {
+            if store.triageWaiting {
+                HStack(alignment: .top, spacing: 10) {
+                    Button { store.checkTriage() } label: { Image(nsImage: store.checkbox(done: false)) }
+                        .buttonStyle(.plain)
+                        .frame(width: 16, height: 17)
+                        .help("Hide this until there's something new to review")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Review what Pulse learned")
+                        Text("\(store.reviewCount) to resolve on Knowledge").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Open") { store.page = .knowledge }
+                }
+                if !rows.isEmpty { Divider() }
+            }
+            if rows.isEmpty && !store.triageWaiting {
                 Text(store.syncing ? "Loading…" : "Nothing needs you right now.").foregroundStyle(.secondary)
             }
             ForEach(rows) { row in

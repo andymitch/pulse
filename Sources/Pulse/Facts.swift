@@ -182,11 +182,11 @@ private func factJSON(_ db: DB, _ r: [Any?]) throws -> [String: Any] {
             "kind": r[1]!, "name": r[2]!,
             "title": r[1] as? String == "ticket" ? (try? JSONDecoder().decode([String].self, from: Data((r[9] as? String ?? "[]").utf8)))?.first : nil,
         ] as [String: Any?]).compactMapValues { $0 }, "kind": r[3], "text": r[4], "observed": r[5], "lastSeen": r[6], "status": r[7],
-        "supersededBy": r[8], "sources": sources, "replaces": replaces.isEmpty ? nil : replaces,
+        "supersededBy": r[8], "recorded": r[10], "sources": sources, "replaces": replaces.isEmpty ? nil : replaces,
     ] as [String: Any?]).compactMapValues { $0 }
 }
 
-private let factColumns = "SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status, f.superseded_by, s.aliases FROM facts f JOIN subjects s ON s.id = f.subject_id"
+private let factColumns = "SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status, f.superseded_by, s.aliases, f.recorded_at FROM facts f JOIN subjects s ON s.id = f.subject_id"
 
 func searchFacts(_ db: DB, query: String = "", since: String? = nil, kind: String? = nil, superseded: Bool = false, limit: Int = 30) throws -> [[String: Any]] {
     var conditions = ["f.status != 'rejected'"], args: [Any?] = []
@@ -247,21 +247,21 @@ func rejectFact(_ db: DB, id: Int) throws {
 
 struct PendingFact: Identifiable, Equatable {
     let id: Int
-    let subject, kind, text, observed: String
+    let subject, kind, text, observed, recorded: String
     let source: URL?
     let replaces: [String]
 }
 
 func unconfirmedFacts(_ db: DB) throws -> [PendingFact] {
     try db.query("""
-        SELECT f.id, s.name, f.kind, f.text, f.observed_at,
+        SELECT f.id, s.name, f.kind, f.text, f.observed_at, f.recorded_at,
                (SELECT so.url FROM sources so JOIN fact_sources fs ON fs.source_id = so.id WHERE fs.fact_id = f.id LIMIT 1)
         FROM facts f JOIN subjects s ON s.id = f.subject_id WHERE f.status = 'unconfirmed' AND f.superseded_by IS NULL ORDER BY f.recorded_at DESC, f.id DESC
         """).map { r in
         let id = r[0] as! Int
         let replaces = try db.query("SELECT o.text FROM pending_replaces p JOIN facts o ON o.id = p.replaces_id WHERE p.fact_id = ? AND o.\(live)", [id]).compactMap { $0[0] as? String }
         return PendingFact(id: id, subject: r[1] as! String, kind: r[2] as! String, text: r[3] as! String, observed: r[4] as! String,
-                           source: (r[5] as? String).flatMap(URL.init), replaces: replaces)
+                           recorded: r[5] as! String, source: (r[6] as? String).flatMap(URL.init), replaces: replaces)
     }
 }
 

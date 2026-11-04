@@ -156,6 +156,17 @@ final class Store: ObservableObject {
     }
 
     var reviewCount: Int { pendingFacts.count + changed.count }
+    @Published var askVersion = 0
+
+    var triageWaiting: Bool {
+        let checked = db.meta("triage_checked_at") ?? ""
+        return changed.contains { ($0["recorded"] as? String ?? "") > checked } || pendingFacts.contains { $0.recorded > checked }
+    }
+
+    func checkTriage() {
+        try? db.setMeta("triage_checked_at", iso.string(from: Date()))
+        reloadFacts()
+    }
 
     func reloadFacts() {
         pendingFacts = (try? unconfirmedFacts(db)) ?? []
