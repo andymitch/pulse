@@ -32,6 +32,7 @@ struct ContentView: View {
                     switch store.page {
                     case .home: home
                     case .meetings: MeetingsView()
+                    case .knowledge: KnowledgeView(store: store)
                     case .trends: trends
                     }
                 }
@@ -151,7 +152,7 @@ struct ContentView: View {
 }
 
 enum PulseTab: String, CaseIterable {
-    case home = "Home", meetings = "Meetings", trends = "Trends"
+    case home = "Home", meetings = "Meetings", knowledge = "Knowledge", trends = "Trends"
 }
 
 enum TrendMetric: String, CaseIterable {
