@@ -33,7 +33,7 @@ func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
 }
 
 func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem],
-                     facts: String, factsOutput: String, since: String?) -> String {
+                     facts: String, factsOutput: String, since: String?, sessions: [String] = []) -> String {
     let s = settings
     var who = ["Linear \"\(me)\""]
     if s.slack { who.append("the Slack user your Slack tools are logged in as") }
@@ -46,8 +46,9 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     }
     if let mail { gather.append("Email from the last \(s.mailDays) days, as JSON with a url for each message: \(mail). Keep only email that needs \(me) to reply or act; ignore newsletters and notifications.") }
     if s.recordMeetings { gather.append("Meetings Pulse recorded, each a file with its summary, decisions, important points and the transcript, newest first: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", ")).") }
+    if !sessions.isEmpty { gather.append("\(me)'s sessions with coding agents (pi, Claude Code), newest first, each a file with the folder it ran in and the conversation without tool output: \(sessions.joined(separator: ", ")). Use them for what was decided, done and left open; skip the mechanics of the work, and anything personal that isn't about the work, such as a job search, a résumé or health.") }
     gather.append("\(me)'s open work right now, from GitHub and Linear. Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
-    let kinds = ["github", "linear"] + (s.slack ? ["slack"] : []) + (mail != nil ? ["mail"] : []) + ["meeting", "doc"]
+    let kinds = ["github", "linear"] + (s.slack ? ["slack"] : []) + (mail != nil ? ["mail"] : []) + ["meeting", "doc"] + (sessions.isEmpty ? [] : ["session"])
     let kindList = kinds.map { "\"\($0)\"" }.joined(separator: " | ")
 
     return """
@@ -70,7 +71,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     - focus: cut through the noise. Usually exactly one entry: the single thing the team is pushing on right now. Add a second or third only if there are genuinely separate efforts in flight that matter as much; never more than 3. headline is one short line. summary is 3 to 5 plain sentences distilled from everything you read: what the goal is, where it stands, what is blocking it, and what \(me)'s part is. Leave out minor threads. Use inline Markdown to make it scannable: **bold** for the goal, the blocker and \(me)'s part, *italics* for people and docs, and `code` for ticket IDs and endpoints. No headings or lists. Each entry cites the 2 to 4 sources that best back it up.
     - today: \(me)'s checklist for today, at most 7 items that fit in about 5 hours of focused work, in the order to do them. Put first what unblocks other people (reviews, replies, merges), then work that is nearly done, then the most important work for the focus. For an item from the open work list, set ref to its ref exactly and keep its title. Other items are unanswered questions or requests, or meeting action items assigned to \(me) by name: set ref to null, title starts with a verb, and url points at the thread, message, email or doc. why is one short line. minutes is an honest estimate.
     - reply: only for a today item that answers someone in Slack (source "slack"). If their question or request has a clear answer from what you read, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
-    - sources: every cited item, numbered from 1. url must be a link you actually saw; never invent one, and drop any claim you cannot link. For a meeting transcript file, url is "file://" followed by its path, author is null, and title is just the meeting's title. title is what the item is (a ticket title, a doc name, an email subject, or "Maya in #engineering"). excerpt is the most telling one or two sentences, quoted or closely paraphrased. author and date are who wrote it and when, if known.
+    - sources: every cited item, numbered from 1. url must be a link you actually saw; never invent one, and drop any claim you cannot link. For a meeting transcript or agent session file, url is "file://" followed by its path, author is null, and title is just the meeting's title or the session's first line. title is what the item is (a ticket title, a doc name, an email subject, or "Maya in #engineering"). excerpt is the most telling one or two sentences, quoted or closely paraphrased. author and date are who wrote it and when, if known.
     - Write plainly. No hype, no filler.
 
     Last, update Pulse's memory. \(facts) holds the facts Pulse already knows, as JSON, each with an id. \(since.map { "Pulse last learned from these sources at \($0). Everything older was already read, so take new facts only from items after that and use older ones as context." } ?? "This is the first time, so learn from everything you read.") Write a second JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
@@ -81,7 +82,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     }
 
     Rules for facts:
-    - A fact is one short sentence that still makes sense on its own a month from now: name the people, tickets and dates instead of saying "he" or "tomorrow". Keep what someone on the team would want to know later: decisions and why, where work stands, blockers, who owns what, who promised what by when, open questions, and \(me)'s own preferences. Skip chatter and anything only true for an hour.
+    - A fact is one short sentence that still makes sense on its own a month from now: name the people, tickets and dates instead of saying "he" or "tomorrow". Keep what someone on the team would want to know later: decisions and why, where work stands, blockers, who owns what, who promised what by when, open questions, and \(me)'s own preferences. Skip chatter and anything only true for an hour. Never keep personal matters that aren't about the work, such as a job search, a résumé, health or family, from any source.
     - subject is what the fact is about. Reuse the exact subject of a known fact when it's the same thing. Name tickets by their ID (KLE-123) with the title as an alias, and people by full name.
     - observed is the date the source said it, not today.
     - Facts with status "unconfirmed" were noted by other agents and haven't been checked. Confirm one when a source you read backs it up, and supersede it with a new fact when a source contradicts it. Otherwise leave it alone.
@@ -110,8 +111,12 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
         }
     }
     let transcripts = settings.recordMeetings ? meetingTranscripts(in: dir.appendingPathComponent("meetings")) : []
+    let newSince = db.meta("facts_since").flatMap(iso.date(from:)) ?? Date().addingTimeInterval(-3 * 86400)
+    let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions")) }.value.filter {
+        ((try? URL(fileURLWithPath: $0).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast) > newSince
+    }
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
-                        facts: facts.path, factsOutput: factsOut.path, since: db.meta("facts_since"))
+                        facts: facts.path, factsOutput: factsOut.path, since: db.meta("facts_since"), sessions: sessions)
         .write(to: prompt, atomically: true, encoding: .utf8)
 
     let log = try await runAgent(prompt: prompt)
