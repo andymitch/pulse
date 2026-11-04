@@ -28,7 +28,6 @@ final class Store: ObservableObject {
     @Published var pendingFacts: [PendingFact] = []
     @Published var changed: [[String: Any]] = []
     @Published var factsVersion = 0
-    @Published var knownSubjects: [String] = []
     private var localBranches: Set<String> = []
 
     let db: DB
@@ -162,10 +161,6 @@ final class Store: ObservableObject {
         pendingFacts = (try? unconfirmedFacts(db)) ?? []
         let since = db.meta("facts_reviewed_at") ?? iso.string(from: Date().addingTimeInterval(-3 * 86400))
         changed = (try? changedFacts(db, since: since)) ?? []
-        knownSubjects = ((try? db.query("""
-            SELECT DISTINCT s.name FROM subjects s JOIN facts f ON f.subject_id = s.id
-            WHERE s.kind IN ('ticket', 'project') AND f.superseded_by IS NULL AND f.status != 'rejected'
-            """)) ?? []).compactMap { $0[0] as? String }
         factsVersion += 1
     }
 

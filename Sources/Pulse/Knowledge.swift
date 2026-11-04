@@ -131,7 +131,7 @@ private struct FactLine: View {
             Spacer(minLength: 4)
             HStack(spacing: 5) {
                 ForEach(Array(fact.sources.prefix(4).enumerated()), id: \.offset) { _, s in
-                    Button { open(s.url) } label: { SourceIcon(kind: s.kind, size: 11) }
+                    Button { openSource(s.url, kind: s.kind) } label: { SourceIcon(kind: s.kind, url: s.url, size: 11) }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
                         .help(s.title)
@@ -149,32 +149,5 @@ private struct FactLine: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Reject as wrong") { store.reject(fact: fact.id) }
-    }
-}
-
-struct KnownAbout: View {
-    @ObservedObject var store: Store
-    let names: [String]
-    @State private var open = false
-    @State private var facts: [KnownFact] = []
-
-    var body: some View {
-        if !names.isEmpty {
-            DisclosureGroup(isExpanded: $open) {
-                VStack(alignment: .leading, spacing: 8) { FactLines(store: store, facts: facts, showSubject: names.count > 1) }
-                    .padding(.top, 4)
-            } label: {
-                Text("What Pulse knows").font(.caption).foregroundStyle(.secondary)
-            }
-            .onChange(of: open) { _, _ in load() }
-            .onChange(of: store.factsVersion) { _, _ in load() }
-        }
-    }
-
-    private func load() {
-        guard open else { return }
-        facts = names.flatMap { name in
-            (((try? subjectFacts(store.db, name: name)) as? [String: Any])?["current"] as? [[String: Any]] ?? []).map(KnownFact.init)
-        }
     }
 }

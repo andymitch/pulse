@@ -7,6 +7,10 @@ enum App: String {
     var url: URL { URL(fileURLWithPath: "/Applications/\(rawValue).app") }
 }
 
+func openSource(_ url: URL, kind: String) {
+    open(url, in: ["slack": App.slack, "linear": .linear][kind])
+}
+
 func open(_ url: URL, in app: App? = nil) {
     guard let app, FileManager.default.fileExists(atPath: app.url.path) else {
         NSWorkspace.shared.open(url)

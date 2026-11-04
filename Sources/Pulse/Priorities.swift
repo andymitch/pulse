@@ -13,7 +13,6 @@ struct PrioritiesView: View {
                         SpeakButton(text: "\(f.headline). \(f.summary)")
                     }
                     Text(markdown(f.summary)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    KnownAbout(store: store, names: store.knownSubjects.filter { "\(f.headline) \(f.summary)".localizedCaseInsensitiveContains($0) }.prefix(4).map { $0 })
                     let cards = f.sources.compactMap { id in s.sources.first { $0.id == id } }
                     Grid(alignment: .topLeading, horizontalSpacing: 8, verticalSpacing: 8) {
                         ForEach(Array(stride(from: 0, to: cards.count, by: 2)), id: \.self) { i in
@@ -37,21 +36,13 @@ struct PrioritiesView: View {
 private struct SourceCard: View {
     let source: Synthesis.Source
 
-    private var app: App? {
-        switch source.kind {
-        case "slack": .slack
-        case "linear": .linear
-        default: nil
-        }
-    }
-
     var body: some View {
         Button {
-            if let url = URL(string: source.url) { open(url, in: app) }
+            if let url = URL(string: source.url) { openSource(url, kind: source.kind) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
-                    SourceIcon(kind: source.kind, size: 11)
+                    SourceIcon(kind: source.kind, url: URL(string: source.url), size: 11)
                     Text(source.title).font(.caption.weight(.semibold)).lineLimit(1)
                 }
                 if let excerpt = source.excerpt {
@@ -104,13 +95,20 @@ struct PendingFactRow: View {
 
 struct SourceIcon: View {
     let kind: String
+    var url: URL?
     var size: CGFloat = 11
+
+    private var session: Brand? {
+        guard kind == "session", let name = url?.lastPathComponent else { return nil }
+        return name.hasPrefix("claude-") ? .claude : name.hasPrefix("pi-") ? .pi : nil
+    }
 
     var body: some View {
         switch kind {
         case "slack": Image(nsImage: Brand.slack.image(size: size))
         case "linear": Image(nsImage: Brand.linear.image(size: size))
         case "github": Image(nsImage: Brand.github.image(size: size))
+        case "session" where session != nil: Image(nsImage: session!.image(size: size))
         default:
             Image(systemName: ["meeting": "waveform", "mail": "envelope", "session": "terminal"][kind] ?? "doc.text")
                 .font(.system(size: size - 1)).frame(width: size, height: size)

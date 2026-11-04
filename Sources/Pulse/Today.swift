@@ -422,7 +422,6 @@ private struct TodoRowView: View {
                 Text([later ? "Later" : nil, row.why, item.reason, row.minutes.map { "~" + duration($0) }].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
-                if !row.done, let ticket = item.ticket, store.knownSubjects.contains(ticket) { KnownAbout(store: store, names: [ticket]) }
             }
             Spacer()
             if !row.done { Buttons(store: store, item: item, canDefer: checkable) }
