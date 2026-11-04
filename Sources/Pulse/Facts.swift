@@ -15,6 +15,28 @@ struct FactChanges: Decodable {
 
 struct FactCounts: Equatable { var added = 0, superseded = 0, confirmed = 0 }
 
+func sourceKind(_ url: URL, given: String) -> String {
+    let host = url.host ?? ""
+    if host == "slack.com" || host.hasSuffix(".slack.com") { return "slack" }
+    if host == "linear.app" { return "linear" }
+    if host == "github.com" { return "github" }
+    if url.scheme == "message" { return "mail" }
+    if url.isFileURL { return url.path.contains("/sessions/") ? "session" : url.path.contains("/meetings/") ? "meeting" : given }
+    return given
+}
+
+func sourceTitle(_ title: String, url: URL) -> String {
+    guard title.hasPrefix("http") || title.isEmpty else { return title }
+    switch sourceKind(url, given: "") {
+    case "slack": return "Slack message"
+    case "linear": return "Linear " + (url.pathComponents.dropFirst(2).first ?? "page")
+    case "github": return "GitHub " + url.pathComponents.dropFirst(1).prefix(2).joined(separator: "/")
+    case "session": return url.lastPathComponent.hasPrefix("claude-") ? "Claude Code session" : "pi session"
+    case "meeting": return "Meeting notes"
+    default: return url.host ?? "Link"
+    }
+}
+
 private func day(_ s: String?, upTo today: String) -> String? {
     guard let d = s.map({ String($0.prefix(10)) }), (try? Date(d, strategy: localDay)) != nil else { return nil }
     return min(d, today)
@@ -59,7 +81,7 @@ func applyFacts(_ changes: FactChanges, to db: DB, now: Date = Date(), origin: S
             let row = try db.query("""
                 INSERT INTO sources (kind, url, title, author, date, excerpt) VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (project, url) DO UPDATE SET title = excluded.title, excerpt = coalesce(excluded.excerpt, excerpt) RETURNING id
-                """, [s.kind, s.url, s.title, s.author, day(s.date, upTo: today), s.excerpt])
+                """, [URL(string: s.url).map { sourceKind($0, given: s.kind) } ?? s.kind, s.url, s.title, s.author, day(s.date, upTo: today), s.excerpt])
             sources[s.id] = row.first?[0] as? Int
         }
         func cite(_ fact: Int, _ ids: [Int]) throws {

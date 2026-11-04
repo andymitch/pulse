@@ -133,6 +133,12 @@ func selfTest() throws {
     let counts = try mem.query("SELECT (SELECT count(*) FROM subjects), (SELECT count(*) FROM sources)")[0]
     check(counts[0] as? Int == 2 && counts[1] as? Int == 1, "subjects and sources are reused")
     let texts = { (facts: [[String: Any]]) in facts.map { $0["text"] as? String ?? "" } }
+    let slackLink = URL(string: "https://acme.slack.com/archives/C1/p1")!, linearLink = URL(string: "https://linear.app/acme/review/fix-it")!
+    check(sourceKind(slackLink, given: "session") == "slack" && sourceKind(linearLink, given: "doc") == "linear" && sourceKind(URL(fileURLWithPath: "/x/Pulse/sessions/pi-1.md"), given: "doc") == "session"
+          && sourceKind(URL(string: "message://%3Ca%3E")!, given: "doc") == "mail", "a source's kind comes from its link, whatever the agent called it")
+    check(sourceTitle("https://acme.slack.com/archives/C1/p1", url: slackLink) == "Slack message" && sourceTitle("", url: linearLink) == "Linear review"
+          && sourceTitle("Standup", url: slackLink) == "Standup" && sourceTitle("https://x.slack.com/a", url: URL(fileURLWithPath: "/x/Pulse/sessions/pi-1.md")) == "pi session",
+          "a source titled with a bare link gets a readable name")
     let real = try DB(path: ":memory:")
     try real.query("INSERT INTO users VALUES ('Jane Doe', 'jane@x.com')")
     try real.set(["Requests v1", "MCP v2"], "linear_projects")

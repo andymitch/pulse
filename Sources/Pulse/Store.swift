@@ -160,12 +160,19 @@ final class Store: ObservableObject {
     func reloadFacts() {
         pendingFacts = (try? unconfirmedFacts(db)) ?? []
         let since = db.meta("facts_reviewed_at") ?? iso.string(from: Date().addingTimeInterval(-3 * 86400))
-        changed = (try? changedFacts(db, since: since)) ?? []
+        let reviewed = Set(db.ids("facts_reviewed_ids").compactMap(Int.init))
+        changed = ((try? changedFacts(db, since: since)) ?? []).filter { !reviewed.contains($0["id"] as? Int ?? 0) }
         factsVersion += 1
     }
 
     func markReviewed() {
         try? db.setMeta("facts_reviewed_at", iso.string(from: Date()))
+        try? db.set([String](), "facts_reviewed_ids")
+        reloadFacts()
+    }
+
+    func reviewed(fact id: Int) {
+        try? db.set(db.ids("facts_reviewed_ids") + [String(id)], "facts_reviewed_ids")
         reloadFacts()
     }
 

@@ -21,7 +21,7 @@ struct KnownFact: Identifiable, Equatable {
         let day = observed
         replaces = ((d["replaces"] as? [[String: Any]]) ?? []).compactMap { r in (r["text"] as? String).map { withoutOwnDate($0, r["observed"] as? String ?? day) } }
         sources = ((d["sources"] as? [[String: Any]]) ?? []).compactMap { s in
-            (s["url"] as? String).flatMap(URL.init).map { Source(kind: s["kind"] as? String ?? "", title: s["title"] as? String ?? $0.absoluteString, url: $0) }
+            (s["url"] as? String).flatMap(URL.init).map { Source(kind: sourceKind($0, given: s["kind"] as? String ?? ""), title: sourceTitle(s["title"] as? String ?? "", url: $0), url: $0) }
         }
     }
 }
@@ -85,7 +85,7 @@ struct KnowledgeView: View {
                     if changed.isEmpty {
                         Text("You're caught up. New and changed facts show up here after each briefing.").foregroundStyle(.secondary)
                     }
-                    FactLines(store: store, facts: changed)
+                    FactLines(store: store, facts: changed, reviewing: true)
                 }
             }
         }
@@ -103,42 +103,67 @@ struct KnowledgeView: View {
 struct FactLines: View {
     @ObservedObject var store: Store
     let facts: [KnownFact]
-    var showSubject = true
+    var reviewing = false
 
     var body: some View {
         ForEach(Array(facts.enumerated()), id: \.element.id) { i, fact in
-            FactLine(store: store, fact: fact, showSubject: showSubject)
+            FactLine(store: store, fact: fact, reviewing: reviewing)
             if i < facts.count - 1 { Divider() }
         }
+    }
+}
+
+private func destination(_ s: KnownFact.Source) -> String {
+    switch s.kind {
+    case "slack": FileManager.default.fileExists(atPath: App.slack.url.path) ? "Opens in Slack" : "Opens Slack in your browser"
+    case "linear": FileManager.default.fileExists(atPath: App.linear.url.path) ? "Opens in Linear" : "Opens Linear in your browser"
+    case "github": "Opens on GitHub"
+    case "meeting": "Opens the meeting's notes and transcript"
+    case "session": "Opens the agent session's digest"
+    case "mail": "Opens in Mail"
+    default: "Opens \(s.url.host ?? "the link")"
     }
 }
 
 private struct FactLine: View {
     @ObservedObject var store: Store
     let fact: KnownFact
-    let showSubject: Bool
+    let reviewing: Bool
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(([showSubject ? [fact.subject, fact.subjectTitle].compactMap { $0 }.joined(separator: " ") : nil, friendlyDay(fact.observed)] as [String?]).compactMap { $0 }.joined(separator: " · "))
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text([[fact.subject, fact.subjectTitle].compactMap { $0 }.joined(separator: " "), friendlyDay(fact.observed)].joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 ForEach(fact.replaces, id: \.self) { old in
                     Text(old).strikethrough().foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Text((fact.replaces.isEmpty ? "" : "→ ") + fact.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                ForEach(Array(fact.sources.prefix(3).enumerated()), id: \.offset) { _, s in
+                    Button { openSource(s.url, kind: s.kind) } label: {
+                        HStack(spacing: 5) {
+                            SourceIcon(kind: s.kind, url: s.url, size: 10)
+                            Text(s.title).lineLimit(1).truncationMode(.tail)
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .help("\(destination(s)): \(s.url.absoluteString)")
+                    .accessibilityLabel("Source: \(s.title). \(destination(s))")
+                }
+                if fact.sources.count > 3 { Text("and \(fact.sources.count - 3) more").font(.caption).foregroundStyle(.secondary) }
             }
             Spacer(minLength: 4)
-            HStack(spacing: 5) {
-                ForEach(Array(fact.sources.prefix(4).enumerated()), id: \.offset) { _, s in
-                    Button { openSource(s.url, kind: s.kind) } label: { SourceIcon(kind: s.kind, url: s.url, size: 11) }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .help(s.title)
-                        .accessibilityLabel("Source: \(s.title)")
+            if reviewing {
+                HStack(spacing: 6) {
+                    Button { store.reviewed(fact: fact.id) } label: { Label("Looks right", systemImage: "checkmark") }
+                        .help("Keep it and take it off this list")
+                    Button { store.reject(fact: fact.id) } label: { Label("Wrong", systemImage: "xmark") }
+                        .help("Stop using it, and bring back what it replaced")
                 }
+                .controlSize(.small)
+                .fixedSize()
             }
-            .fixedSize()
         }
         .contentShape(Rectangle())
         .contextMenu {
@@ -148,6 +173,5 @@ private struct FactLine: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityAction(named: "Reject as wrong") { store.reject(fact: fact.id) }
     }
 }
