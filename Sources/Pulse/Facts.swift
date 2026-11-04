@@ -156,9 +156,10 @@ func searchFacts(_ db: DB, query: String = "", since: String? = nil, kind: Strin
 func subjectFacts(_ db: DB, name: String?) throws -> Any {
     guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
         return try db.query("""
-            SELECT s.kind, s.name, count(f.id), max(f.observed_at) FROM subjects s JOIN facts f ON f.subject_id = s.id AND f.\(live)
+            SELECT s.kind, s.name, count(f.id), max(f.observed_at), s.aliases FROM subjects s JOIN facts f ON f.subject_id = s.id AND f.\(live)
             GROUP BY s.id ORDER BY max(f.observed_at) DESC, s.name
-            """).map { ["kind": $0[0]!, "name": $0[1]!, "facts": $0[2]!, "latest": $0[3]!] }
+            """).map { ["kind": $0[0]!, "name": $0[1]!, "facts": $0[2]!, "latest": $0[3]!,
+                        "aliases": (try? JSONDecoder().decode([String].self, from: Data(($0[4] as? String ?? "[]").utf8))) ?? []] }
     }
     guard let s = try db.query("""
         SELECT id, kind, name, aliases FROM subjects

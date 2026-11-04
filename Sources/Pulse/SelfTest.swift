@@ -223,6 +223,21 @@ func selfTest() throws {
     check(later.contains("documents created since 2026-11-03T22:00:00Z") && later.contains("gather only what's new") && !later.contains("in the last 14 days")
           && first.contains("documents created in the last 14 days") && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
           "after a run the briefing reads only what's new, a first run reads 14 days, and memory is updated before the briefing is written")
+    let d = "2026-11-03"
+    check(withoutOwnDate("On 2026-11-03 Drew Osmond opened PR #2047.", d) == "Drew Osmond opened PR #2047."
+          && withoutOwnDate("As of 2026-11-03 document unification met 9 of 10 criteria.", d) == "Document unification met 9 of 10 criteria."
+          && withoutOwnDate("Change orders are plain requests (decided 2026-11-03).", d) == "Change orders are plain requests."
+          && withoutOwnDate("Jason said to skip auto-close, on 2026-11-03.", d) == "Jason said to skip auto-close.",
+          "a fact's own date is left out of its text, since it's shown beside it")
+    let short = { (day: String) in (try? Date(day, strategy: localDay))?.formatted(Calendar.current.component(.year, from: try! Date(day, strategy: localDay)) == Calendar.current.component(.year, from: Date()) ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year()) ?? day }
+    check(withoutOwnDate("On 2026-11-02 Abe reported a gap.", d) == "On \(short("2026-11-02")) Abe reported a gap." && withoutOwnDate("Open as of 2026-11-03: who owns it.", d) == "Open as of \(short(d)): who owns it."
+          && withoutOwnDate("Requests had not reached prod as of 2026-11-03, so launch moved to Monday 2026-11-09.", d) == "Requests had not reached prod, so launch moved to Monday \(short("2026-11-09")).",
+          "other dates stay but read as short dates, and the fact's own date is dropped mid-sentence too")
+    let wed = try Date("2026-11-04", strategy: localDay).addingTimeInterval(12 * 3600)
+    let oct20 = try Date("2026-10-20", strategy: localDay).formatted(.dateTime.month(.abbreviated).day())
+    check(friendlyDay("2026-11-04", now: wed) == "Today" && friendlyDay("2026-11-03", now: wed) == "Yesterday" && friendlyDay("2026-11-01", now: wed) == "Sunday"
+          && friendlyDay("2026-10-20", now: wed) == oct20,
+          "dates read as today, yesterday, a weekday this week, or a short date")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
