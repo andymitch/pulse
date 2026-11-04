@@ -1,13 +1,22 @@
 # Pulse
 
-A macOS menu-bar app that tells you what to work on today, what your team is focused on, and how shipping is trending. Pulse pulls together GitHub, Linear, Slack, Mail and the meetings it records for you.
+Pulse is a context nexus for your work. It runs in your Mac's menu bar, gathers what's happening across GitHub, Linear, Slack, Mail, your meetings and your coding-agent sessions, and keeps it as short, dated facts with links to their sources. The agents you work with ask it what's going on over MCP, so they start every task already knowing what was decided, who owns what and what changed. A few everyday tools are built on the same context: your tasks for the day, the team's focus, meeting notes and trends.
 
-Pulse opens on **Home**: your tasks, the full focus briefing, today's meetings and a trends summary, with Meetings, Knowledge and Trends each on their own tab.
+## How it works
+
+- **Sources:** each morning, and whenever you press Refresh, the briefing agent reads what's new since the last run: Linear cycles, projects and docs, Slack channels and the messages that need you, email, the meetings Pulse recorded, and digests of your finished pi and Claude Code sessions in your repo.
+- **Facts:** it turns them into one-sentence facts (decisions, status, blockers, owners, commitments, open questions, your preferences), each tied to a real ticket, Linear project, teammate or topic, with its sources. A newer fact replaces an older one about the same thing; nothing is deleted.
+- **Agents:** Pulse's MCP server lets any agent on your Mac search the facts, see where a ticket or project stands, and save what it learns. Facts from other agents wait for confirmation before they count.
+- **You:** the Knowledge tab only asks for your attention when something needs resolving, and answers questions about your work.
+
+## Tools built on it
+
+Pulse opens on **Home**: your tasks, the focus briefing, today's meetings and a trends summary, with Meetings, Knowledge and Trends each on their own tab.
 
 - **Tasks**: a short checklist planned each morning to fit about 5 hours, covering reviews to unblock, replies you owe, and the tickets that matter most. Linear tickets show their real status, which you can change from the list. An item's dropdown can also move it to the bottom for later, or remove it for the day. Finished tasks stay on the list, checked off, until the week is over. **Start** creates a git worktree on the ticket's branch, moves the ticket to In Progress, and opens it in your IDE's agent panel (Zed, Cursor, VS Code) or in a terminal agent (pi, Claude Code, or your own).
-- **Focus**: one distilled summary of what the team is pushing on, with source cards. Each focus item and meeting summary has its own button that reads it aloud.
-- **Meetings**: Pulse notices Google Meet calls, Slack huddles and calendar meetings, records them, transcribes them on your Mac, and saves a summary with the decisions and important points. The briefing reads them. Each meeting can be copied as Markdown or moved to the Trash from its card.
-- **Knowledge**: a review of what Pulse has learned. Facts other agents noted wait for you to confirm, edit or reject, and below them is what Pulse learned or changed its mind about since you last looked, one line each, with replaced facts crossed out above the new one. Mark it all reviewed to clear it, search it to see what Pulse knows about something, and right-click a fact to reject it as wrong.
+- **Focus**: one distilled summary of what the team is pushing on, written from the facts, with source cards. Each focus item and meeting summary has its own button that reads it aloud.
+- **Meetings**: Pulse notices Google Meet calls, Slack huddles and calendar meetings, records them, transcribes them on your Mac, and saves a summary with the decisions and important points. Each meeting can be copied as Markdown or moved to the Trash from its card.
+- **Knowledge**: the Focus, a place to **ask** about your work, and a short triage list. Answers come from this Mac's on-device model using the facts Pulse has (shown under each answer), or from your briefing agent when you choose **Ask pi** or when Pulse doesn't know. The triage list shows only what needs you: facts other agents noted, to confirm, edit or reject, and facts that replaced something Pulse knew, as the old fact crossed out above the new one, each with **Looks right** and **Wrong**. Each source is listed with what it is, and Slack links open at the message in the Slack app.
 - **Trends**: PRs merged and Linear tickets closed per person, over 7 days, 5 weeks or 12 months.
 
 <p align="center">
@@ -24,6 +33,7 @@ Everything runs on your Mac. Pulse has no server and sends no telemetry. Your da
 - A Linear personal API key
 - For the morning briefing: [pi](https://pi.dev) or [Claude Code](https://claude.com/claude-code), with **Linear** and **Slack** MCP servers configured
 - Optional: Mail.app with your email account
+- Optional: macOS 26 with Apple Intelligence on, to answer questions on this Mac. Otherwise questions go to your briefing agent.
 
 ## Install
 
@@ -72,7 +82,7 @@ The briefing only reads: the prompt tells the agent never to post or change anyt
 
 Other agents on this Mac can read what Pulse knows, and keep it current, through its own MCP server. Open **Settings → Agents**, leave **Agent access (MCP)** on, and copy the Claude Code command or the JSON for pi and other clients. The server runs over stdio and works whether or not the app is open. Turning agent access off makes every tool call fail with a note to turn it back on.
 
-It's meant as a second brain for the agents you work with. Each briefing run also teaches Pulse short, dated facts about your work (decisions, status, blockers, owners, commitments, open questions, your preferences), each linked to its sources. Besides Slack, Linear, GitHub, mail and meetings, it learns from your finished pi and Claude Code sessions in the repo and worktrees folder set in Settings, and ignores sessions anywhere else. Pulse keeps a short digest of each one (what you and the agent said, without tool output), and personal matters that aren't about the work are left out. A newer fact replaces an older one about the same thing, and the older one is kept as history. `search` finds facts by words, subject or date (`since` alone lists what changed), and `subject` shows where a project, ticket, person or topic stands, with its history, or lists them all. Agents can add what they learn with `remember`. Those facts stay unconfirmed, and never replace a confirmed one, until a later briefing finds a source that backs them up or you confirm, edit or reject them on the Knowledge tab. `forget` hides a fact you say is wrong and brings back whatever it had replaced.
+Tools for the facts: `search` finds them by words, subject or date (`since` alone lists what changed), and `subject` shows where a ticket, project, person or topic stands, with its history, or lists them all. `remember` adds what an agent learns; it stays unconfirmed, and never replaces a confirmed fact, until a later briefing finds a source that backs it up or you confirm it on the Knowledge tab. `forget` hides a fact you say is wrong and brings back whatever it had replaced. Session digests come only from the repo and worktrees folder set in Settings, and personal matters that aren't about the work are left out.
 
 The other read tools are `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and task list) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `update_task` (done, later or removed), `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never changes settings, tokens or keys.
 

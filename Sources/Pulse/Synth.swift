@@ -53,7 +53,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     let kindList = kinds.map { "\"\($0)\"" }.joined(separator: " | ")
 
     return """
-    You are writing the morning briefing for Pulse, \(me)'s dashboard. Today is \(today). \(me) is \(who.joined(separator: ", ")).
+    You are updating Pulse, the context nexus for \(me)'s work, and writing \(me)'s morning briefing from it. Today is \(today). \(me) is \(who.joined(separator: ", ")).
 
     This is read-only. Never post, react, comment, create, or change anything anywhere.
 
