@@ -35,6 +35,19 @@ private let mcpTools: [[String: Any]] = [
     tool("subject", "Where one project, ticket, person or topic stands: its current facts newest first, and the history of facts newer ones replaced. Without a name, lists the subjects Pulse knows, most recently active first.", [
         "name": ["type": "string", "description": "The subject's name or an alias, such as a ticket ID or project name"],
     ]),
+    tool("remember", "Tell Pulse something worth knowing later about my work, such as a decision made, where work stands, a blocker, who owns what, a commitment, an open question, or one of my preferences. It's saved as unconfirmed until a later source backs it up or I confirm it in Pulse, and it never replaces a confirmed fact until then. Check search first so you don't repeat a known fact.", [
+        "subject": ["type": "string", "description": "What it's about: a ticket ID (KLE-123), a person's full name, or a project or topic name. Reuse the name Pulse already uses."],
+        "subjectKind": ["type": "string", "enum": subjectKinds],
+        "fact": ["type": "string", "description": "One short sentence that still makes sense on its own a month from now, with names and dates"],
+        "kind": ["type": "string", "enum": factKinds],
+        "observed": ["type": "string", "description": "When it became true or was said, YYYY-MM-DD, default today"],
+        "sourceUrl": ["type": "string", "description": "A link that backs it up (PR, ticket, message), if there is one"],
+        "sourceTitle": ["type": "string", "description": "What the link is, such as a PR title"],
+        "replaces": ["type": "array", "items": ["type": "integer"], "description": "Ids of facts this one makes out of date. They're replaced once it's confirmed."],
+    ], required: ["subject", "subjectKind", "fact", "kind"], hints: ["readOnlyHint": false, "destructiveHint": false]),
+    tool("forget", "Mark a fact as wrong so Pulse stops using it. Only when I say it's wrong; a fact that's just out of date should be replaced with remember instead. Any facts it replaced become current again.", [
+        "id": ["type": "integer", "description": "The fact id from search or subject"],
+    ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": true, "idempotentHint": true]),
     tool("today", "Today's briefing: the team focus (the current priorities) with its sources, and the task list with ids, refs, links and estimates. done, later and removed reflect what was marked in Pulse today; live ticket and PR status isn't fetched. stale is true when the briefing wasn't made today.", [:]),
     tool("stats", "PRs merged and tickets closed per person per period, plus PR stats (median hours to merge, median lines added, PRs over 500 lines), as shown on Trends.", [
         "range": ["type": "string", "enum": TrendRange.allCases.map(\.rawValue), "description": "Period, default 5 weeks"],
@@ -143,6 +156,28 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
                                since: args["since"] as? String, kind: args["kind"] as? String, superseded: args["superseded"] as? Bool ?? false, limit: args["limit"] as? Int ?? 30)
     case "subject":
         return try subjectFacts(try DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true), name: args["name"] as? String)
+    case "remember":
+        let db = try DB(path: dir.appendingPathComponent("pulse.db").path)
+        let text = (args["fact"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = args["sourceUrl"] as? String
+        let changes = FactChanges(
+            sources: url.map { [FactChanges.Source(id: 1, kind: "agent", url: $0, title: args["sourceTitle"] as? String ?? $0, author: nil, date: nil, excerpt: nil)] },
+            add: [FactChanges.Add(subject: FactChanges.Subject(kind: args["subjectKind"] as? String ?? "", name: args["subject"] as? String ?? "", aliases: nil),
+                                  kind: args["kind"] as? String ?? "", text: text, observed: args["observed"] as? String ?? Date().formatted(localDay),
+                                  sources: url == nil ? [] : [1], supersedes: (args["replaces"] as? [Int]) ?? [])],
+            confirm: nil)
+        let counts = try applyFacts(changes, to: db, origin: "agent")
+        guard counts.added + counts.confirmed > 0,
+              let row = try db.query("SELECT id, status FROM facts WHERE text = ? AND superseded_by IS NULL AND status != 'rejected' ORDER BY id DESC LIMIT 1", [text]).first else {
+            throw SyncError(description: "Not saved. Check subjectKind and kind, keep the fact to one sentence under 600 characters, and use YYYY-MM-DD for observed.")
+        }
+        changed(dir)
+        return ["id": row[0]!, "status": row[1]!, "alreadyKnown": counts.added == 0]
+    case "forget":
+        guard let id = args["id"] as? Int else { throw SyncError(description: "Give the fact id") }
+        try rejectFact(try DB(path: dir.appendingPathComponent("pulse.db").path), id: id)
+        changed(dir)
+        return ["id": id, "forgotten": true]
     case "today":
         let s = try briefing(dir)
         let file = dir.appendingPathComponent("synthesis.json")

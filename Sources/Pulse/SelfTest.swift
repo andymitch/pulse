@@ -143,6 +143,27 @@ func selfTest() throws {
     let ticket = try subjectFacts(mem, name: "invite teammates") as? [String: Any]
     check(ticket?["name"] as? String == "KLE-1" && (ticket?["current"] as? [Any])?.count == 1 && (ticket?["history"] as? [Any])?.count == 2, "a subject by alias shows current facts and history")
     check((try subjectFacts(mem, name: nil) as? [[String: Any]])?.map { $0["name"] as? String } == ["KLE-1", "KLE-3"], "subjects list most recently active first, then by name")
+    let noted = { (subject: String, text: String, replaces: Int) in
+        try applyFacts(FactChanges(sources: nil, add: [FactChanges.Add(subject: FactChanges.Subject(kind: "ticket", name: subject, aliases: nil), kind: "status", text: text,
+                                                                      observed: "2026-11-03", sources: [], supersedes: [replaces])], confirm: nil),
+                       to: mem, now: iso.date(from: "2026-11-03T12:00:00Z")!, origin: "agent")
+    }
+    let agentAdded = try noted("KLE-1", "Invites shipped to everyone", 2)
+    let stillCurrent = texts(try searchFacts(mem, query: "invites")).contains("Invites merged")
+    check(agentAdded == FactCounts(added: 1) && stillCurrent, "an agent's fact needs no source and doesn't replace a confirmed one yet")
+    let pending = try unconfirmedFacts(mem)
+    check(pending.map(\.text) == ["Invites shipped to everyone"] && pending[0].replaces == ["Invites merged"], "unconfirmed facts are listed with what they'd replace")
+    try confirmFact(mem, id: pending[0].id, text: "Invites shipped to all workspaces")
+    let afterConfirm = (try searchFacts(mem, query: "workspaces"), try searchFacts(mem, query: "invites"), try unconfirmedFacts(mem))
+    check(texts(afterConfirm.0) == ["Invites shipped to all workspaces"] && !texts(afterConfirm.1).contains("Invites merged") && afterConfirm.2.isEmpty,
+          "confirming with an edit saves the new text, finds it in search, and replaces the old fact")
+    try rejectFact(mem, id: pending[0].id)
+    let afterReject = (try searchFacts(mem, query: "invites"), try searchFacts(mem, query: "workspaces", superseded: true))
+    check(texts(afterReject.0).contains("Invites merged") && afterReject.1.isEmpty, "rejecting a fact hides it and makes what it replaced current again")
+    _ = try noted("KLE-3", "Due next Friday", 4)
+    let checked = try changes("{\(slack), \"confirm\": [{\"id\": \(try unconfirmedFacts(mem)[0].id), \"sources\": [1]}]}")
+    let due = try searchFacts(mem, query: "KLE-3")
+    check(checked == FactCounts(confirmed: 1) && texts(due) == ["Due next Friday"], "a briefing run confirming an agent's fact applies what it replaces")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
@@ -191,7 +212,7 @@ func selfTest() throws {
         let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
         return try? JSONSerialization.jsonObject(with: Data(text.utf8))
     }
-    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 10, "MCP lists its ten tools")
+    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 12, "MCP lists its twelve tools")
     check((mcpResponse(["id": 1, "method": "nope"], dir: mcpDir)?["error"] as? [String: Any])?["code"] as? Int == -32601 && mcpResponse(["method": "notifications/initialized"], dir: mcpDir) == nil, "MCP rejects unknown methods and doesn't answer notifications")
     check((call("list_meetings", ["query": "launch"]) as? [[String: Any]])?.first?["id"] as? String == "0", "MCP finds a meeting by text")
     let page = call("get_meeting", ["id": "0", "transcript": true, "offset": 1, "lines": 1]) as? [String: Any]
@@ -202,6 +223,9 @@ func selfTest() throws {
     _ = try applyFacts(try JSONDecoder().decode(FactChanges.self, from: Data("{\(slack), \"add\": [\(fact("KLE-1", "Invites merged", "2026-11-03", ""))]}".utf8)), to: mcpDB)
     check(((call("search", ["query": "merged"]) as? [[String: Any]])?.first?["sources"] as? [[String: Any]])?.first?["url"] as? String == "https://x.slack.com/archives/C1/p1", "MCP search returns facts with their sources")
     check((call("subject", ["name": "KLE-1"]) as? [String: Any])?["name"] as? String == "KLE-1" && call("subject", ["name": "nope"]) == nil, "MCP subject finds one by name and errors on an unknown one")
+    let remembered = call("remember", ["subject": "KLE-1", "subjectKind": "ticket", "fact": "Invites need a feature flag", "kind": "decision", "sourceUrl": "https://github.com/o/r/pull/9", "sourceTitle": "Flag invites"]) as? [String: Any]
+    check(remembered?["status"] as? String == "unconfirmed" && call("remember", ["subject": "KLE-1", "subjectKind": "ticket", "fact": "x", "kind": "rumor"]) == nil, "MCP remember saves an unconfirmed fact and refuses an unknown kind")
+    check((call("forget", ["id": remembered?["id"] as? Int ?? 0]) as? [String: Any])?["forgotten"] as? Bool == true && (call("search", ["query": "flag"]) as? [Any])?.isEmpty == true, "MCP forget hides a fact")
     _ = call("update_task", ["id": "T-1", "done": true, "removed": true])
     let tasks = (call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]]
     check(tasks?.last?["id"] as? String == "T-1" && tasks?.last?["done"] as? Bool == true && tasks?.last?["removed"] as? Bool == true, "MCP marks a task done and removed")

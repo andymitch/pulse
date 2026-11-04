@@ -25,6 +25,7 @@ final class Store: ObservableObject {
     @Published var doneThisWeek: [DoneItem] = []
     @Published var workflow: [String: [WorkflowState]] = [:]
     var closedTickets: [String: WorkflowState]?
+    @Published var pendingFacts: [PendingFact] = []
     private var localBranches: Set<String> = []
 
     let db: DB
@@ -149,6 +150,17 @@ final class Store: ObservableObject {
         laterIDs = Set(db.ids(laterKey))
         removedIDs = Set(db.ids(removedKey))
         doneThisWeek = db.decode(weekKey) ?? []
+        pendingFacts = (try? unconfirmedFacts(db)) ?? []
+    }
+
+    func confirm(_ fact: PendingFact, text: String? = nil) {
+        do { try confirmFact(db, id: fact.id, text: text == fact.text ? nil : text) } catch { lastError = "\(error)" }
+        pendingFacts = (try? unconfirmedFacts(db)) ?? []
+    }
+
+    func reject(_ fact: PendingFact) {
+        do { try rejectFact(db, id: fact.id) } catch { lastError = "\(error)" }
+        pendingFacts = (try? unconfirmedFacts(db)) ?? []
     }
 
     private var weekKey: String { "week-" + thisMonday.formatted(localDay) }
@@ -331,6 +343,7 @@ final class Store: ObservableObject {
         do {
             synthesis = try await runSynthesis(dir: dir, db: db, candidates: today, me: me ?? "me")
             synthesizedAt = Date()
+            pendingFacts = (try? unconfirmedFacts(db)) ?? []
             recordDone()
         } catch {
             synthesisError = "\(error)"

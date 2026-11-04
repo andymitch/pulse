@@ -84,6 +84,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     - A fact is one short sentence that still makes sense on its own a month from now: name the people, tickets and dates instead of saying "he" or "tomorrow". Keep what someone on the team would want to know later: decisions and why, where work stands, blockers, who owns what, who promised what by when, open questions, and \(me)'s own preferences. Skip chatter and anything only true for an hour.
     - subject is what the fact is about. Reuse the exact subject of a known fact when it's the same thing. Name tickets by their ID (KLE-123) with the title as an alias, and people by full name.
     - observed is the date the source said it, not today.
+    - Facts with status "unconfirmed" were noted by other agents and haven't been checked. Confirm one when a source you read backs it up, and supersede it with a new fact when a source contradicts it. Otherwise leave it alone.
     - When a new fact replaces a known one (a status moved on, a decision changed, a blocker cleared, an owner changed), put the old id in supersedes. When a source only restates a known fact, confirm it instead of adding it again.
     - Every fact and confirmation cites at least one source you actually saw, with the same url rules as the briefing. sources here are numbered on their own, from 1.
     """

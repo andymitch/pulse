@@ -49,6 +49,7 @@ struct ContentView: View {
 
     @ViewBuilder private var home: some View {
         TodayView(store: store)
+        ConfirmFactsView(store: store)
         focusHeader
         PrioritiesView(store: store)
         MeetingsView(todayOnly: true) { store.page = .meetings }
