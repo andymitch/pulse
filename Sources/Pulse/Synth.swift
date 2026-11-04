@@ -46,7 +46,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     }
     if let mail { gather.append("Email from the last \(s.mailDays) days, as JSON with a url for each message: \(mail). Keep only email that needs \(me) to reply or act; ignore newsletters and notifications.") }
     if s.recordMeetings { gather.append("Meetings Pulse recorded, each a file with its summary, decisions, important points and the transcript, newest first: \(transcripts.isEmpty ? "none this period" : transcripts.joined(separator: ", ")).") }
-    if !sessions.isEmpty { gather.append("\(me)'s sessions with coding agents (pi, Claude Code), newest first, each a file with the folder it ran in and the conversation without tool output: \(sessions.joined(separator: ", ")). Use them for what was decided, done and left open; skip the mechanics of the work, and anything personal that isn't about the work, such as a job search, a résumé or health.") }
+    if !sessions.isEmpty { gather.append("\(me)'s sessions with coding agents (pi, Claude Code) in the \(s.repoName) repo, newest first, each a file with the folder it ran in and the conversation without tool output: \(sessions.joined(separator: ", ")). Use them for what was decided, done and left open; skip the mechanics of the work, and anything personal that isn't about the work, such as a job search, a résumé or health.") }
     gather.append("\(me)'s open work right now, from GitHub and Linear. Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
     let kinds = ["github", "linear"] + (s.slack ? ["slack"] : []) + (mail != nil ? ["mail"] : []) + ["meeting", "doc"] + (sessions.isEmpty ? [] : ["session"])
     let kindList = kinds.map { "\"\($0)\"" }.joined(separator: " | ")
@@ -112,7 +112,7 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
     }
     let transcripts = settings.recordMeetings ? meetingTranscripts(in: dir.appendingPathComponent("meetings")) : []
     let newSince = db.meta("facts_since").flatMap(iso.date(from:)) ?? Date().addingTimeInterval(-3 * 86400)
-    let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions")) }.value.filter {
+    let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions"), folders: settings.codeReady ? [settings.repo, settings.worktrees] : []) }.value.filter {
         ((try? URL(fileURLWithPath: $0).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast) > newSince
     }
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
