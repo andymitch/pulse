@@ -218,6 +218,11 @@ func selfTest() throws {
     let refreshed = try String(contentsOfFile: again[0], encoding: .utf8)
     check(again.first.map { URL(fileURLWithPath: $0).lastPathComponent } == "pi-old.md" && refreshed.contains("invite page"),
           "a session picked up again gets a fresh digest")
+    let prompt = { (since: String?) in synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", since: since) }
+    let later = prompt("2026-11-03T22:00:00Z"), first = prompt(nil)
+    check(later.contains("documents created since 2026-11-03T22:00:00Z") && later.contains("gather only what's new") && !later.contains("in the last 14 days")
+          && first.contains("documents created in the last 14 days") && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
+          "after a run the briefing reads only what's new, a first run reads 14 days, and memory is updated before the briefing is written")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
