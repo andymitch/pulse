@@ -61,6 +61,7 @@ struct KnowledgeView: View {
     @State private var answers: [Answer] = []
     @State private var asking = false
     @AppStorage("askOnThisMac") private var onThisMac = true
+    @AppStorage("askFallback") private var fallback = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -78,6 +79,8 @@ struct KnowledgeView: View {
                     } items: {
                         Button("Ask on this Mac") { onThisMac = true; ask(question, local: true) }
                         Button("Ask \(agent)") { onThisMac = false; ask(question, local: false) }.disabled(demoMode)
+                        Divider()
+                        Toggle("Ask \(agent) when this Mac doesn't know", isOn: $fallback)
                     }
                     .disabled(asking || blank)
                 } else {
@@ -88,6 +91,9 @@ struct KnowledgeView: View {
             ForEach(answers) { a in
                 AnswerView(store: store, answer: a, askAgent: asking || demoMode ? nil : { ask(a.question, local: false) })
                     .padding(.horizontal, 14)
+            }
+            if !answers.isEmpty {
+                Button("Clear") { answers = []; save() }.buttonStyle(.link).font(.caption).disabled(asking).padding(.horizontal, 14)
             }
             FocusHeader(store: store)
             PrioritiesView(store: store)
@@ -111,8 +117,11 @@ struct KnowledgeView: View {
                 Text("Nothing to resolve. Facts that agents note, or that replace something Pulse knew, show up here.").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14)
             }
         }
-        .onChange(of: store.askVersion) { _, _ in answers = [] }
+        .padding(.top, 6)
+        .onAppear { answers = store.db.decode("ask_thread") ?? [] }
     }
+
+    private func save() { try? store.db.set(answers, "ask_thread") }
 
     private var blank: Bool { question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var local: Bool { localModelReady && (onThisMac || demoMode) }
@@ -125,7 +134,7 @@ struct KnowledgeView: View {
         asking = true
         let previous = answers.last
         let facts = (try? factsFor(question: q, in: store.db)) ?? []
-        answers.append(Answer(question: q, by: local ? "On this Mac" : BriefingAgent.current.name, facts: local ? facts.map(KnownFact.init) : []))
+        answers.append(Answer(question: q, by: local ? "On this Mac" : BriefingAgent.current.name, factIDs: local ? facts.compactMap { $0["id"] as? Int } : []))
         let me = store.me ?? "me"
         Task {
             var a = answers[answers.count - 1]
@@ -134,8 +143,10 @@ struct KnowledgeView: View {
             } catch {
                 a.error = "\(error)"
             }
-            answers[answers.count - 1] = a
+            if let i = answers.firstIndex(where: { $0.id == a.id }) { answers[i] = a }
+            save()
             asking = false
+            if local, fallback, !demoMode, a.error != nil || a.text?.contains("doesn't know") == true { ask(q, local: false) }
         }
     }
 }
@@ -168,11 +179,14 @@ private struct AnswerView: View {
             } else {
                 Text("Thinking…").foregroundStyle(.secondary)
             }
-            if !answer.facts.isEmpty {
+            if !answer.factIDs.isEmpty {
                 DisclosureGroup(isExpanded: $showFacts) {
-                    VStack(alignment: .leading, spacing: 8) { FactLines(store: store, facts: answer.facts, numbered: true) }.padding(.top, 4)
+                    VStack(alignment: .leading, spacing: 8) {
+                        FactLines(store: store, facts: ((try? factsByID(store.db, answer.factIDs)) ?? []).map(KnownFact.init), numbered: true)
+                    }
+                    .padding(.top, 4)
                 } label: {
-                    Text("\(answer.by) · from \(answer.facts.count) fact\(answer.facts.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                    Text("\(answer.by) · from \(answer.factIDs.count) fact\(answer.factIDs.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
                 }
             } else if answer.text != nil {
                 Text(answer.by).font(.caption).foregroundStyle(.secondary)

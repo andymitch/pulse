@@ -3,12 +3,12 @@ import Foundation
 import FoundationModels
 #endif
 
-struct Answer: Identifiable {
-    let id = UUID()
+struct Answer: Identifiable, Codable {
+    var id = UUID()
     let question: String
     var text: String?
     var by = ""
-    var facts: [KnownFact] = []
+    var factIDs: [Int] = []
     var error: String?
 }
 

@@ -156,7 +156,6 @@ final class Store: ObservableObject {
     }
 
     var reviewCount: Int { pendingFacts.count + changed.count }
-    @Published var askVersion = 0
 
     var triageWaiting: Bool {
         let checked = db.meta("triage_checked_at") ?? ""

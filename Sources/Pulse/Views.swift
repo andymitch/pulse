@@ -18,6 +18,10 @@ struct ContentView: View {
             }
         }
         .overlayScrollers()
+        .environment(\.openURL, OpenURLAction { url in
+            openLink(url)
+            return .handled
+        })
         .background { if settings.solidBackground { Color(nsColor: .windowBackgroundColor).ignoresSafeArea() } }
     }
 

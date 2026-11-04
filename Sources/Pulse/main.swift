@@ -137,7 +137,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         Speaker.shared.stop()
-        store.askVersion += 1
         anchor?.orderOut(nil)
         if !popover.isShown { NSApp.deactivate() }
     }

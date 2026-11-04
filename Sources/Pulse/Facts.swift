@@ -265,6 +265,10 @@ func unconfirmedFacts(_ db: DB) throws -> [PendingFact] {
     }
 }
 
+func factsByID(_ db: DB, _ ids: [Int]) throws -> [[String: Any]] {
+    try ids.compactMap { id in try db.query("\(factColumns) WHERE f.id = ?", [id]).first.map { try factJSON(db, $0) } }
+}
+
 func changedFacts(_ db: DB, since: String, limit: Int = 100) throws -> [[String: Any]] {
     try db.query("\(factColumns) WHERE f.recorded_at > ? AND f.\(live) AND f.status = 'confirmed' ORDER BY f.recorded_at DESC, f.observed_at DESC, f.id DESC LIMIT ?",
                  [since, limit]).map { try factJSON(db, $0) }

@@ -29,6 +29,10 @@ func slackDeepLink(_ url: URL, state: URL = slackState) -> URL? {
     return c.url
 }
 
+func openLink(_ url: URL) {
+    open(url, in: ["slack": App.slack, "linear": .linear][sourceKind(url, given: "")])
+}
+
 func openSource(_ url: URL, kind: String) {
     open(url, in: ["slack": App.slack, "linear": .linear][kind])
 }
