@@ -71,12 +71,14 @@ The briefing only reads: the prompt tells the agent never to post or change anyt
 
 Other agents on this Mac can read what Pulse knows, and keep it current, through its own MCP server. Open **Settings → Agents**, leave **Agent access (MCP)** on, and copy the Claude Code command or the JSON for pi and other clients. The server runs over stdio and works whether or not the app is open. Turning agent access off makes every tool call fail with a note to turn it back on.
 
-It offers read tools: `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and task list) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `update_task` (done, later or removed), `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never changes settings, tokens or keys.
+It's meant as a second brain for the agents you work with. Each briefing run also teaches Pulse short, dated facts about your work (decisions, status, blockers, owners, commitments, open questions, your preferences), each linked to its sources. A newer fact replaces an older one about the same thing, and the older one is kept as history. `search` finds facts by words, subject or date (`since` alone lists what changed), and `subject` shows where a project, ticket, person or topic stands, with its history, or lists them all.
+
+The other read tools are `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and task list) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `update_task` (done, later or removed), `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never changes settings, tokens or keys.
 
 ## Data
 
 Pulse keeps everything in `~/Library/Application Support/Pulse/`:
-- `pulse.db`: the SQLite cache behind Trends
+- `pulse.db`: the SQLite cache behind Trends, and the facts Pulse has learned
 - `settings.json`
 - `synthesis.json`: the latest briefing
 - `meetings/`: meeting summaries and transcripts, one Markdown file per meeting

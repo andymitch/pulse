@@ -101,3 +101,57 @@ func currentFacts(_ db: DB) throws -> [[String: Any]] {
         ["id": r[0]!, "subject": "\(r[1]!): \(r[2]!)", "kind": r[3]!, "text": r[4]!, "observed": r[5]!, "lastSeen": r[6]!, "status": r[7]!]
     }
 }
+
+private func factJSON(_ db: DB, _ r: [Any?]) throws -> [String: Any] {
+    let id = r[0] as! Int
+    let sources = try db.query("""
+        SELECT s.kind, s.url, s.title, s.author, s.date, s.excerpt FROM sources s JOIN fact_sources fs ON fs.source_id = s.id WHERE fs.fact_id = ? ORDER BY s.date DESC
+        """, [id]).map { s in
+        (["kind": s[0], "url": s[1], "title": s[2], "author": s[3], "date": s[4], "excerpt": s[5]] as [String: Any?]).compactMapValues { $0 }
+    }
+    let replaces = try db.query("SELECT id, text, observed_at FROM facts WHERE superseded_by = ? ORDER BY observed_at DESC", [id])
+        .map { ["id": $0[0]!, "text": $0[1]!, "observed": $0[2]!] }
+    return ([
+        "id": id, "subject": ["kind": r[1]!, "name": r[2]!], "kind": r[3], "text": r[4], "observed": r[5], "lastSeen": r[6], "status": r[7],
+        "supersededBy": r[8], "sources": sources, "replaces": replaces.isEmpty ? nil : replaces,
+    ] as [String: Any?]).compactMapValues { $0 }
+}
+
+private let factColumns = "SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status, f.superseded_by FROM facts f JOIN subjects s ON s.id = f.subject_id"
+
+func searchFacts(_ db: DB, query: String = "", since: String? = nil, kind: String? = nil, superseded: Bool = false, limit: Int = 30) throws -> [[String: Any]] {
+    var conditions = ["1"], args: [Any?] = []
+    let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    let words = q.split { !$0.isLetter && !$0.isNumber }
+    if !words.isEmpty {
+        conditions.append("(f.id IN (SELECT rowid FROM facts_fts WHERE facts_fts MATCH ?) OR s.name LIKE ? OR s.aliases LIKE ?)")
+        args += [words.map { "\"\($0)\"*" }.joined(separator: " "), "%\(q)%", "%\(q)%"]
+    }
+    if let since { conditions.append("f.observed_at >= ?"); args.append(String(since.prefix(10))) }
+    if let kind { conditions.append("f.kind = ?"); args.append(kind) }
+    if !superseded { conditions.append("f.superseded_by IS NULL") }
+    return try db.query("\(factColumns) WHERE \(conditions.joined(separator: " AND ")) ORDER BY f.observed_at DESC, f.id DESC LIMIT ?",
+                        args + [min(max(limit, 1), 100)]).map { try factJSON(db, $0) }
+}
+
+func subjectFacts(_ db: DB, name: String?) throws -> Any {
+    guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+        return try db.query("""
+            SELECT s.kind, s.name, count(f.id), max(f.observed_at) FROM subjects s JOIN facts f ON f.subject_id = s.id AND f.superseded_by IS NULL
+            GROUP BY s.id ORDER BY max(f.observed_at) DESC, s.name
+            """).map { ["kind": $0[0]!, "name": $0[1]!, "facts": $0[2]!, "latest": $0[3]!] }
+    }
+    guard let s = try db.query("""
+        SELECT id, kind, name, aliases FROM subjects
+        WHERE name = ? COLLATE NOCASE OR EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ? COLLATE NOCASE)
+        ORDER BY name = ? COLLATE NOCASE DESC LIMIT 1
+        """, [name, name, name]).first else {
+        let close = try db.query("SELECT name FROM subjects WHERE name LIKE ? OR aliases LIKE ? ORDER BY name LIMIT 10", ["%\(name)%", "%\(name)%"]).compactMap { $0[0] as? String }
+        throw SyncError(description: "No subject named \(name)." + (close.isEmpty ? " Call subject with no name to list them." : " Close: \(close.joined(separator: ", "))."))
+    }
+    let facts = try db.query("\(factColumns) WHERE f.subject_id = ? ORDER BY f.observed_at DESC, f.id DESC", [s[0]]).map { try factJSON(db, $0) }
+    return [
+        "kind": s[1]!, "name": s[2]!, "aliases": (try? JSONDecoder().decode([String].self, from: Data((s[3] as? String ?? "[]").utf8))) ?? [],
+        "current": facts.filter { $0["supersededBy"] == nil }, "history": facts.filter { $0["supersededBy"] != nil },
+    ]
+}
