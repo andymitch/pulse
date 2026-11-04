@@ -61,28 +61,25 @@ struct KnowledgeView: View {
     @State private var answers: [Answer] = []
     @State private var asking = false
     @AppStorage("askOnThisMac") private var onThisMac = true
-    @AppStorage("askFallback") private var fallback = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                TextField("Ask about your work, like when Requests v1 launches", text: $question)
+                TextField(settings.codeReady ? "Ask about \(settings.repoName)…" : "Ask about your work…", text: $question)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { ask(question, local: local) }
                     .disabled(asking)
                 if asking { ProgressView().controlSize(.small) }
                 if localModelReady {
-                    SplitButton(help: local ? "Answer on this Mac from what Pulse knows" : "Ask \(agent), which can also look in Linear, Slack and GitHub", width: nil) {
+                    SplitButton(help: local ? "Answer on this Mac from what Pulse knows, and ask \(agent) if it doesn't know" : "Ask \(agent), which can also look in Linear, Slack and GitHub",
+                                width: nil, actionDisabled: asking || blank) {
                         ask(question, local: local)
                     } title: {
                         Text(local ? "Ask" : "Ask \(agent)")
                     } items: {
                         Button("Ask on this Mac") { onThisMac = true; ask(question, local: true) }
                         Button("Ask \(agent)") { onThisMac = false; ask(question, local: false) }.disabled(demoMode)
-                        Divider()
-                        Toggle("Ask \(agent) when this Mac doesn't know", isOn: $fallback)
                     }
-                    .disabled(asking || blank)
                 } else {
                     Button("Ask \(agent)") { ask(question, local: false) }.disabled(asking || blank || demoMode)
                         .help("Ask \(agent), which can also look in Linear, Slack and GitHub")
@@ -92,7 +89,7 @@ struct KnowledgeView: View {
                 }
             }
             ForEach(answers) { a in
-                AnswerView(store: store, answer: a, askAgent: asking || demoMode ? nil : { ask(a.question, local: false) })
+                AnswerView(store: store, answer: a)
                     .padding(.horizontal, 14)
             }
             FocusHeader(store: store)
@@ -146,7 +143,7 @@ struct KnowledgeView: View {
             if let i = answers.firstIndex(where: { $0.id == a.id }) { answers[i] = a }
             save()
             asking = false
-            if local, fallback, !demoMode, a.error != nil || a.text?.contains("doesn't know") == true { ask(q, local: false) }
+            if local, !demoMode, a.error != nil || a.text?.contains("doesn't know") == true { ask(q, local: false) }
         }
     }
 }
@@ -154,28 +151,15 @@ struct KnowledgeView: View {
 private struct AnswerView: View {
     @ObservedObject var store: Store
     let answer: Answer
-    let askAgent: (() -> Void)?
     @State private var showFacts = false
-
-    private var stuck: Bool {
-        answer.by == "On this Mac" && (answer.error != nil || answer.text?.contains("doesn't know") == true)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(answer.question).font(.callout.weight(.medium))
             if let text = answer.text {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(markdown(answer.by == "On this Mac" ? withoutCitations(text) : text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    if stuck, let askAgent { Button("Ask \(BriefingAgent.current.name)", action: askAgent).controlSize(.small).help("Ask the same question of \(BriefingAgent.current.name), which can also look in Linear, Slack and GitHub") }
-                }
+                Text(markdown(answer.by == "On this Mac" ? withoutCitations(text) : text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             } else if let error = answer.error {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(error).font(.caption).foregroundStyle(.red).lineLimit(4)
-                    Spacer(minLength: 8)
-                    if stuck, let askAgent { Button("Ask \(BriefingAgent.current.name)", action: askAgent).controlSize(.small) }
-                }
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(4)
             } else {
                 Text("Thinking…").foregroundStyle(.secondary)
             }

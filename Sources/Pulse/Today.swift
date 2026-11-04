@@ -315,7 +315,10 @@ struct TodayView: View {
                         store.checkTriage()
                         store.page = .knowledge
                     } label: {
-                        Label("Go", systemImage: "link").labelStyle(.titleAndIcon)
+                        HStack(spacing: 5) {
+                            Text("Review")
+                            Image(systemName: "arrow.up.right.square")
+                        }
                     }
                     .help("Open Knowledge to resolve them")
                 }
@@ -544,6 +547,7 @@ private struct Buttons: View {
 struct SplitButton<Title: View, Items: View>: View {
     let help: String
     var width: CGFloat? = 104
+    var actionDisabled = false
     let action: () -> Void
     @ViewBuilder let title: Title
     @ViewBuilder let items: Items
@@ -563,6 +567,7 @@ struct SplitButton<Title: View, Items: View>: View {
             }
             .buttonStyle(Pressable())
             .help(help)
+            .disabled(actionDisabled)
             Divider().padding(.vertical, 5)
             Menu { items } label: { Image(systemName: "chevron.down") }
                 .menuStyle(.borderlessButton)
