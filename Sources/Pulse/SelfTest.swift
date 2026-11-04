@@ -133,6 +133,13 @@ func selfTest() throws {
     let counts = try mem.query("SELECT (SELECT count(*) FROM subjects), (SELECT count(*) FROM sources)")[0]
     check(counts[0] as? Int == 2 && counts[1] as? Int == 1, "subjects and sources are reused")
     let texts = { (facts: [[String: Any]]) in facts.map { $0["text"] as? String ?? "" } }
+    let state = FileManager.default.temporaryDirectory.appendingPathComponent("slack-state-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: state) }
+    try Data(#"{"workspaces": {"T02ABC": {"domain": "acme", "name": "Acme"}}}"#.utf8).write(to: state)
+    let deep = slackDeepLink(URL(string: "https://acme.slack.com/archives/C08QBJ75EUB/p1793817031868429?thread_ts=1793810000.000100&cid=C08QBJ75EUB")!, state: state)
+    check(deep?.absoluteString == "slack://channel?team=T02ABC&id=C08QBJ75EUB&message=1793817031.868429&thread_ts=1793810000.000100"
+          && slackDeepLink(URL(string: "https://other.slack.com/archives/C1/p1793817031868429")!, state: state) == nil,
+          "a Slack message link opens at that message in the Slack app, and other workspaces fall back to the browser")
     let slackLink = URL(string: "https://acme.slack.com/archives/C1/p1")!, linearLink = URL(string: "https://linear.app/acme/review/fix-it")!
     check(sourceKind(slackLink, given: "session") == "slack" && sourceKind(linearLink, given: "doc") == "linear" && sourceKind(URL(fileURLWithPath: "/x/Pulse/sessions/pi-1.md"), given: "doc") == "session"
           && sourceKind(URL(string: "message://%3Ca%3E")!, given: "doc") == "mail", "a source's kind comes from its link, whatever the agent called it")
