@@ -36,24 +36,6 @@ struct PrioritiesView: View {
 private struct SourceCard: View {
     let source: Synthesis.Source
 
-    private var brand: Brand? {
-        switch source.kind {
-        case "slack": .slack
-        case "linear": .linear
-        case "github": .github
-        default: nil
-        }
-    }
-
-    private var symbol: String {
-        switch source.kind {
-        case "meeting": "waveform"
-        case "mail": "envelope"
-        case "session": "terminal"
-        default: "doc.text"
-        }
-    }
-
     private var app: App? {
         switch source.kind {
         case "slack": .slack
@@ -68,7 +50,7 @@ private struct SourceCard: View {
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
-                    if let brand { Image(nsImage: brand.image(size: 11)) } else { Image(systemName: symbol).font(.system(size: 10)).frame(width: 11, height: 11) }
+                    SourceIcon(kind: source.kind, size: 11)
                     Text(source.title).font(.caption.weight(.semibold)).lineLimit(1)
                 }
                 if let excerpt = source.excerpt {
@@ -131,6 +113,22 @@ private struct PendingFactRow: View {
             }
             .buttonStyle(.link)
             .font(.caption)
+        }
+    }
+}
+
+struct SourceIcon: View {
+    let kind: String
+    var size: CGFloat = 11
+
+    var body: some View {
+        switch kind {
+        case "slack": Image(nsImage: Brand.slack.image(size: size))
+        case "linear": Image(nsImage: Brand.linear.image(size: size))
+        case "github": Image(nsImage: Brand.github.image(size: size))
+        default:
+            Image(systemName: ["meeting": "waveform", "mail": "envelope", "session": "terminal"][kind] ?? "doc.text")
+                .font(.system(size: size - 1)).frame(width: size, height: size)
         }
     }
 }
