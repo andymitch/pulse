@@ -13,6 +13,7 @@ struct PrioritiesView: View {
                         SpeakButton(text: "\(f.headline). \(f.summary)")
                     }
                     Text(markdown(f.summary)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    KnownAbout(store: store, names: store.knownSubjects.filter { "\(f.headline) \(f.summary)".localizedCaseInsensitiveContains($0) }.prefix(4).map { $0 })
                     let cards = f.sources.compactMap { id in s.sources.first { $0.id == id } }
                     Grid(alignment: .topLeading, horizontalSpacing: 8, verticalSpacing: 8) {
                         ForEach(Array(stride(from: 0, to: cards.count, by: 2)), id: \.self) { i in
@@ -70,23 +71,7 @@ private struct SourceCard: View {
     }
 }
 
-struct ConfirmFactsView: View {
-    @ObservedObject var store: Store
-
-    var body: some View {
-        let facts = store.pendingFacts
-        if !facts.isEmpty {
-            Panel(title: "Agents noted · \(facts.count) to confirm") {
-                ForEach(facts) { fact in
-                    PendingFactRow(store: store, fact: fact)
-                    if fact.id != facts.last?.id { Divider() }
-                }
-            }
-        }
-    }
-}
-
-private struct PendingFactRow: View {
+struct PendingFactRow: View {
     @ObservedObject var store: Store
     let fact: PendingFact
     @State private var draft: String?

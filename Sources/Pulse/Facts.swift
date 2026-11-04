@@ -99,13 +99,38 @@ func applyFacts(_ changes: FactChanges, to db: DB, now: Date = Date(), origin: S
     return counts
 }
 
-private func subjectID(kind: String, names: [String], in db: DB) throws -> Int {
-    let names = names.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+func isTicketID(_ s: String) -> Bool { s.range(of: "^[A-Z][A-Z0-9]*-[0-9]+$", options: .regularExpression) != nil }
+
+private func known(_ db: DB) throws -> (projects: [String], people: [String]) {
+    (db.ids("linear_projects"), try db.query("SELECT name FROM users").compactMap { $0[0] as? String })
+}
+
+func realSubject(kind: String, names: [String], in db: DB) throws -> (kind: String, names: [String]) {
+    let (projects, people) = try known(db)
+    let match = { (list: [String]) in names.lazy.compactMap { n in list.first { $0.caseInsensitiveCompare(n) == .orderedSame } }.first }
+    if let p = match(projects) { return ("project", [p] + names.filter { $0.caseInsensitiveCompare(p) != .orderedSame }) }
+    if let id = names.first(where: isTicketID) { return ("ticket", [id] + names.filter { $0 != id }) }
+    if let p = match(people) { return ("person", [p] + names.filter { $0.caseInsensitiveCompare(p) != .orderedSame }) }
+    return ("topic", names)
+}
+
+func fixSubjects(_ db: DB) throws {
+    for r in try db.query("SELECT id, kind, name, aliases FROM subjects") {
+        let aliases = (try? JSONDecoder().decode([String].self, from: Data((r[3] as? String ?? "[]").utf8))) ?? []
+        let real = try realSubject(kind: r[1] as! String, names: [r[2] as! String] + aliases, in: db)
+        guard real.kind != r[1] as? String || real.names[0] != r[2] as? String else { continue }
+        try db.query("UPDATE subjects SET kind = ?, name = ?, aliases = ? WHERE id = ?",
+                     [real.kind, real.names[0], String(decoding: try JSONEncoder().encode(Array(real.names.dropFirst())), as: UTF8.self), r[0]])
+    }
+}
+
+private func subjectID(kind asked: String, names given: [String], in db: DB) throws -> Int {
+    let (kind, names) = try realSubject(kind: asked, names: given.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }, in: db)
     for (i, n) in names.enumerated() {
         let found = try db.query("""
-            SELECT id, name, aliases FROM subjects WHERE kind = ? AND (name = ? COLLATE NOCASE OR (? AND EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ? COLLATE NOCASE)))
+            SELECT id, name, aliases FROM subjects WHERE name = ? COLLATE NOCASE OR (? AND EXISTS (SELECT 1 FROM json_each(aliases) WHERE value = ? COLLATE NOCASE))
             ORDER BY name = ? COLLATE NOCASE DESC LIMIT 1
-            """, [kind, n, i == 0 ? 1 : 0, n, n]).first
+            """, [n, i == 0 ? 1 : 0, n, n]).first
         guard let id = found?[0] as? Int, let name = found?[1] as? String else { continue }
         let known = (try? JSONDecoder().decode([String].self, from: Data((found?[2] as? String ?? "[]").utf8))) ?? []
         let all = (known + names).filter { $0.caseInsensitiveCompare(name) != .orderedSame }
@@ -131,12 +156,15 @@ private func factJSON(_ db: DB, _ r: [Any?]) throws -> [String: Any] {
     let replaces = try db.query("SELECT id, text, observed_at FROM facts WHERE superseded_by = ? AND status != 'rejected' ORDER BY observed_at DESC", [id])
         .map { ["id": $0[0]!, "text": $0[1]!, "observed": $0[2]!] }
     return ([
-        "id": id, "subject": ["kind": r[1]!, "name": r[2]!], "kind": r[3], "text": r[4], "observed": r[5], "lastSeen": r[6], "status": r[7],
+        "id": id, "subject": ([
+            "kind": r[1]!, "name": r[2]!,
+            "title": r[1] as? String == "ticket" ? (try? JSONDecoder().decode([String].self, from: Data((r[9] as? String ?? "[]").utf8)))?.first : nil,
+        ] as [String: Any?]).compactMapValues { $0 }, "kind": r[3], "text": r[4], "observed": r[5], "lastSeen": r[6], "status": r[7],
         "supersededBy": r[8], "sources": sources, "replaces": replaces.isEmpty ? nil : replaces,
     ] as [String: Any?]).compactMapValues { $0 }
 }
 
-private let factColumns = "SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status, f.superseded_by FROM facts f JOIN subjects s ON s.id = f.subject_id"
+private let factColumns = "SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status, f.superseded_by, s.aliases FROM facts f JOIN subjects s ON s.id = f.subject_id"
 
 func searchFacts(_ db: DB, query: String = "", since: String? = nil, kind: String? = nil, superseded: Bool = false, limit: Int = 30) throws -> [[String: Any]] {
     var conditions = ["f.status != 'rejected'"], args: [Any?] = []
@@ -213,4 +241,9 @@ func unconfirmedFacts(_ db: DB) throws -> [PendingFact] {
         return PendingFact(id: id, subject: r[1] as! String, kind: r[2] as! String, text: r[3] as! String, observed: r[4] as! String,
                            source: (r[5] as? String).flatMap(URL.init), replaces: replaces)
     }
+}
+
+func changedFacts(_ db: DB, since: String, limit: Int = 100) throws -> [[String: Any]] {
+    try db.query("\(factColumns) WHERE f.recorded_at > ? AND f.\(live) AND f.status = 'confirmed' ORDER BY f.recorded_at DESC, f.observed_at DESC, f.id DESC LIMIT ?",
+                 [since, limit]).map { try factJSON(db, $0) }
 }

@@ -50,7 +50,6 @@ struct ContentView: View {
 
     @ViewBuilder private var home: some View {
         TodayView(store: store)
-        ConfirmFactsView(store: store)
         focusHeader
         PrioritiesView(store: store)
         MeetingsView(todayOnly: true) { store.page = .meetings }
@@ -119,7 +118,9 @@ struct ContentView: View {
         HStack {
             Text("Pulse").font(.title3.bold())
             Picker("", selection: $store.page) {
-                ForEach(PulseTab.allCases.filter { $0 != .meetings || meetings.shown }, id: \.self) { Text($0.rawValue).tag($0) }
+                ForEach(PulseTab.allCases.filter { $0 != .meetings || meetings.shown }, id: \.self) { tab in
+                    Text(tab == .knowledge && store.reviewCount > 0 ? "\(tab.rawValue) · \(store.reviewCount)" : tab.rawValue).tag(tab)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()

@@ -4,17 +4,22 @@ struct KnownFact: Identifiable, Equatable {
     struct Source: Equatable { let kind, title: String; let url: URL }
     let id: Int
     let subject, kind, text, observed, status: String
+    let subjectTitle: String?
     let replaced: Bool
+    let replaces: [String]
     let sources: [Source]
 
     init(_ d: [String: Any]) {
         id = d["id"] as? Int ?? 0
         subject = (d["subject"] as? [String: Any])?["name"] as? String ?? ""
+        subjectTitle = (d["subject"] as? [String: Any])?["title"] as? String
         kind = d["kind"] as? String ?? ""
         observed = d["observed"] as? String ?? ""
         text = withoutOwnDate(d["text"] as? String ?? "", observed)
         status = d["status"] as? String ?? ""
         replaced = d["supersededBy"] != nil
+        let day = observed
+        replaces = ((d["replaces"] as? [[String: Any]]) ?? []).compactMap { r in (r["text"] as? String).map { withoutOwnDate($0, r["observed"] as? String ?? day) } }
         sources = ((d["sources"] as? [[String: Any]]) ?? []).compactMap { s in
             (s["url"] as? String).flatMap(URL.init).map { Source(kind: s["kind"] as? String ?? "", title: s["title"] as? String ?? $0.absoluteString, url: $0) }
         }
@@ -50,188 +55,126 @@ func friendlyDay(_ day: String, now: Date = Date()) -> String {
     return date.formatted(.dateTime.month(.abbreviated).day())
 }
 
-private let sections: [(kind: String, title: String)] = [("project", "Projects"), ("ticket", "Tickets"), ("person", "People"), ("topic", "Topics")]
-private let groups: [(kind: String, title: String)] = [
-    ("status", "Where it stands"), ("decision", "Decided"), ("blocker", "Blocked on"), ("owner", "Who owns what"),
-    ("commitment", "Promised"), ("question", "Open questions"), ("preference", "Preferences"),
-]
-
-private struct SubjectEntry: Identifiable {
-    let kind, name, latest: String
-    let title: String?
-    var id: String { kind + name }
-
-    init(_ d: [String: Any]) {
-        kind = d["kind"] as? String ?? ""
-        name = d["name"] as? String ?? ""
-        latest = d["latest"] as? String ?? ""
-        title = kind == "ticket" ? (d["aliases"] as? [String])?.first : nil
-    }
-}
-
 struct KnowledgeView: View {
     @ObservedObject var store: Store
     @State private var query = ""
-    @State private var subject: SubjectEntry?
-    @State private var subjects: [SubjectEntry] = []
-    @State private var facts: [KnownFact] = []
-    @State private var history: [KnownFact] = []
-    @State private var showHistory = false
+    @State private var results: [KnownFact] = []
 
     var body: some View {
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         VStack(alignment: .leading, spacing: 12) {
-            if let subject {
-                Button { self.subject = nil } label: { Label("All subjects", systemImage: "chevron.left") }.buttonStyle(.link)
-                HStack(alignment: .firstTextBaseline) {
-                    Text(subject.title ?? subject.name).font(.title3.weight(.semibold))
-                    if subject.title != nil { Text(subject.name).foregroundStyle(.secondary) }
-                }
-                ForEach(groups, id: \.kind) { group in
-                    let list = facts.filter { $0.kind == group.kind }
-                    if !list.isEmpty { Panel(title: group.title) { factList(list) } }
-                }
-                if !history.isEmpty {
-                    DisclosureGroup("Replaced · \(history.count)", isExpanded: $showHistory) {
-                        VStack(alignment: .leading, spacing: 8) { factList(history) }.padding(.top, 6)
-                    }
-                    .padding(.horizontal, 14)
-                    .foregroundStyle(.secondary)
+            TextField("Ask what Pulse knows, like KLE-1209 or auto-close", text: $query).textFieldStyle(.roundedBorder)
+            if searching {
+                Panel(title: "What Pulse knows") {
+                    if results.isEmpty { Text("Nothing about that yet.").foregroundStyle(.secondary) }
+                    FactLines(store: store, facts: results)
                 }
             } else {
-                TextField("Search what Pulse knows", text: $query).textFieldStyle(.roundedBorder)
-                if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    if subjects.isEmpty { Text("Nothing learned yet. Pulse learns from each briefing.").foregroundStyle(.secondary) }
-                    ForEach(sections, id: \.kind) { section in
-                        let list = subjects.filter { $0.kind == section.kind }
-                        if !list.isEmpty {
-                            Panel(title: section.title) {
-                                ForEach(list) { s in
-                                    subjectRow(s)
-                                    if s.id != list.last?.id { Divider() }
-                                }
-                            }
+                if !store.pendingFacts.isEmpty {
+                    Panel(title: "Agents noted · confirm or reject") {
+                        ForEach(store.pendingFacts) { fact in
+                            PendingFactRow(store: store, fact: fact)
+                            if fact.id != store.pendingFacts.last?.id { Divider() }
                         }
                     }
-                } else {
-                    Panel(title: "Results") {
-                        if facts.isEmpty { Text("Nothing matches.").foregroundStyle(.secondary) }
-                        factList(facts, showSubject: true)
+                }
+                let changed = store.changed.map(KnownFact.init)
+                Panel(title: "Since you last looked", accessory: {
+                    if !changed.isEmpty { Button("Mark all reviewed") { store.markReviewed() }.buttonStyle(.link).font(.caption) }
+                }) {
+                    if changed.isEmpty {
+                        Text("You're caught up. New and changed facts show up here after each briefing.").foregroundStyle(.secondary)
                     }
+                    FactLines(store: store, facts: changed)
                 }
             }
         }
-        .onAppear(perform: reload)
-        .onChange(of: query) { _, _ in reload() }
-        .onChange(of: subject?.id) { _, _ in showHistory = false; reload() }
-        .onChange(of: store.pendingFacts) { _, _ in reload() }
-        .onChange(of: store.synthesizedAt) { _, _ in reload() }
+        .onAppear(perform: search)
+        .onChange(of: query) { _, _ in search() }
+        .onChange(of: store.factsVersion) { _, _ in search() }
     }
 
-    private func subjectRow(_ s: SubjectEntry) -> some View {
-        Button { subject = s } label: {
-            HStack(spacing: 6) {
-                Text(s.title ?? s.name).lineLimit(1)
-                if s.title != nil { Text(s.name).foregroundStyle(.secondary).fixedSize() }
-                Spacer()
-                Text(friendlyDay(s.latest)).font(.caption).foregroundStyle(.secondary).fixedSize()
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel([s.title, s.name, "last changed \(friendlyDay(s.latest))"].compactMap { $0 }.joined(separator: ", "))
+    private func search() {
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return results = [] }
+        results = ((try? searchFacts(store.db, query: query, limit: 50)) ?? []).map(KnownFact.init)
     }
+}
 
-    @ViewBuilder private func factList(_ list: [KnownFact], showSubject: Bool = false) -> some View {
-        ForEach(Array(list.enumerated()), id: \.element.id) { i, fact in
-            let newDay = i == 0 || list[i - 1].observed != fact.observed
-            if newDay || showSubject {
-                Text([showSubject ? fact.subject : nil, newDay || showSubject ? friendlyDay(fact.observed) : nil].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                    .padding(.top, i == 0 ? 0 : 4)
-            }
-            KnownFactRow(fact: fact, open: showSubject ? { subject = subjects.first { $0.name == fact.subject } } : nil) { text in
-                do {
-                    if let text { try confirmFact(store.db, id: fact.id, text: text) } else { try rejectFact(store.db, id: fact.id) }
-                } catch {
-                    store.lastError = "\(error)"
-                }
-                store.pendingFacts = (try? unconfirmedFacts(store.db)) ?? []
-                reload()
-            }
-        }
-    }
+struct FactLines: View {
+    @ObservedObject var store: Store
+    let facts: [KnownFact]
+    var showSubject = true
 
-    private func reload() {
-        let db = store.db
-        subjects = (((try? subjectFacts(db, name: nil)) as? [[String: Any]]) ?? []).map(SubjectEntry.init)
-        if let subject {
-            let all = ((try? subjectFacts(db, name: subject.name)) as? [String: Any]).map { s in
-                (((s["current"] as? [[String: Any]]) ?? []).map(KnownFact.init), ((s["history"] as? [[String: Any]]) ?? []).map(KnownFact.init))
-            }
-            (facts, history) = all ?? ([], [])
-        } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-            facts = ((try? searchFacts(db, query: query, limit: 100)) ?? []).map(KnownFact.init)
+    var body: some View {
+        ForEach(Array(facts.enumerated()), id: \.element.id) { i, fact in
+            FactLine(store: store, fact: fact, showSubject: showSubject)
+            if i < facts.count - 1 { Divider() }
         }
     }
 }
 
-private struct KnownFactRow: View {
+private struct FactLine: View {
+    @ObservedObject var store: Store
     let fact: KnownFact
-    let open: (() -> Void)?
-    let change: (String?) -> Void
-    @State private var draft: String?
+    let showSubject: Bool
 
     var body: some View {
-        if let draft {
-            VStack(alignment: .leading, spacing: 4) {
-                TextField("Fact", text: Binding(get: { draft }, set: { self.draft = $0 }), axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(save)
-                HStack(spacing: 12) {
-                    Button("Save", action: save).disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Button("Cancel") { self.draft = nil }
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(([showSubject ? [fact.subject, fact.subjectTitle].compactMap { $0 }.joined(separator: " ") : nil, friendlyDay(fact.observed)] as [String?]).compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                ForEach(fact.replaces, id: \.self) { old in
+                    Text(old).strikethrough().foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.link)
-                .font(.caption)
+                Text((fact.replaces.isEmpty ? "" : "→ ") + fact.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                (Text(fact.text).strikethrough(fact.replaced) + Text(fact.status == "unconfirmed" ? "  unconfirmed" : "").font(.caption).foregroundColor(.orange))
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 4)
-                HStack(spacing: 5) {
-                    ForEach(Array(fact.sources.prefix(4).enumerated()), id: \.offset) { _, s in
-                        Button { Pulse.open(s.url) } label: { SourceIcon(kind: s.kind, size: 11) }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .help(s.title)
-                            .accessibilityLabel("Source: \(s.title)")
-                    }
-                }
-                .fixedSize()
-            }
-            .contentShape(Rectangle())
-            .contextMenu {
-                if let open { Button("Open \(fact.subject)", action: open) }
-                if !fact.replaced {
-                    Button("Edit…") { draft = fact.text }
-                    Button("Reject as wrong") { change(nil) }
-                }
-                if let s = fact.sources.first { Button("Copy link to source") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s.url.absoluteString, forType: .string) } }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityActions {
-                if !fact.replaced {
-                    Button("Edit") { draft = fact.text }
-                    Button("Reject as wrong") { change(nil) }
+            Spacer(minLength: 4)
+            HStack(spacing: 5) {
+                ForEach(Array(fact.sources.prefix(4).enumerated()), id: \.offset) { _, s in
+                    Button { open(s.url) } label: { SourceIcon(kind: s.kind, size: 11) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help(s.title)
+                        .accessibilityLabel("Source: \(s.title)")
                 }
             }
+            .fixedSize()
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Reject as wrong") { store.reject(fact: fact.id) }
+            if let s = fact.sources.first {
+                Button("Copy link to source") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s.url.absoluteString, forType: .string) }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Reject as wrong") { store.reject(fact: fact.id) }
+    }
+}
+
+struct KnownAbout: View {
+    @ObservedObject var store: Store
+    let names: [String]
+    @State private var open = false
+    @State private var facts: [KnownFact] = []
+
+    var body: some View {
+        if !names.isEmpty {
+            DisclosureGroup(isExpanded: $open) {
+                VStack(alignment: .leading, spacing: 8) { FactLines(store: store, facts: facts, showSubject: names.count > 1) }
+                    .padding(.top, 4)
+            } label: {
+                Text("What Pulse knows").font(.caption).foregroundStyle(.secondary)
+            }
+            .onChange(of: open) { _, _ in load() }
+            .onChange(of: store.factsVersion) { _, _ in load() }
         }
     }
 
-    private func save() {
-        guard let draft else { return }
-        change(draft)
-        self.draft = nil
+    private func load() {
+        guard open else { return }
+        facts = names.flatMap { name in
+            (((try? subjectFacts(store.db, name: name)) as? [String: Any])?["current"] as? [[String: Any]] ?? []).map(KnownFact.init)
+        }
     }
 }

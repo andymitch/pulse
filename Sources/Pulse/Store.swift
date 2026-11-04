@@ -26,6 +26,9 @@ final class Store: ObservableObject {
     @Published var workflow: [String: [WorkflowState]] = [:]
     var closedTickets: [String: WorkflowState]?
     @Published var pendingFacts: [PendingFact] = []
+    @Published var changed: [[String: Any]] = []
+    @Published var factsVersion = 0
+    @Published var knownSubjects: [String] = []
     private var localBranches: Set<String> = []
 
     let db: DB
@@ -150,17 +153,40 @@ final class Store: ObservableObject {
         laterIDs = Set(db.ids(laterKey))
         removedIDs = Set(db.ids(removedKey))
         doneThisWeek = db.decode(weekKey) ?? []
+        reloadFacts()
+    }
+
+    var reviewCount: Int { pendingFacts.count + changed.count }
+
+    func reloadFacts() {
         pendingFacts = (try? unconfirmedFacts(db)) ?? []
+        let since = db.meta("facts_reviewed_at") ?? iso.string(from: Date().addingTimeInterval(-3 * 86400))
+        changed = (try? changedFacts(db, since: since)) ?? []
+        knownSubjects = ((try? db.query("""
+            SELECT DISTINCT s.name FROM subjects s JOIN facts f ON f.subject_id = s.id
+            WHERE s.kind IN ('ticket', 'project') AND f.superseded_by IS NULL AND f.status != 'rejected'
+            """)) ?? []).compactMap { $0[0] as? String }
+        factsVersion += 1
+    }
+
+    func markReviewed() {
+        try? db.setMeta("facts_reviewed_at", iso.string(from: Date()))
+        reloadFacts()
     }
 
     func confirm(_ fact: PendingFact, text: String? = nil) {
         do { try confirmFact(db, id: fact.id, text: text == fact.text ? nil : text) } catch { lastError = "\(error)" }
-        pendingFacts = (try? unconfirmedFacts(db)) ?? []
+        reloadFacts()
     }
 
     func reject(_ fact: PendingFact) {
         do { try rejectFact(db, id: fact.id) } catch { lastError = "\(error)" }
-        pendingFacts = (try? unconfirmedFacts(db)) ?? []
+        reloadFacts()
+    }
+
+    func reject(fact id: Int) {
+        do { try rejectFact(db, id: id) } catch { lastError = "\(error)" }
+        reloadFacts()
     }
 
     private var weekKey: String { "week-" + thisMonday.formatted(localDay) }
@@ -343,7 +369,7 @@ final class Store: ObservableObject {
         do {
             synthesis = try await runSynthesis(dir: dir, db: db, candidates: today, me: me ?? "me")
             synthesizedAt = Date()
-            pendingFacts = (try? unconfirmedFacts(db)) ?? []
+            reloadFacts()
             recordDone()
         } catch {
             synthesisError = "\(error)"

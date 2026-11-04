@@ -133,6 +133,19 @@ func selfTest() throws {
     let counts = try mem.query("SELECT (SELECT count(*) FROM subjects), (SELECT count(*) FROM sources)")[0]
     check(counts[0] as? Int == 2 && counts[1] as? Int == 1, "subjects and sources are reused")
     let texts = { (facts: [[String: Any]]) in facts.map { $0["text"] as? String ?? "" } }
+    let real = try DB(path: ":memory:")
+    try real.query("INSERT INTO users VALUES ('Jane Doe', 'jane@x.com')")
+    try real.set(["Requests v1", "MCP v2"], "linear_projects")
+    let linked = try realSubject(kind: "project", names: ["requests V1"], in: real), made = try realSubject(kind: "project", names: ["Pulse"], in: real)
+    let stranger = try realSubject(kind: "person", names: ["Maya"], in: real), teammate = try realSubject(kind: "person", names: ["jane doe"], in: real)
+    let titled = try realSubject(kind: "topic", names: ["Invite teammates", "KLE-9"], in: real)
+    check(linked.kind == "project" && linked.names[0] == "Requests v1", "a project subject takes the Linear project's own name")
+    check(made.kind == "topic" && stranger.kind == "topic" && teammate.kind == "person" && teammate.names[0] == "Jane Doe", "only Linear projects and teammates are projects and people; anything else is a topic")
+    check(titled.kind == "ticket" && titled.names == ["KLE-9", "Invite teammates"], "a subject with a ticket ID is that ticket, named by the ID")
+    try real.query("INSERT INTO subjects (kind, name, aliases) VALUES ('project', 'Pulse', '[]'), ('topic', 'mcp v2', '[]'), ('ticket', 'Ship invites', '[\"KLE-4\"]'), ('ticket', 'KLE-5', '[\"Requests v1\"]')")
+    try fixSubjects(real)
+    check(try real.query("SELECT kind || ':' || name FROM subjects ORDER BY id").compactMap { $0[0] as? String } == ["topic:Pulse", "project:MCP v2", "ticket:KLE-4", "project:Requests v1"],
+          "existing subjects are fixed up to real projects, tickets and topics, and a project name wins over a ticket ID")
     let invites = try searchFacts(mem, query: "invite")
     check(texts(invites) == ["Due Friday", "Invites merged"] && (invites[1]["replaces"] as? [[String: Any]])?.count == 2, "search finds current facts by word stem or subject alias, with what they replaced")
     let replaced = (try searchFacts(mem, query: "invites are"), try searchFacts(mem, query: "invites are", superseded: true))
@@ -151,6 +164,9 @@ func selfTest() throws {
     let agentAdded = try noted("KLE-1", "Invites shipped to everyone", 2)
     let stillCurrent = texts(try searchFacts(mem, query: "invites")).contains("Invites merged")
     check(agentAdded == FactCounts(added: 1) && stillCurrent, "an agent's fact needs no source and doesn't replace a confirmed one yet")
+    let before = try changedFacts(mem, since: "2026-11-03T00:00:00Z"), afterwards = try changedFacts(mem, since: "2026-11-03T13:00:00Z")
+    check(before.map { $0["text"] as? String } == ["Due Friday", "Invites merged"] && afterwards.isEmpty && (before[1]["replaces"] as? [Any])?.count == 2,
+          "since you last looked lists confirmed facts learned after that time, newest first, with what they replaced, and skips agents' unconfirmed ones")
     let pending = try unconfirmedFacts(mem)
     check(pending.map(\.text) == ["Invites shipped to everyone"] && pending[0].replaces == ["Invites merged"], "unconfirmed facts are listed with what they'd replace")
     try confirmFact(mem, id: pending[0].id, text: "Invites shipped to all workspaces")

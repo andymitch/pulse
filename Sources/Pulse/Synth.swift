@@ -33,7 +33,7 @@ func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
 }
 
 func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem],
-                     facts: String, factsOutput: String, since: String?, sessions: [String] = []) -> String {
+                     facts: String, factsOutput: String, since: String?, sessions: [String] = [], projects: [String] = [], people: [String] = []) -> String {
     let s = settings
     var who = ["Linear \"\(me)\""]
     if s.slack { who.append("the Slack user your Slack tools are logged in as") }
@@ -73,7 +73,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
 
     Rules for facts:
     - A fact is one short sentence that still makes sense on its own a month from now: name the people and tickets instead of saying "he" or "it", and write a date that matters as a date instead of "tomorrow". Keep what someone on the team would want to know later: decisions and why, where work stands, blockers, who owns what, who promised what by when, open questions, and \(me)'s own preferences. Skip chatter and anything only true for an hour. Never keep personal matters that aren't about the work, such as a job search, a résumé, health or family, from any source.
-    - subject is what the fact is about. Reuse the exact subject of a known fact when it's the same thing. Name tickets by their ID (KLE-123) with the title as an alias, and people by full name.
+    - subject is what the fact is about, and it's a real thing: a ticket by its ID (KLE-123) with the title as an alias\(projects.isEmpty ? "" : ", a Linear project by its exact name (\(projects.joined(separator: ", ")))")\(people.isEmpty ? "" : ", or a teammate by full name (\(people.joined(separator: ", ")))"). Anything else is a topic with a short plain name. Reuse the exact subject of a known fact when it's the same thing.
     - observed is the date the source said it, not today. Pulse shows it next to the fact, so don't put it in the text ("On 2026-11-04 …", "(decided 2026-11-04)"); mention a date only when it's the point, such as a deadline or a launch day.
     - Facts with status "unconfirmed" were noted by other agents and haven't been checked. Confirm one when a source you read backs it up, and supersede it with a new fact when a source contradicts it. Otherwise leave it alone.
     - When a new fact replaces a known one (a status moved on, a decision changed, a blocker cleared, an owner changed), put the old id in supersedes. When a source only restates a known fact, confirm it instead of adding it again.
@@ -124,7 +124,8 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
     let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions"), folders: settings.codeReady ? [settings.repo, settings.worktrees] : []) }.value
         .filter { changedSince($0, newSince) }
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
-                        facts: facts.path, factsOutput: factsOut.path, since: since.map(iso.string(from:)), sessions: sessions)
+                        facts: facts.path, factsOutput: factsOut.path, since: since.map(iso.string(from:)), sessions: sessions,
+                        projects: db.ids("linear_projects"), people: try db.query("SELECT name FROM users").compactMap { ($0[0] as? String).flatMap { $0.contains("@") ? nil : $0 } })
         .write(to: prompt, atomically: true, encoding: .utf8)
 
     let log = try await runAgent(prompt: prompt)
