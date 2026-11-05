@@ -19,8 +19,6 @@ fi
 
 if [[ -n "${DEVELOPER_ID:-}" ]]; then
     codesign --force --options runtime --timestamp --entitlements Pulse.entitlements --sign "$DEVELOPER_ID" "$APP"
-elif security find-identity -v -p codesigning 2>/dev/null | grep -q '"Pulse Signing"'; then
-    codesign --force --sign "Pulse Signing" "$APP"
 else
     codesign --force --sign - --requirements '=designated => identifier "com.andymitch.pulse"' "$APP"
 fi
