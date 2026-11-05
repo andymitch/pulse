@@ -125,37 +125,15 @@ struct SettingsView: View {
             } header: { header("Meetings", nil, symbol: "waveform") }
 
             Section {
-                VoiceRow(on: $draft.naturalVoice, asked: $draft.voiceAsked)
-            } header: { header("Voice", nil, symbol: "speaker.wave.2") }
-
-            Section {
-                LaunchAtLoginRow()
-                HotkeyRow(hotkey: $draft.hotkey)
-            } header: { header("Startup", nil, symbol: "power") }
-
-            Section {
-                UpdatesRow(beta: $draft.betaUpdates)
-            } header: { header("Updates", nil, symbol: "arrow.down.circle") }
-
-            Section {
-                Toggle(isOn: $draft.agentAccess) {
-                    Text("Agent access (MCP)")
-                    Text("Let Claude Code, pi and other MCP clients on this Mac read your meetings, briefing and stats, and update tasks and meetings. Changes show in Pulse at once.")
+                Picker("Agent", selection: $draft.briefingCommand) {
+                    ForEach(Settings.briefingPresets, id: \.command) { Text($0.name).tag($0.command) }
+                    if !Settings.briefingPresets.contains(where: { $0.command == draft.briefingCommand }) { Text("Custom").tag(draft.briefingCommand) }
                 }
-                if draft.agentAccess {
-                    CopyRow(title: "Claude Code", text: "claude mcp add pulse -- \(mcpCommand) --mcp")
-                    CopyRow(title: "pi and other clients", text: #"{"pulse": {"command": "\#(mcpCommand)", "args": ["--mcp"]}}"#)
-                }
-            } header: { header("Agents", nil, symbol: "point.3.connected.trianglepath.dotted") } footer: {
-                if draft.agentAccess { note("Run the command once, or add the JSON under mcpServers in the client's config.") }
+                TextField("Command", text: $draft.briefingCommand)
+                Stepper("Each morning after \(draft.briefingHour):00", value: $draft.briefingHour, in: 0...23)
+            } header: { header("Briefing", nil, symbol: "sparkles") } footer: {
+                note("The briefing reads your sources with this agent and writes one file that Pulse checks. It never posts.")
             }
-
-            Section {
-                Toggle(isOn: $draft.solidBackground) {
-                    Text("Solid background")
-                    Text("Turns off the see-through popover background, for better contrast.")
-                }
-            } header: { header("Accessibility", nil, symbol: "accessibility") }
 
             Section {
                 TextField("Repository", text: $draft.repoPath, prompt: Text("~/code/app"))
@@ -190,15 +168,37 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker("Agent", selection: $draft.briefingCommand) {
-                    ForEach(Settings.briefingPresets, id: \.command) { Text($0.name).tag($0.command) }
-                    if !Settings.briefingPresets.contains(where: { $0.command == draft.briefingCommand }) { Text("Custom").tag(draft.briefingCommand) }
+                Toggle(isOn: $draft.agentAccess) {
+                    Text("Agent access (MCP)")
+                    Text("Let Claude Code, pi and other MCP clients on this Mac read your meetings, briefing and stats, and update tasks and meetings. Changes show in Pulse at once.")
                 }
-                TextField("Command", text: $draft.briefingCommand)
-                Stepper("Each morning after \(draft.briefingHour):00", value: $draft.briefingHour, in: 0...23)
-            } header: { header("Briefing", nil, symbol: "sparkles") } footer: {
-                note("The briefing reads your sources with this agent and writes one file that Pulse checks. It never posts.")
+                if draft.agentAccess {
+                    CopyRow(title: "Claude Code", text: "claude mcp add pulse -- \(mcpCommand) --mcp")
+                    CopyRow(title: "pi and other clients", text: #"{"pulse": {"command": "\#(mcpCommand)", "args": ["--mcp"]}}"#)
+                }
+            } header: { header("Agents", nil, symbol: "point.3.connected.trianglepath.dotted") } footer: {
+                if draft.agentAccess { note("Run the command once, or add the JSON under mcpServers in the client's config.") }
             }
+
+            Section {
+                VoiceRow(on: $draft.naturalVoice, asked: $draft.voiceAsked)
+            } header: { header("Voice", nil, symbol: "speaker.wave.2") }
+
+            Section {
+                Toggle(isOn: $draft.solidBackground) {
+                    Text("Solid background")
+                    Text("Turns off the see-through popover background, for better contrast.")
+                }
+            } header: { header("Accessibility", nil, symbol: "accessibility") }
+
+            Section {
+                LaunchAtLoginRow()
+                HotkeyRow(hotkey: $draft.hotkey)
+            } header: { header("Startup", nil, symbol: "power") }
+
+            Section {
+                UpdatesRow(beta: $draft.betaUpdates)
+            } header: { header("Updates", nil, symbol: "arrow.down.circle") }
         }
         .formStyle(.grouped)
     }
@@ -543,7 +543,7 @@ struct UpdatesRow: View {
 
     var body: some View {
         HStack {
-            Text("Pulse \(updater.current)")
+            Text("v\(updater.current)")
             Spacer()
             if updater.devBuild {
                 Text("Local build, updates are off").font(.caption).foregroundStyle(.secondary)
