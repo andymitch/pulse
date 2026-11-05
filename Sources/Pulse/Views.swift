@@ -67,19 +67,15 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
+            PeoplePicker(people: store.people, me: store.me, selection: $store.selected)
         }
-        let prs = store.trends.prs.filter { store.prPeople.isEmpty || store.prPeople.contains($0.person) }
-        Panel(title: "PRs merged", brand: .github, accessory: {
-            PeoplePicker(people: store.prAuthors, me: settings.githubAccount, selection: $store.prPeople)
-        }) {
-            StackedChart(store: store, counts: prCounts, unit: "PRs", order: store.prOrder, selection: store.prPeople)
-            PRStatsTable(store: store, prs: prs)
+        Panel(title: "PRs merged", brand: .github) {
+            StackedChart(store: store, counts: prCounts, unit: "PRs")
+            PRStatsTable(store: store, prs: store.trends.prs.filter { store.includes($0.person) })
         }
         if store.hasLinearKey {
-            Panel(title: "Tickets closed", brand: .linear, accessory: {
-                PeoplePicker(people: store.ticketAssignees, me: store.me, selection: $store.ticketPeople)
-            }) {
-                StackedChart(store: store, counts: store.trends.completed, unit: "Tickets", order: store.ticketOrder, selection: store.ticketPeople)
+            Panel(title: "Tickets closed", brand: .linear) {
+                StackedChart(store: store, counts: store.trends.completed, unit: "Tickets")
                 Text("Tickets completed, by assignee.").font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -247,8 +243,6 @@ struct StackedChart: View {
     @ObservedObject var store: Store
     let counts: [Count]
     let unit: String
-    let order: [String]
-    let selection: Set<String>
     @State private var selected: String?
 
     private struct Bar: Identifiable {
@@ -258,11 +252,10 @@ struct StackedChart: View {
     }
 
     var body: some View {
-        let includes = { (p: String) in selection.isEmpty || selection.contains(p) }
         let present = Set(counts.map(\.person))
-        let shown = order.filter { present.contains($0) && includes($0) }
+        let shown = store.people.filter { present.contains($0) && store.includes($0) }
         let bars = store.buckets.flatMap { m in
-            counts.filter { $0.bucket == m && includes($0.person) }
+            counts.filter { $0.bucket == m && store.includes($0.person) }
                 .sorted { ($0.n, $1.person) > ($1.n, $0.person) }
                 .enumerated()
                 .map { Bar(bucket: m, person: $1.person, n: $1.n, order: $0) }
@@ -285,13 +278,9 @@ struct StackedChart: View {
         }
         .chartXSelection(value: $selected)
         .chartXScale(domain: store.buckets.map(store.label))
-        .chartForegroundStyleScale(domain: shown, range: shown.map { palette[colorIndex($0) % palette.count] })
+        .chartForegroundStyleScale(domain: shown, range: shown.map { palette[store.colorIndex($0) % palette.count] })
         .chartLegend(position: .bottom, alignment: .leading)
         .frame(height: 200)
-    }
-
-    private func colorIndex(_ person: String) -> Int {
-        order.firstIndex(of: person) ?? order.count + abs(person.unicodeScalars.reduce(0) { $0 &+ Int($1.value) })
     }
 
     private func tooltip(_ period: String, _ bars: [Bar]) -> some View {
@@ -299,7 +288,7 @@ struct StackedChart: View {
             Text(period).font(.caption.weight(.semibold))
             ForEach(bars) { b in
                 HStack(spacing: 6) {
-                    Circle().fill(palette[colorIndex(b.person) % palette.count]).frame(width: 7, height: 7)
+                    Circle().fill(palette[store.colorIndex(b.person) % palette.count]).frame(width: 7, height: 7)
                     Text(b.person)
                     Spacer(minLength: 12)
                     Text("\(b.n)").monospacedDigit()

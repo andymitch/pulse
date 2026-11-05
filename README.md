@@ -17,7 +17,7 @@ Pulse opens on **Home**: your pace toward this week's PR target, your tasks, the
 - **Focus**: one distilled summary of what the team is pushing on, written from the facts, with source cards. Each focus item and meeting summary has its own button that reads it aloud.
 - **Meetings**: Pulse notices Google Meet calls, Slack huddles and calendar meetings, records them, transcribes them on your Mac, and saves a summary with the decisions and important points. Each meeting can be copied as Markdown or moved to the Trash from its card.
 - **Knowledge**: a place to **ask** about your work, the Focus, and a short triage list. When something needs resolving, Tasks shows one **Review what Pulse learned** item; **Review** opens Knowledge and hides the item until there's something new. Answers come from this Mac's on-device model using the facts Pulse has (shown under each answer), and when that doesn't know, Pulse asks your briefing agent instead, handing it the facts it found; the agent can also look in Linear, Slack and GitHub. While it works, the latest few steps show under the question ("Looking in Linear"), and its answer links the words each source backs up, with the source's logo. The thread stays until you clear it. The triage list shows only what needs you: facts other agents noted, to confirm, edit or reject, and facts that replaced something Pulse knew, as the old fact crossed out above the new one, each with **Looks right** and **Wrong**. Each source is listed with what it is, and Slack links open at the message in the Slack app.
-- **Trends**: PRs merged per GitHub login and Linear tickets closed per assignee, as two charts with their own people filters, over 7 days, 5 weeks or 12 months. Your PRs merged this week also show on Home against a weekly target you set in Settings (10 by default).
+- **Trends**: PRs merged and Linear tickets closed per person, as two charts with one people filter, over 7 days, 5 weeks or 12 months. Your PRs merged this week also show on Home against a weekly target you set in Settings (10 by default).
 
 <p align="center">
   <img src="docs/screenshot-today.png" alt="The Home tab: this week's PR pace, today's checklist, the focus briefing and meetings" width="49%">
@@ -61,7 +61,7 @@ A local build is versioned after the latest tag with a `-dev` suffix, such as `1
 
 Click the gear in the popover.
 
-1. **GitHub**: pick your `gh` account and organization, and your weekly PR target.
+1. **GitHub**: pick your `gh` account and organization, and your weekly PR target. Pulse matches GitHub people to Linear people automatically, first by GitHub profile name, then by login.
 2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's stored in your Keychain and can be replaced or removed there.
 3. **Slack**: leave it on. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
 4. **Mail**: turn it on, and macOS asks once for permission to read Mail. Pulse reads your inbox only while Mail is open and never launches it.

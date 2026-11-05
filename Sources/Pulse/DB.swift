@@ -23,6 +23,7 @@ final class DB: @unchecked Sendable {
                 creator TEXT, assignee TEXT, created_at TEXT NOT NULL, completed_at TEXT);
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS users (name TEXT PRIMARY KEY, email TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS github_users (login TEXT PRIMARY KEY, name TEXT);
             CREATE TABLE IF NOT EXISTS subjects (
                 id INTEGER PRIMARY KEY, project TEXT NOT NULL DEFAULT 'default', kind TEXT NOT NULL, name TEXT NOT NULL,
                 aliases TEXT NOT NULL DEFAULT '[]');
@@ -169,6 +170,24 @@ func displayName(_ name: String) -> String {
     return name[..<at].capitalized
 }
 
+func autoAffix(org: String, logins: [String]) -> String {
+    let o = org.lowercased()
+    guard o.count >= 3 else { return "" }
+    let lower = logins.map { $0.lowercased() }
+    var best = ("", 1)
+    for n in 3...o.count {
+        let prefix = String(o.prefix(n))
+        let hits = lower.filter { $0.contains(prefix) }.count
+        if hits >= best.1 && hits >= 2 { best = (prefix, hits) }
+    }
+    return best.0
+}
+
+func githubKey(_ login: String, affix: String) -> String {
+    let l = login.lowercased()
+    return (affix.isEmpty ? l : l.replacingOccurrences(of: affix.lowercased(), with: "")).trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+}
+
 enum TrendRange: String, CaseIterable {
     case week = "7 days", month = "5 weeks", year = "12 months"
 
@@ -215,13 +234,28 @@ enum TrendRange: String, CaseIterable {
 }
 
 extension DB {
-    func trends(since: String, range: TrendRange = .year) throws -> Trends {
+    func trends(since: String, range: TrendRange = .year, org: String = "") throws -> Trends {
+        var byKey: [String: String] = [:]
+        var byName: [String: String] = [:]
+        for r in try query("SELECT name, email FROM users") {
+            let email = r[1] as! String, name = displayName(r[0] as! String)
+            byKey[String(email.prefix { $0 != "@" }).lowercased()] = name
+            byName[name.lowercased()] = name
+        }
+        var profile: [String: String] = [:]
+        for r in try query("SELECT login, name FROM github_users WHERE name IS NOT NULL") {
+            profile[r[0] as! String] = byName[(r[1] as! String).lowercased()]
+        }
+        let logins = try query("SELECT DISTINCT author FROM prs").compactMap { $0[0] as? String }
+        let affix = autoAffix(org: org, logins: logins)
         let prs = try query("""
             SELECT \(range.sql("merged_at")), author,
                    (julianday(merged_at) - julianday(created_at)) * 24, additions
             FROM prs WHERE merged_at >= ? ORDER BY merged_at
             """, [since]).map { r in
-            PRRow(bucket: r[0] as! String, person: r[1] as! String, hours: r[2] as? Double ?? 0, additions: r[3] as? Int ?? 0)
+            let login = r[1] as! String
+            return PRRow(bucket: r[0] as! String, person: profile[login] ?? byKey[githubKey(login, affix: affix)] ?? login,
+                         hours: r[2] as? Double ?? 0, additions: r[3] as? Int ?? 0)
         }
 
         let completed = try query("""

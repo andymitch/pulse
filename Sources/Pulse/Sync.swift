@@ -4,7 +4,7 @@ import Security
 let githubURL = URL(string: "https://api.github.com/graphql")!
 let linearURL = URL(string: "https://api.linear.app/graphql")!
 
-private let reposQuery = "query($org: String!) { organization(login: $org) { repositories(first: 100, orderBy: {field: PUSHED_AT, direction: DESC}) { nodes { name pushedAt isArchived } } } }"
+private let reposQuery = "query($org: String!) { organization(login: $org) { repositories(first: 100, orderBy: {field: PUSHED_AT, direction: DESC}) { nodes { name pushedAt isArchived } } membersWithRole(first: 100) { nodes { login name } } } }"
 private let prsQuery = "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { pullRequests(states: MERGED, first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { number createdAt mergedAt updatedAt additions author { __typename login } } } } }"
 private let issuesQuery = "query($after: String, $since: DateTimeOrDuration) { issues(first: 100, after: $after, includeArchived: true, orderBy: updatedAt, filter: {updatedAt: {gt: $since}}) { pageInfo { hasNextPage endCursor } nodes { id identifier title url createdAt completedAt creator { name } assignee { name } } } }"
 
@@ -37,7 +37,8 @@ struct Named: Decodable {
 }
 
 private struct ReposData: Decodable {
-    struct Org: Decodable { let repositories: Nodes<Repo> }
+    struct Member: Decodable { let login: String; let name: String? }
+    struct Org: Decodable { let repositories: Nodes<Repo>; let membersWithRole: Nodes<Member> }
     struct Repo: Decodable { let name: String; let pushedAt: String?; let isArchived: Bool }
     let organization: Org
 }
@@ -156,6 +157,11 @@ func syncGitHub(_ db: DB, token: String) async throws {
     guard !settings.githubOrg.isEmpty else { return }
     let org = settings.githubOrg
     let repos: ReposData = try await gql(githubURL, auth: auth, reposQuery, ["org": org])
+    try db.transaction {
+        for m in repos.organization.membersWithRole.nodes {
+            try db.query("INSERT OR REPLACE INTO github_users VALUES (?, ?)", [m.login, m.name])
+        }
+    }
     for repo in repos.organization.repositories.nodes where !repo.isArchived && (repo.pushedAt ?? "") >= since {
         var after: String?
         while true {
