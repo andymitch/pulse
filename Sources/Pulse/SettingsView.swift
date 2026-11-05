@@ -4,8 +4,8 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: Store
     @State private var draft = settings
-    @State private var accounts: [String] = []
-    @State private var orgs: [String] = []
+    @State private var accounts: [String]?
+    @State private var orgs: [String]?
     @State private var replacingKey = false
     @State private var synced = settings
 
@@ -34,21 +34,49 @@ struct SettingsView: View {
     private var form: some View {
         Form {
             Section {
-                if accounts.isEmpty {
+                if let accounts, accounts.isEmpty {
                     Text("Sign in to GitHub with the GitHub CLI to see PRs and reviews.")
                     HStack {
                         Button("Sign in to GitHub") { try? openCommandInTerminal("gh auth login --web") }
                         Link("Get the GitHub CLI", destination: URL(string: "https://cli.github.com")!)
                     }
                 } else {
-                    Picker("Account", selection: $draft.githubAccount) {
-                        ForEach(accounts, id: \.self) { Text($0).tag($0) }
+                    if let accounts {
+                        Picker("Account", selection: $draft.githubAccount) {
+                            ForEach(accounts, id: \.self) { Text($0).tag($0) }
+                        }
+                    } else {
+                        loading("Account", draft.githubAccount)
                     }
-                    Picker("Organization", selection: $draft.githubOrg) {
-                        Text("None").tag("")
-                        ForEach(orgs, id: \.self) { Text($0).tag($0) }
+                    if let orgs {
+                        Picker("Organization", selection: $draft.githubOrg) {
+                            Text("None").tag("")
+                            ForEach(orgs, id: \.self) { Text($0).tag($0) }
+                        }
+                    } else {
+                        loading("Organization", draft.githubOrg)
                     }
-                    Stepper("Monthly PR target: \(draft.monthlyPRTarget)", value: $draft.monthlyPRTarget, in: 1...200)
+                    LabeledContent("Monthly PR target") {
+                        HStack(spacing: 8) {
+                            Button { draft.monthlyPRTarget = max(draft.monthlyPRTarget - 1, 1) } label: { Image(systemName: "minus").frame(width: 12, height: 12) }
+                                .disabled(draft.monthlyPRTarget <= 1)
+                                .accessibilityLabel("Decrease")
+                            Text("\(draft.monthlyPRTarget)").monospacedDigit().frame(minWidth: 28)
+                            Button { draft.monthlyPRTarget = min(draft.monthlyPRTarget + 1, 200) } label: { Image(systemName: "plus").frame(width: 12, height: 12) }
+                                .disabled(draft.monthlyPRTarget >= 200)
+                                .accessibilityLabel("Increase")
+                        }
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Monthly PR target")
+                    .accessibilityValue("\(draft.monthlyPRTarget)")
+                    .accessibilityAdjustableAction { direction in
+                        switch direction {
+                        case .increment: draft.monthlyPRTarget = min(draft.monthlyPRTarget + 1, 200)
+                        case .decrement: draft.monthlyPRTarget = max(draft.monthlyPRTarget - 1, 1)
+                        @unknown default: break
+                        }
+                    }
                 }
             } header: { header("GitHub", .github) }
 
@@ -190,11 +218,23 @@ struct SettingsView: View {
 
     private func loadGitHub() async {
         let account = draft.githubAccount
+        orgs = nil
         let found = await Task.detached { ghAccounts() }.value
         accounts = found
         if !found.contains(account), let first = found.first { draft.githubAccount = first; return }
-        orgs = await Task.detached { ghOrgs(account: account) }.value
-        if !draft.githubOrg.isEmpty && !orgs.contains(draft.githubOrg) { orgs.insert(draft.githubOrg, at: 0) }
+        var loaded = await Task.detached { ghOrgs(account: account) }.value
+        if !draft.githubOrg.isEmpty && !loaded.contains(draft.githubOrg) { loaded.insert(draft.githubOrg, at: 0) }
+        orgs = loaded
+    }
+
+    private func loading(_ label: String, _ value: String) -> some View {
+        LabeledContent(label) {
+            HStack(spacing: 6) {
+                if !value.isEmpty { Text(value).foregroundStyle(.secondary) }
+                ProgressView().controlSize(.small)
+            }
+        }
+        .accessibilityLabel("\(label): loading")
     }
 
     private func save(_ old: Settings, _ new: Settings) {
@@ -256,6 +296,7 @@ struct ConnectionRow: View {
     }
 
     private var detail: String {
+        if connected == nil { return "Checking…" }
         if connected == true { return "\(agent.name) can read \(service.name) for the briefing. Pulse never posts." }
         if !agent.installed { return "The briefing runs on \(agent.name), which isn't installed." }
         return "Opens \(service.name) in your browser to let \(agent.name) read it. Pulse never posts."
