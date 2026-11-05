@@ -543,7 +543,7 @@ struct UpdatesRow: View {
 
     var body: some View {
         HStack {
-            Text("Pulse \(updater.current)")
+            Text("Pulse v\(updater.current)")
             Spacer()
             if updater.devBuild {
                 Text("Local build, updates are off").font(.caption).foregroundStyle(.secondary)
