@@ -25,7 +25,7 @@ private let mcpTools: [[String: Any]] = [
         "offset": ["type": "integer", "description": "First transcript line to return, default 0"],
         "lines": ["type": "integer", "description": "Transcript lines to return, default 200, at most 500"],
     ], required: ["id"]),
-    tool("search", "Search what Pulse has learned about my work: short dated facts (decisions, status, blockers, owners, commitments, open questions, preferences) from Slack, Linear, GitHub, mail and meetings, each with its sources. Newest first; when facts disagree, the newer one is the truth. Leave out query and give since to see what changed since a date. A fact that replaced older ones lists them in replaces.", [
+    tool("search", "Search what Pulse has learned about my work: short dated facts (decisions, status, blockers, owners, commitments, open questions, preferences) from Slack, Linear, GitHub, mail and meetings, each with its sources. Newest first; when facts disagree, the newer one is the truth. Leave out query and give since to see what changed since a date. A fact that replaced older ones lists them in replaces. A fact with a doubt is one Pulse couldn't settle, waiting for me to check.", [
         "query": ["type": "string", "description": "Words to find in the fact or its subject (a project, ticket ID, person or topic)"],
         "since": ["type": "string", "description": "Only facts observed on or after this date, YYYY-MM-DD"],
         "kind": ["type": "string", "enum": factKinds],
@@ -35,7 +35,7 @@ private let mcpTools: [[String: Any]] = [
     tool("subject", "Where one project, ticket, person or topic stands: its current facts newest first, and the history of facts newer ones replaced. Without a name, lists the subjects Pulse knows, most recently active first.", [
         "name": ["type": "string", "description": "The subject's name or an alias, such as a ticket ID or project name"],
     ]),
-    tool("remember", "Tell Pulse something worth knowing later about my work, such as a decision made, where work stands, a blocker, who owns what, a commitment, an open question, or one of my preferences. It's saved as unconfirmed until a later source backs it up or I confirm it in Pulse, and it never replaces a confirmed fact until then. Check search first so you don't repeat a known fact.", [
+    tool("remember", "Tell Pulse something worth knowing later about my work, such as a decision made, where work stands, a blocker, who owns what, a commitment, an open question, or one of my preferences. It's saved as unconfirmed until a later briefing finds a source that backs it up, and it never replaces a confirmed fact until then. Check search first so you don't repeat a known fact.", [
         "subject": ["type": "string", "description": "What it's about: a ticket ID (KLE-123), a person's full name, or a project or topic name. Reuse the name Pulse already uses."],
         "subjectKind": ["type": "string", "enum": subjectKinds],
         "fact": ["type": "string", "description": "One short sentence that still makes sense on its own a month from now, with names and dates"],
