@@ -61,24 +61,35 @@ struct ContentView: View {
 
     @ViewBuilder private var trends: some View {
         SectionHeader(title: "Trends") {
+            Picker("", selection: $store.metric) {
+                ForEach(TrendMetric.allCases.filter { $0 == .prs || store.hasLinearKey }, id: \.self) { m in
+                    Label { Text(m.rawValue) } icon: { Image(nsImage: m.brand.padded(size: 13, trailing: 5)) }.tag(m)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
             Picker("", selection: $store.range) {
                 ForEach(TrendRange.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            PeoplePicker(people: store.people, me: store.me, selection: $store.selected)
+            PeoplePicker(people: store.people, me: store.meInTrends, selection: $store.selected)
         }
-        Panel(title: "PRs merged", brand: .github) {
-            StackedChart(store: store, counts: prCounts, unit: "PRs")
-            PRStatsTable(store: store, prs: store.trends.prs.filter { store.includes($0.person) })
-        }
-        if store.hasLinearKey {
-            Panel(title: "Tickets closed", brand: .linear) {
+        VStack(alignment: .leading, spacing: 10) {
+            switch store.metric {
+            case .prs:
+                StackedChart(store: store, counts: prCounts, unit: "PRs")
+                PRStatsTable(store: store, prs: store.trends.prs.filter { store.includes($0.person) })
+                Text("PRs merged, by GitHub login.").font(.caption2).foregroundStyle(.secondary)
+            case .closed:
                 StackedChart(store: store, counts: store.trends.completed, unit: "Tickets")
-                Text("Tickets completed, by assignee.").font(.caption2).foregroundStyle(.secondary)
+                Text("Tickets completed, by Linear assignee.").font(.caption2).foregroundStyle(.secondary)
             }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var prCounts: [Count] {
@@ -122,6 +133,12 @@ struct ContentView: View {
         }
         .padding(.horizontal, 16)
     }
+}
+
+enum TrendMetric: String, CaseIterable {
+    case prs = "PRs merged", closed = "Tickets closed"
+
+    var brand: Brand { self == .prs ? .github : .linear }
 }
 
 enum PulseTab: String, CaseIterable {
