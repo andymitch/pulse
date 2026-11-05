@@ -52,7 +52,6 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var home: some View {
-        WeeklyPace(store: store)
         TodayView(store: store)
         FocusHeader(store: store)
         PrioritiesView(store: store)
@@ -90,6 +89,7 @@ struct ContentView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        if !settings.githubAccount.isEmpty { MonthPace(store: store) }
     }
 
     private var prCounts: [Count] {
@@ -204,25 +204,33 @@ struct PeoplePicker: View {
     }
 }
 
-struct WeeklyPace: View {
+struct MonthPace: View {
     @ObservedObject var store: Store
 
     var body: some View {
-        let target = max(settings.weeklyPRTarget, 1), merged = store.mergedThisWeek
-        if !settings.githubAccount.isEmpty {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text("PRs merged this week").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(merged) of \(target)").font(.caption.monospacedDigit()).foregroundStyle(merged >= target ? .green : .secondary)
+        let (totals, days) = store.myMonth, target = max(settings.monthlyPRTarget, 1)
+        let done = totals.last ?? 0, expected = Int((Double(target) * Double(totals.count) / Double(days)).rounded())
+        Panel(title: "My PRs this month", brand: .github, accessory: {
+            Text("\(done) of \(target) · " + (done == expected ? "on pace" : done > expected ? "\(done - expected) ahead of pace" : "\(expected - done) behind pace"))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(done >= expected ? .green : .secondary)
+        }) {
+            Chart {
+                ForEach(Array(totals.enumerated()), id: \.offset) { i, total in
+                    BarMark(x: .value("Day", i + 1), y: .value("PRs", total), width: .fixed(12))
+                        .foregroundStyle(Color.accentColor.opacity(0.6))
                 }
-                ProgressView(value: Double(min(merged, target)), total: Double(target))
-                    .tint(merged >= target ? .green : .accentColor)
+                ForEach([0, days], id: \.self) { day in
+                    LineMark(x: .value("Day", day), y: .value("PRs", Double(target) * Double(day) / Double(days)), series: .value("Line", "Target"))
+                        .foregroundStyle(Color.gray)
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 4)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("PRs merged this week: \(merged) of \(target)")
+            .chartXScale(domain: 0...days)
+            .chartYScale(domain: 0...max(target, done))
+            .chartXAxis { AxisMarks(values: [1, 8, 15, 22, days]) }
+            .frame(height: 140)
+            .accessibilityLabel("My PRs this month: \(done) of \(target), \(done >= expected ? "on or ahead of" : "behind") pace")
         }
     }
 }

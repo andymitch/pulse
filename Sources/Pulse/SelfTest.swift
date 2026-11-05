@@ -49,8 +49,11 @@ func selfTest() throws {
     check(Set(weeks.prs.map(\.bucket)) == ["2026-08-31", "2026-09-28"], "weeks start on Monday")
     check(TrendRange.month.buckets(now: iso.date(from: "2026-10-21T12:00:00Z")!) == ["2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"], "last 5 weeks")
     check(TrendRange.week.buckets(now: iso.date(from: "2026-10-21T12:00:00Z")!).last == "2026-10-21", "last 7 days end today")
-    check(db.mergedSince(iso.date(from: "2026-09-01T00:00:00Z")!, author: "jane-acme") == 2 && db.mergedSince(iso.date(from: "2026-10-02T00:00:00Z")!, author: "jane-acme") == 0,
-          "the weekly pace counts my PRs merged since a date")
+    var utc = Calendar(identifier: .gregorian)
+    utc.timeZone = TimeZone(identifier: "UTC")!
+    let pace = monthPace(db.merged(since: iso.date(from: "2026-09-01T00:00:00Z")!, author: "jane-acme"), now: iso.date(from: "2026-10-03T12:00:00Z")!, calendar: utc)
+    check(pace.totals == [1, 1, 1] && pace.days == 31 && db.merged(since: iso.date(from: "2026-10-02T00:00:00Z")!, author: "jane-acme").isEmpty,
+          "my month's pace is a running total per day of the PRs I merged this month")
     check(Version("v2")! > Version("1.4.0")!, "major beats minor")
     check(Version("2.0.0-beta.3")! < Version("v2")!, "stable beats its beta")
     check(Version("v2-beta.2")! < Version("v2-beta.10")!, "beta numbers compare as numbers")
