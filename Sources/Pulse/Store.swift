@@ -4,7 +4,7 @@ import AppKit
 final class Store: ObservableObject {
     @Published var trends = Trends()
     private var colorOrder: [String] = []
-    @Published var mergedThisWeek = 0
+    @Published var myMonth: (totals: [Int], days: Int) = ([], 30)
     @Published var syncing = false
     @Published var lastSync: Date?
     @Published var lastError: String?
@@ -64,7 +64,7 @@ final class Store: ObservableObject {
             let year = range == .year ? trends : try db.trends(since: TrendRange.year.buckets()[0], range: .year)
             colorOrder = ranked(year)
             me = db.meta("me")
-            mergedThisWeek = db.mergedSince(thisMonday, author: settings.githubAccount)
+            myMonth = monthPace(db.merged(since: Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date(), author: settings.githubAccount))
         } catch {
             lastError = "\(error)"
         }

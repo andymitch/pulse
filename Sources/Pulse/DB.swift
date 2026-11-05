@@ -233,7 +233,19 @@ extension DB {
         return Trends(prs: prs, completed: completed)
     }
 
-    func mergedSince(_ since: Date, author: String) -> Int {
-        ((try? query("SELECT count(*) FROM prs WHERE author = ? AND merged_at >= ?", [author, iso.string(from: since)]))?.first?[0] as? Int) ?? 0
+    func merged(since: Date, author: String) -> [Date] {
+        ((try? query("SELECT merged_at FROM prs WHERE author = ? AND merged_at >= ? ORDER BY merged_at", [author, iso.string(from: since)])) ?? [])
+            .compactMap { ($0[0] as? String).flatMap(iso.date(from:)) }
     }
+}
+
+func monthPace(_ merged: [Date], now: Date = Date(), calendar: Calendar = .current) -> (totals: [Int], days: Int) {
+    guard let month = calendar.dateInterval(of: .month, for: now), let days = calendar.range(of: .day, in: .month, for: now)?.count else { return ([], 30) }
+    let today = calendar.component(.day, from: now)
+    let perDay = Dictionary(grouping: merged.filter { month.contains($0) }) { calendar.component(.day, from: $0) }.mapValues(\.count)
+    var total = 0
+    return ((1...today).map { day in
+        total += perDay[day] ?? 0
+        return total
+    }, days)
 }

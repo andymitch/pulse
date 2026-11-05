@@ -56,7 +56,7 @@ enum IDE: String, Codable, CaseIterable {
 struct Settings: Codable, Equatable {
     var githubOrg = ""
     var githubAccount = ""
-    var weeklyPRTarget = 10
+    var monthlyPRTarget = 40
     var repoPath = ""
     var worktreeRoot = "~/worktrees"
     var slack = true
