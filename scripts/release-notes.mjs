@@ -34,12 +34,12 @@ const ghJson = (args) =>
 const FORCE_LABEL = "changelog-include";
 
 // Start of the current beta cycle: when the earliest vN-beta.* for this major
-// was published. Null when cutting a beta itself (a beta's notes should list
-// everything since the last stable, so testers see the whole surface they are
-// being asked to exercise) or when the release had no betas.
+// was published. Only the stable vN that ends the cycle folds. Null when cutting
+// a beta (its notes list everything since the last stable, so testers see the
+// whole surface they are being asked to exercise), a hotfix vN.X (the bugs it
+// fixes shipped in vN), or when the release had no betas.
 const cycleStart = (() => {
-  if (/-beta\./.test(TAG)) return null;
-  const major = /^v(\d+)/.exec(TAG)?.[1];
+  const major = /^v(\d+)$/.exec(TAG)?.[1];
   if (!major) return null;
   let dates = [];
   try {
@@ -165,7 +165,7 @@ let md = "";
 for (const cat of [...CATEGORIES.map((c) => c.title), OTHER]) {
   if (sections[cat]?.length) md += `### ${cat}\n${sections[cat].join("\n")}\n\n`;
 }
-md += `**Full Changelog**: https://github.com/${REPO}/commits/${TAG}\n`;
+md += `**Full Changelog**: https://github.com/${REPO}/${PREV ? `compare/${PREV}...${TAG}` : `commits/${TAG}`}\n`;
 if (dropped.length) {
   process.stderr.write(
     `Folded ${dropped.length} in-cycle entries (raised and resolved during the beta):\n` +
