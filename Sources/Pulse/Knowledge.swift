@@ -60,6 +60,7 @@ struct KnowledgeView: View {
     @State private var question = ""
     @State private var answers: [Answer] = []
     @State private var asking = false
+    @State private var thought = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -76,7 +77,7 @@ struct KnowledgeView: View {
                 }
             }
             ForEach(answers) { a in
-                AnswerView(store: store, answer: a)
+                AnswerView(store: store, answer: a, thought: a.id == answers.last?.id && asking ? thought : nil)
                     .padding(.horizontal, 14)
             }
             FocusHeader(store: store)
@@ -114,10 +115,11 @@ struct KnowledgeView: View {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !asking else { return }
         question = ""
+        thought = ""
         asking = true
         let previous = answers.last
-        let facts = localModelReady ? (try? factsFor(question: q, in: store.db)) ?? [] : []
-        let answer = Answer(question: q, factIDs: facts.compactMap { $0["id"] as? Int })
+        let facts = (try? factsFor(question: q, in: store.db)) ?? []
+        let answer = Answer(question: q, factIDs: localModelReady ? facts.compactMap { $0["id"] as? Int } : [])
         answers.append(answer)
         let me = store.me ?? "me"
         Task {
@@ -128,7 +130,22 @@ struct KnowledgeView: View {
             if a.text == nil || a.text?.contains("doesn't know") == true, !demoMode {
                 a.text = nil
                 a.factIDs = []
-                do { a.text = try await agentAnswer(q, me: me) } catch { a.error = "\(error)" }
+                let id = a.id
+                if !facts.isEmpty, let i = answers.firstIndex(where: { $0.id == id }) { answers[i].steps = ["Checking what Pulse knows"] }
+                do {
+                    a.text = try await agentAnswer(q, me: me, known: facts) { event in
+                        guard let i = answers.firstIndex(where: { $0.id == id }) else { return }
+                        switch event {
+                        case .step(let step):
+                            if answers[i].steps?.last != step { answers[i].steps = (answers[i].steps ?? []) + [step] }
+                        case .thought(let text):
+                            thought = String((thought + text).suffix(400))
+                        }
+                    }
+                } catch {
+                    a.error = "\(error)"
+                }
+                a.steps = answers.first(where: { $0.id == id })?.steps
             }
             if let i = answers.firstIndex(where: { $0.id == a.id }) { answers[i] = a }
             save()
@@ -140,6 +157,7 @@ struct KnowledgeView: View {
 private struct AnswerView: View {
     @ObservedObject var store: Store
     let answer: Answer
+    let thought: String?
     @State private var showFacts = false
 
     var body: some View {
@@ -150,7 +168,23 @@ private struct AnswerView: View {
             } else if let error = answer.error {
                 Text(error).font(.caption).foregroundStyle(.red).lineLimit(4)
             } else {
-                Text("Thinking…").foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    let steps = answer.steps ?? []
+                    ForEach(Array(steps.enumerated().suffix(3)), id: \.offset) { i, step in
+                        HStack(spacing: 6) {
+                            if i == steps.count - 1 { ProgressView().controlSize(.mini) } else { Image(systemName: "checkmark").font(.caption2) }
+                            Text(step).font(.caption)
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    if (answer.steps ?? []).isEmpty { Text("Thinking…").foregroundStyle(.secondary) }
+                    if let line = latestThought(thought) {
+                        Text(line).font(.caption).italic().foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
+                    }
+                }
+            }
+            if answer.text != nil || answer.error != nil, let steps = answer.steps, !lookedIn(steps).isEmpty {
+                Text(lookedIn(steps)).font(.caption).foregroundStyle(.secondary)
             }
             if answer.text != nil, !answer.factIDs.isEmpty {
                 DisclosureGroup(isExpanded: $showFacts) {

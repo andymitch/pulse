@@ -187,6 +187,17 @@ func selfTest() throws {
           "a question gets the current facts about the subjects it names and the words it uses, not replaced facts or filler words")
     check(withoutCitations("[2] Chad owns it [1, 3].") == "Chad owns it." && withoutCitations("See [the doc](https://x).") == "See [the doc](https://x).", "on-device answers drop citation numbers but keep links")
     check(linkLabel("PR #1490", kind: "github") == "#1490" && linkLabel("PR #1490", kind: "slack") == "PR #1490" && linkLabel("KLE-630", kind: "linear") == "KLE-630", "GitHub links in answers read as #123")
+    let codemode = #"{"type":"tool_execution_start","toolName":"codemode","args":{"code":"const a = await tools.mcp__pulse__search({ query: 'allianz' });\nconst b = await tools.mcp__linear__list_issues({ query: \"allianz credit\" });"}}"#
+    check(agentEvents(codemode) == [.step("Checking what Pulse knows"), .step("Looking in Linear for \"allianz\"")], "pi codemode calls read as the services they look in")
+    check(agentEvents(#"{"type":"tool_execution_start","toolName":"bash","args":{"command":"gh pr view 1502"}}"#) == [.step("Looking in GitHub")]
+          && agentEvents(#"{"type":"tool_execution_start","toolName":"read","args":{"path":"/x"}}"#).isEmpty, "gh commands are GitHub, and plain file reads aren't shown")
+    check(agentEvents(#"{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"Checking the "}}"#) == [.thought("Checking the ")], "pi reasoning streams as thought")
+    check(agentEvents(#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Look in Slack"},{"type":"tool_use","name":"mcp__slack__search","input":{"query":"refresh"}}]}}"#)
+          == [.thought("Look in Slack "), .step("Looking in Slack for \"refresh\"")], "Claude Code events read the same way")
+    check(streaming("pi -p --no-session @'/x'") == "pi --mode json -p --no-session @'/x'" && streaming("claude -p \"$(cat x)\"").hasPrefix("claude --output-format stream-json --verbose -p")
+          && streaming("my-agent {prompt}") == "my-agent {prompt}", "pi and Claude Code run with streaming output, other commands as they are")
+    check(lookedIn(["Checking what Pulse knows", "Looking in Linear for \"a\"", "Looking in Slack", "Looking in Linear"]) == "Looked in Pulse, Linear and Slack", "the steps fold into where it looked")
+    check(latestThought("I should check Linear. Then look at the Slack thread for the cause") == "Then look at the Slack thread for the cause", "the latest line of reasoning is shown")
     let pending = try unconfirmedFacts(mem)
     check(pending.map(\.text) == ["Invites shipped to everyone"] && pending[0].replaces == ["Invites merged"], "unconfirmed facts are listed with what they'd replace")
     try confirmFact(mem, id: pending[0].id, text: "Invites shipped to all workspaces")
