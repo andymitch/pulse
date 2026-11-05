@@ -36,39 +36,13 @@ struct PrioritiesView: View {
 private struct SourceCard: View {
     let source: Synthesis.Source
 
-    private var brand: Brand? {
-        switch source.kind {
-        case "slack": .slack
-        case "linear": .linear
-        case "github": .github
-        default: nil
-        }
-    }
-
-    private var symbol: String {
-        switch source.kind {
-        case "meeting": "waveform"
-        case "mail": "envelope"
-        case "session": "terminal"
-        default: "doc.text"
-        }
-    }
-
-    private var app: App? {
-        switch source.kind {
-        case "slack": .slack
-        case "linear": .linear
-        default: nil
-        }
-    }
-
     var body: some View {
         Button {
-            if let url = URL(string: source.url) { open(url, in: app) }
+            if let url = URL(string: source.url) { openSource(url, kind: source.kind) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
-                    if let brand { Image(nsImage: brand.image(size: 11)) } else { Image(systemName: symbol).font(.system(size: 10)).frame(width: 11, height: 11) }
+                    SourceIcon(kind: source.kind, url: URL(string: source.url), size: 11)
                     Text(source.title).font(.caption.weight(.semibold)).lineLimit(1)
                 }
                 if let excerpt = source.excerpt {
@@ -88,23 +62,7 @@ private struct SourceCard: View {
     }
 }
 
-struct ConfirmFactsView: View {
-    @ObservedObject var store: Store
-
-    var body: some View {
-        let facts = store.pendingFacts
-        if !facts.isEmpty {
-            Panel(title: "Agents noted · \(facts.count) to confirm") {
-                ForEach(facts) { fact in
-                    PendingFactRow(store: store, fact: fact)
-                    if fact.id != facts.last?.id { Divider() }
-                }
-            }
-        }
-    }
-}
-
-private struct PendingFactRow: View {
+struct PendingFactRow: View {
     @ObservedObject var store: Store
     let fact: PendingFact
     @State private var draft: String?
@@ -131,6 +89,29 @@ private struct PendingFactRow: View {
             }
             .buttonStyle(.link)
             .font(.caption)
+        }
+    }
+}
+
+struct SourceIcon: View {
+    let kind: String
+    var url: URL?
+    var size: CGFloat = 11
+
+    private var session: Brand? {
+        guard kind == "session", let name = url?.lastPathComponent else { return nil }
+        return name.hasPrefix("claude-") ? .claude : name.hasPrefix("pi-") ? .pi : nil
+    }
+
+    var body: some View {
+        switch kind {
+        case "slack": Image(nsImage: Brand.slack.image(size: size))
+        case "linear": Image(nsImage: Brand.linear.image(size: size))
+        case "github": Image(nsImage: Brand.github.image(size: size))
+        case "session" where session != nil: Image(nsImage: session!.image(size: size))
+        default:
+            Image(systemName: ["meeting": "waveform", "mail": "envelope", "session": "terminal"][kind] ?? "doc.text")
+                .font(.system(size: size - 1)).frame(width: size, height: size)
         }
     }
 }

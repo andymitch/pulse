@@ -185,12 +185,14 @@ private struct UsersData: Decodable {
     struct User: Decodable { let name, email: String }
     struct Org: Decodable { let urlKey: String }
     let viewer: User
+    struct Project: Decodable { let name: String }
     let users: Nodes<User>
     let organization: Org
+    let projects: Nodes<Project>
 }
 
 func syncLinear(_ db: DB, key: String) async throws {
-    let people: UsersData = try await gql(linearURL, auth: key, "{ viewer { name email } organization { urlKey } users(first: 250, includeDisabled: true) { nodes { name email } } }")
+    let people: UsersData = try await gql(linearURL, auth: key, "{ viewer { name email } organization { urlKey } users(first: 250, includeDisabled: true) { nodes { name email } } projects(first: 250) { nodes { name } } }")
     try db.transaction {
         try db.query("DELETE FROM users")
         for u in people.users.nodes where !u.email.hasSuffix(".linear.app") {
@@ -198,6 +200,8 @@ func syncLinear(_ db: DB, key: String) async throws {
         }
         try db.setMeta("me", displayName(people.viewer.name))
         try db.setMeta("linear_workspace", people.organization.urlKey)
+        try db.set(people.projects.nodes.map(\.name), "linear_projects")
+        try fixSubjects(db)
     }
     let (since, start) = window(db, "linear_since")
     var after: String?

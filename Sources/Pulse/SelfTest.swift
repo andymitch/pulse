@@ -133,6 +133,32 @@ func selfTest() throws {
     let counts = try mem.query("SELECT (SELECT count(*) FROM subjects), (SELECT count(*) FROM sources)")[0]
     check(counts[0] as? Int == 2 && counts[1] as? Int == 1, "subjects and sources are reused")
     let texts = { (facts: [[String: Any]]) in facts.map { $0["text"] as? String ?? "" } }
+    let state = FileManager.default.temporaryDirectory.appendingPathComponent("slack-state-\(UUID()).json")
+    defer { try? FileManager.default.removeItem(at: state) }
+    try Data(#"{"workspaces": {"T02ABC": {"domain": "acme", "name": "Acme"}}}"#.utf8).write(to: state)
+    let deep = slackDeepLink(URL(string: "https://acme.slack.com/archives/C08QBJ75EUB/p1793817031868429?thread_ts=1793810000.000100&cid=C08QBJ75EUB")!, state: state)
+    check(deep?.absoluteString == "slack://channel?team=T02ABC&id=C08QBJ75EUB&message=1793817031.868429&thread_ts=1793810000.000100"
+          && slackDeepLink(URL(string: "https://other.slack.com/archives/C1/p1793817031868429")!, state: state) == nil,
+          "a Slack message link opens at that message in the Slack app, and other workspaces fall back to the browser")
+    let slackLink = URL(string: "https://acme.slack.com/archives/C1/p1")!, linearLink = URL(string: "https://linear.app/acme/review/fix-it")!
+    check(sourceKind(slackLink, given: "session") == "slack" && sourceKind(linearLink, given: "doc") == "linear" && sourceKind(URL(fileURLWithPath: "/x/Pulse/sessions/pi-1.md"), given: "doc") == "session"
+          && sourceKind(URL(string: "message://%3Ca%3E")!, given: "doc") == "mail", "a source's kind comes from its link, whatever the agent called it")
+    check(sourceTitle("https://acme.slack.com/archives/C1/p1", url: slackLink) == "Slack message" && sourceTitle("", url: linearLink) == "Linear review"
+          && sourceTitle("Standup", url: slackLink) == "Standup" && sourceTitle("https://x.slack.com/a", url: URL(fileURLWithPath: "/x/Pulse/sessions/pi-1.md")) == "pi session",
+          "a source titled with a bare link gets a readable name")
+    let real = try DB(path: ":memory:")
+    try real.query("INSERT INTO users VALUES ('Jane Doe', 'jane@x.com')")
+    try real.set(["Requests v1", "MCP v2"], "linear_projects")
+    let linked = try realSubject(kind: "project", names: ["requests V1"], in: real), made = try realSubject(kind: "project", names: ["Pulse"], in: real)
+    let stranger = try realSubject(kind: "person", names: ["Maya"], in: real), teammate = try realSubject(kind: "person", names: ["jane doe"], in: real)
+    let titled = try realSubject(kind: "topic", names: ["Invite teammates", "KLE-9"], in: real)
+    check(linked.kind == "project" && linked.names[0] == "Requests v1", "a project subject takes the Linear project's own name")
+    check(made.kind == "topic" && stranger.kind == "topic" && teammate.kind == "person" && teammate.names[0] == "Jane Doe", "only Linear projects and teammates are projects and people; anything else is a topic")
+    check(titled.kind == "ticket" && titled.names == ["KLE-9", "Invite teammates"], "a subject with a ticket ID is that ticket, named by the ID")
+    try real.query("INSERT INTO subjects (kind, name, aliases) VALUES ('project', 'Pulse', '[]'), ('topic', 'mcp v2', '[]'), ('ticket', 'Ship invites', '[\"KLE-4\"]'), ('ticket', 'KLE-5', '[\"Requests v1\"]')")
+    try fixSubjects(real)
+    check(try real.query("SELECT kind || ':' || name FROM subjects ORDER BY id").compactMap { $0[0] as? String } == ["topic:Pulse", "project:MCP v2", "ticket:KLE-4", "project:Requests v1"],
+          "existing subjects are fixed up to real projects, tickets and topics, and a project name wins over a ticket ID")
     let invites = try searchFacts(mem, query: "invite")
     check(texts(invites) == ["Due Friday", "Invites merged"] && (invites[1]["replaces"] as? [[String: Any]])?.count == 2, "search finds current facts by word stem or subject alias, with what they replaced")
     let replaced = (try searchFacts(mem, query: "invites are"), try searchFacts(mem, query: "invites are", superseded: true))
@@ -151,6 +177,27 @@ func selfTest() throws {
     let agentAdded = try noted("KLE-1", "Invites shipped to everyone", 2)
     let stillCurrent = texts(try searchFacts(mem, query: "invites")).contains("Invites merged")
     check(agentAdded == FactCounts(added: 1) && stillCurrent, "an agent's fact needs no source and doesn't replace a confirmed one yet")
+    let before = try changedFacts(mem, since: "2026-11-03T00:00:00Z"), afterwards = try changedFacts(mem, since: "2026-11-03T13:00:00Z")
+    check(before.map { $0["text"] as? String } == ["Due Friday", "Invites merged"] && afterwards.isEmpty && (before[1]["replaces"] as? [Any])?.count == 2,
+          "since you last looked lists confirmed facts learned after that time, newest first, with what they replaced, and skips agents' unconfirmed ones")
+    let picked = try factsFor(question: "When is KLE-3 due?", in: mem).map { $0["text"] as? String ?? "" }
+    let worded = try factsFor(question: "What about the invites?", in: mem).map { $0["text"] as? String ?? "" }
+    let filler = try factsFor(question: "what is the", in: mem)
+    check(picked.first == "Due Friday" && worded.contains("Invites merged") && !worded.contains("Invites are in review") && filler.isEmpty,
+          "a question gets the current facts about the subjects it names and the words it uses, not replaced facts or filler words")
+    check(withoutCitations("[2] Chad owns it [1, 3].") == "Chad owns it." && withoutCitations("See [the doc](https://x).") == "See [the doc](https://x).", "on-device answers drop citation numbers but keep links")
+    check(linkLabel("PR #1490", kind: "github") == "#1490" && linkLabel("PR #1490", kind: "slack") == "PR #1490" && linkLabel("KLE-630", kind: "linear") == "KLE-630", "GitHub links in answers read as #123")
+    let codemode = #"{"type":"tool_execution_start","toolName":"codemode","args":{"code":"const a = await tools.mcp__pulse__search({ query: 'allianz' });\nconst b = await tools.mcp__linear__list_issues({ query: \"allianz credit\" });"}}"#
+    check(agentEvents(codemode) == [.step("Checking what Pulse knows"), .step("Looking in Linear for \"allianz\"")], "pi codemode calls read as the services they look in")
+    check(agentEvents(#"{"type":"tool_execution_start","toolName":"bash","args":{"command":"gh pr view 1502"}}"#) == [.step("Looking in GitHub")]
+          && agentEvents(#"{"type":"tool_execution_start","toolName":"read","args":{"path":"/x"}}"#).isEmpty, "gh commands are GitHub, and plain file reads aren't shown")
+    check(agentEvents(#"{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"Checking the "}}"#) == [.thought("Checking the ")], "pi reasoning streams as thought")
+    check(agentEvents(#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Look in Slack"},{"type":"tool_use","name":"mcp__slack__search","input":{"query":"refresh"}}]}}"#)
+          == [.thought("Look in Slack "), .step("Looking in Slack for \"refresh\"")], "Claude Code events read the same way")
+    check(streaming("pi -p --no-session @'/x'") == "pi --mode json -p --no-session @'/x'" && streaming("claude -p \"$(cat x)\"").hasPrefix("claude --output-format stream-json --verbose -p")
+          && streaming("my-agent {prompt}") == "my-agent {prompt}", "pi and Claude Code run with streaming output, other commands as they are")
+    check(lookedIn(["Checking what Pulse knows", "Looking in Linear for \"a\"", "Looking in Slack", "Looking in Linear"]) == "Looked in Pulse, Linear and Slack", "the steps fold into where it looked")
+    check(latestThought("I should check Linear. Then look at the Slack thread for the cause") == "Then look at the Slack thread for the cause", "the latest line of reasoning is shown")
     let pending = try unconfirmedFacts(mem)
     check(pending.map(\.text) == ["Invites shipped to everyone"] && pending[0].replaces == ["Invites merged"], "unconfirmed facts are listed with what they'd replace")
     try confirmFact(mem, id: pending[0].id, text: "Invites shipped to all workspaces")
@@ -223,6 +270,21 @@ func selfTest() throws {
     check(later.contains("documents created since 2026-11-03T22:00:00Z") && later.contains("gather only what's new") && !later.contains("in the last 14 days")
           && first.contains("documents created in the last 14 days") && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
           "after a run the briefing reads only what's new, a first run reads 14 days, and memory is updated before the briefing is written")
+    let d = "2026-11-03"
+    check(withoutOwnDate("On 2026-11-03 Drew Osmond opened PR #2047.", d) == "Drew Osmond opened PR #2047."
+          && withoutOwnDate("As of 2026-11-03 document unification met 9 of 10 criteria.", d) == "Document unification met 9 of 10 criteria."
+          && withoutOwnDate("Change orders are plain requests (decided 2026-11-03).", d) == "Change orders are plain requests."
+          && withoutOwnDate("Jason said to skip auto-close, on 2026-11-03.", d) == "Jason said to skip auto-close.",
+          "a fact's own date is left out of its text, since it's shown beside it")
+    let short = { (day: String) in (try? Date(day, strategy: localDay))?.formatted(Calendar.current.component(.year, from: try! Date(day, strategy: localDay)) == Calendar.current.component(.year, from: Date()) ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year()) ?? day }
+    check(withoutOwnDate("On 2026-11-02 Abe reported a gap.", d) == "On \(short("2026-11-02")) Abe reported a gap." && withoutOwnDate("Open as of 2026-11-03: who owns it.", d) == "Open as of \(short(d)): who owns it."
+          && withoutOwnDate("Requests had not reached prod as of 2026-11-03, so launch moved to Monday 2026-11-09.", d) == "Requests had not reached prod, so launch moved to Monday \(short("2026-11-09")).",
+          "other dates stay but read as short dates, and the fact's own date is dropped mid-sentence too")
+    let wed = try Date("2026-11-04", strategy: localDay).addingTimeInterval(12 * 3600)
+    let oct20 = try Date("2026-10-20", strategy: localDay).formatted(.dateTime.month(.abbreviated).day())
+    check(friendlyDay("2026-11-04", now: wed) == "Today" && friendlyDay("2026-11-03", now: wed) == "Yesterday" && friendlyDay("2026-11-01", now: wed) == "Sunday"
+          && friendlyDay("2026-10-20", now: wed) == oct20,
+          "dates read as today, yesterday, a weekday this week, or a short date")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }

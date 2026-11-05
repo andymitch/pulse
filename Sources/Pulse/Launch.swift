@@ -7,7 +7,41 @@ enum App: String {
     var url: URL { URL(fileURLWithPath: "/Applications/\(rawValue).app") }
 }
 
+let slackState = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Slack/storage/root-state.json")
+
+func slackDeepLink(_ url: URL, state: URL = slackState) -> URL? {
+    guard let host = url.host, host.hasSuffix(".slack.com"), let i = url.pathComponents.firstIndex(of: "archives"), i + 1 < url.pathComponents.count,
+          let root = (try? JSONSerialization.jsonObject(with: Data(contentsOf: state))) as? [String: Any],
+          let team = ((root["workspaces"] as? [String: [String: Any]]) ?? [:]).first(where: { $0.value["domain"] as? String == String(host.dropLast(".slack.com".count)) })?.key
+    else { return nil }
+    var items = [URLQueryItem(name: "team", value: team), URLQueryItem(name: "id", value: url.pathComponents[i + 1])]
+    if i + 2 < url.pathComponents.count, case let p = url.pathComponents[i + 2], p.hasPrefix("p"), p.count > 7 {
+        let digits = p.dropFirst()
+        items.append(URLQueryItem(name: "message", value: "\(digits.dropLast(6)).\(digits.suffix(6))"))
+    }
+    if let thread = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "thread_ts" })?.value {
+        items.append(URLQueryItem(name: "thread_ts", value: thread))
+    }
+    var c = URLComponents()
+    c.scheme = "slack"
+    c.host = "channel"
+    c.queryItems = items
+    return c.url
+}
+
+func openLink(_ url: URL) {
+    open(url, in: ["slack": App.slack, "linear": .linear][sourceKind(url, given: "")])
+}
+
+func openSource(_ url: URL, kind: String) {
+    open(url, in: ["slack": App.slack, "linear": .linear][kind])
+}
+
 func open(_ url: URL, in app: App? = nil) {
+    if app == .slack {
+        NSWorkspace.shared.open(slackDeepLink(url) ?? url)
+        return
+    }
     guard let app, FileManager.default.fileExists(atPath: app.url.path) else {
         NSWorkspace.shared.open(url)
         return

@@ -1,161 +1,305 @@
 import SwiftUI
 
 struct KnownFact: Identifiable, Equatable {
-    struct Source: Equatable { let title: String; let url: URL }
+    struct Source: Equatable { let kind, title: String; let url: URL }
     let id: Int
     let subject, kind, text, observed, status: String
+    let subjectTitle: String?
     let replaced: Bool
+    let replaces: [String]
     let sources: [Source]
 
     init(_ d: [String: Any]) {
         id = d["id"] as? Int ?? 0
         subject = (d["subject"] as? [String: Any])?["name"] as? String ?? ""
+        subjectTitle = (d["subject"] as? [String: Any])?["title"] as? String
         kind = d["kind"] as? String ?? ""
-        text = d["text"] as? String ?? ""
         observed = d["observed"] as? String ?? ""
+        text = withoutOwnDate(d["text"] as? String ?? "", observed)
         status = d["status"] as? String ?? ""
         replaced = d["supersededBy"] != nil
+        let day = observed
+        replaces = ((d["replaces"] as? [[String: Any]]) ?? []).compactMap { r in (r["text"] as? String).map { withoutOwnDate($0, r["observed"] as? String ?? day) } }
         sources = ((d["sources"] as? [[String: Any]]) ?? []).compactMap { s in
-            (s["url"] as? String).flatMap(URL.init).map { Source(title: s["title"] as? String ?? $0.absoluteString, url: $0) }
+            (s["url"] as? String).flatMap(URL.init).map { Source(kind: sourceKind($0, given: s["kind"] as? String ?? ""), title: sourceTitle(s["title"] as? String ?? "", url: $0), url: $0) }
         }
     }
+}
+
+func withoutOwnDate(_ text: String, _ day: String) -> String {
+    let d = NSRegularExpression.escapedPattern(for: day)
+    var t = text
+    if !day.isEmpty {
+        for pattern in ["^(On|As of|Since|By) \(d),? ", " \\((decided |as of |on )?\(d)\\)", ",? (on|as of) \(d)(?!:)"] {
+            t = t.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        if t != text, let first = t.first { t = first.uppercased() + t.dropFirst() }
+    }
+    let iso = try! NSRegularExpression(pattern: "\\b(\\d{4})-(\\d{2})-(\\d{2})\\b")
+    for m in iso.matches(in: t, range: NSRange(t.startIndex..., in: t)).reversed() {
+        guard let r = Range(m.range, in: t), let date = try? Date(String(t[r]), strategy: localDay) else { continue }
+        let sameYear = Calendar.current.component(.year, from: date) == Calendar.current.component(.year, from: Date())
+        t.replaceSubrange(r, with: date.formatted(sameYear ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year()))
+    }
+    return t
+}
+
+func friendlyDay(_ day: String, now: Date = Date()) -> String {
+    guard let date = try? Date(day, strategy: localDay) else { return day }
+    let cal = Calendar.current
+    if cal.isDate(date, inSameDayAs: now) { return "Today" }
+    if let y = cal.date(byAdding: .day, value: -1, to: now), cal.isDate(date, inSameDayAs: y) { return "Yesterday" }
+    if let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: now)).day, (2..<7).contains(days) {
+        return date.formatted(.dateTime.weekday(.wide))
+    }
+    return date.formatted(.dateTime.month(.abbreviated).day())
 }
 
 struct KnowledgeView: View {
     @ObservedObject var store: Store
-    @State private var query = ""
-    @State private var subject: String?
-    @State private var subjects: [[String: Any]] = []
-    @State private var facts: [KnownFact] = []
-    @State private var history: [KnownFact] = []
-    @State private var showHistory = false
+    @State private var question = ""
+    @State private var answers: [Answer] = []
+    @State private var asking = false
+    @State private var thought = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let subject {
-                HStack {
-                    Button { self.subject = nil } label: { Label("All subjects", systemImage: "chevron.left") }.buttonStyle(.link)
-                    Spacer()
+            HStack(spacing: 8) {
+                TextField(settings.codeReady ? "Ask about \(settings.repoName)…" : "Ask about your work…", text: $question)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(ask)
+                    .disabled(asking)
+                if asking { ProgressView().controlSize(.small) }
+                Button("Ask", action: ask).disabled(asking || blank)
+                    .help(localModelReady ? "Answers on this Mac from what Pulse knows, and asks \(agent) when it doesn't know" : "Asks \(agent), which can also look in Linear, Slack and GitHub")
+                if !answers.isEmpty {
+                    Button("Clear") { answers = []; save() }.disabled(asking).help("Clear the questions and answers")
                 }
-                Text(subject).font(.title3.weight(.semibold))
-                Panel(title: "Now · \(facts.count)") { factList(facts, editable: true) }
-                if !history.isEmpty {
-                    DisclosureGroup("Replaced · \(history.count)", isExpanded: $showHistory) {
-                        VStack(alignment: .leading, spacing: 8) { factList(history, editable: false) }.padding(.top, 6)
-                    }
+            }
+            ForEach(answers) { a in
+                AnswerView(store: store, answer: a, thought: a.id == answers.last?.id && asking ? thought : nil)
                     .padding(.horizontal, 14)
-                    .foregroundStyle(.secondary)
+            }
+            FocusHeader(store: store)
+            PrioritiesView(store: store)
+            if !store.pendingFacts.isEmpty {
+                Panel(title: "Agents noted") {
+                    ForEach(store.pendingFacts) { fact in
+                        PendingFactRow(store: store, fact: fact)
+                        if fact.id != store.pendingFacts.last?.id { Divider() }
+                    }
                 }
-            } else {
-                TextField("Search what Pulse knows", text: $query).textFieldStyle(.roundedBorder)
-                if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Panel(title: "Subjects · \(subjects.count)") {
-                        if subjects.isEmpty { Text("Nothing learned yet. Pulse learns from each briefing.").foregroundStyle(.secondary) }
-                        ForEach(Array(subjects.enumerated()), id: \.offset) { i, s in
-                            let name = s["name"] as? String ?? ""
-                            Button { subject = name } label: {
-                                HStack {
-                                    Text(name).lineLimit(1)
-                                    Spacer()
-                                    Text("\(s["kind"] as? String ?? "") · \(s["facts"] as? Int ?? 0) · \(s["latest"] as? String ?? "")").font(.caption).foregroundStyle(.secondary)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("\(name), \(s["kind"] as? String ?? ""), \(s["facts"] as? Int ?? 0) fact\(s["facts"] as? Int == 1 ? "" : "s")")
-                            if i < subjects.count - 1 { Divider() }
+            }
+            let changed = store.changed.map(KnownFact.init)
+            if !changed.isEmpty {
+                Panel(title: "Pulse changed its mind", accessory: {
+                    Button("Mark all reviewed") { store.markReviewed() }.buttonStyle(.link).font(.caption)
+                }) {
+                    FactLines(store: store, facts: changed, reviewing: true)
+                }
+            }
+            if changed.isEmpty && store.pendingFacts.isEmpty {
+                Text("Nothing to resolve. Facts that agents note, or that replace something Pulse knew, show up here.").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14)
+            }
+        }
+        .padding(.top, 6)
+        .onAppear { answers = store.db.decode("ask_thread") ?? [] }
+    }
+
+    private func save() { try? store.db.set(answers, "ask_thread") }
+
+    private var blank: Bool { question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var agent: String { BriefingAgent.current.name }
+
+    private func ask() {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, !asking else { return }
+        question = ""
+        thought = ""
+        asking = true
+        let previous = answers.last
+        let facts = (try? factsFor(question: q, in: store.db)) ?? []
+        let answer = Answer(question: q, factIDs: localModelReady ? facts.compactMap { $0["id"] as? Int } : [])
+        answers.append(answer)
+        let me = store.me ?? "me"
+        Task {
+            var a = answer
+            if localModelReady {
+                a.text = try? await localAnswer(q, facts: facts, previous: previous)
+            }
+            if a.text == nil || a.text?.contains("doesn't know") == true, !demoMode {
+                a.text = nil
+                a.factIDs = []
+                let id = a.id
+                if !facts.isEmpty, let i = answers.firstIndex(where: { $0.id == id }) { answers[i].steps = ["Checking what Pulse knows"] }
+                do {
+                    a.text = try await agentAnswer(q, me: me, known: facts) { event in
+                        guard let i = answers.firstIndex(where: { $0.id == id }) else { return }
+                        switch event {
+                        case .step(let step):
+                            if answers[i].steps?.last != step { answers[i].steps = (answers[i].steps ?? []) + [step] }
+                        case .thought(let text):
+                            thought = String((thought + text).suffix(400))
                         }
                     }
-                } else {
-                    Panel(title: "Facts · \(facts.count)") {
-                        if facts.isEmpty { Text("No facts match.").foregroundStyle(.secondary) }
-                        factList(facts, editable: true, showSubject: true)
-                    }
-                }
-            }
-        }
-        .onAppear(perform: reload)
-        .onChange(of: query) { _, _ in reload() }
-        .onChange(of: subject) { _, _ in showHistory = false; reload() }
-        .onChange(of: store.pendingFacts) { _, _ in reload() }
-        .onChange(of: store.synthesizedAt) { _, _ in reload() }
-    }
-
-    @ViewBuilder private func factList(_ list: [KnownFact], editable: Bool, showSubject: Bool = false) -> some View {
-        ForEach(list) { fact in
-            KnownFactRow(fact: fact, editable: editable, showSubject: showSubject, open: { subject = fact.subject }) { text in
-                do {
-                    if let text { try confirmFact(store.db, id: fact.id, text: text) } else { try rejectFact(store.db, id: fact.id) }
                 } catch {
-                    store.lastError = "\(error)"
+                    a.error = "\(error)"
                 }
-                store.pendingFacts = (try? unconfirmedFacts(store.db)) ?? []
-                reload()
+                a.steps = answers.first(where: { $0.id == id })?.steps
             }
-            if fact.id != list.last?.id { Divider() }
-        }
-    }
-
-    private func reload() {
-        let db = store.db
-        if let subject {
-            let all = ((try? subjectFacts(db, name: subject)) as? [String: Any]).map { s in
-                (((s["current"] as? [[String: Any]]) ?? []).map(KnownFact.init), ((s["history"] as? [[String: Any]]) ?? []).map(KnownFact.init))
-            }
-            (facts, history) = all ?? ([], [])
-        } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
-            facts = ((try? searchFacts(db, query: query, limit: 100)) ?? []).map(KnownFact.init)
-        } else {
-            subjects = ((try? subjectFacts(db, name: nil)) as? [[String: Any]]) ?? []
+            if let i = answers.firstIndex(where: { $0.id == a.id }) { answers[i] = a }
+            save()
+            asking = false
         }
     }
 }
 
-private struct KnownFactRow: View {
-    let fact: KnownFact
-    let editable, showSubject: Bool
-    let open: () -> Void
-    let change: (String?) -> Void
-    @State private var draft: String?
+private struct AnswerView: View {
+    @ObservedObject var store: Store
+    let answer: Answer
+    let thought: String?
+    @State private var showFacts = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let draft {
-                TextField("Fact", text: Binding(get: { draft }, set: { self.draft = $0 }), axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(save)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(answer.question).font(.callout.weight(.medium))
+            if let text = answer.text {
+                linkedText(withoutCitations(text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            } else if let error = answer.error {
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(4)
             } else {
-                Text(fact.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true).strikethrough(fact.replaced)
-            }
-            Text(([showSubject ? fact.subject : nil, fact.kind, fact.observed, fact.status == "confirmed" ? nil : fact.status] as [String?]).compactMap { $0 }.joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 12) {
-                if showSubject { Button("Subject", action: open) }
-                ForEach(Array(fact.sources.prefix(3).enumerated()), id: \.offset) { _, s in
-                    Button { Pulse.open(s.url) } label: {
-                        Text(s.title.hasPrefix("http") ? s.url.host ?? "Link" : s.title).lineLimit(1).truncationMode(.tail)
+                VStack(alignment: .leading, spacing: 3) {
+                    let steps = answer.steps ?? []
+                    ForEach(Array(steps.enumerated().suffix(3)), id: \.offset) { i, step in
+                        HStack(spacing: 6) {
+                            if i == steps.count - 1 { ProgressView().controlSize(.mini) } else { Image(systemName: "checkmark").font(.caption2) }
+                            Text(step).font(.caption)
+                        }
+                        .foregroundStyle(.secondary)
                     }
-                    .help(s.url.absoluteString)
-                }
-                if editable {
-                    Spacer()
-                    if draft == nil {
-                        Button("Edit") { draft = fact.text }
-                        Button("Reject") { change(nil) }.help("Wrong: stop using it, and bring back what it replaced")
-                    } else {
-                        Button("Save", action: save).disabled(draft?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true)
-                        Button("Cancel") { draft = nil }
+                    if (answer.steps ?? []).isEmpty { Text("Thinking…").foregroundStyle(.secondary) }
+                    if let line = latestThought(thought) {
+                        Text(line).font(.caption).italic().foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
                     }
                 }
             }
-            .buttonStyle(.link)
-            .font(.caption)
+            if answer.text != nil || answer.error != nil, let steps = answer.steps, !lookedIn(steps).isEmpty {
+                Text(lookedIn(steps)).font(.caption).foregroundStyle(.secondary)
+            }
+            if answer.text != nil, !answer.factIDs.isEmpty {
+                DisclosureGroup(isExpanded: $showFacts) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        FactLines(store: store, facts: ((try? factsByID(store.db, answer.factIDs)) ?? []).map(KnownFact.init))
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Text("From \(answer.factIDs.count) fact\(answer.factIDs.count == 1 ? "" : "s") Pulse knows").font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
     }
+}
 
-    private func save() {
-        guard let draft else { return }
-        change(draft)
-        self.draft = nil
+func linkLabel(_ text: String, kind: String) -> String {
+    kind == "github" ? text.replacingOccurrences(of: "^(PR|pull request|Pull request) ", with: "", options: .regularExpression) : text
+}
+
+func linkedText(_ text: String) -> Text {
+    let attributed = markdown(text)
+    var out = Text("")
+    var last: URL?
+    for run in attributed.runs {
+        var piece = AttributedString(attributed[run.range])
+        if let link = run.link, link != last {
+            let kind = sourceKind(link, given: "")
+            let icon: Image = switch kind {
+            case "slack": Image(nsImage: Brand.slack.image(size: 11))
+            case "linear": Image(nsImage: Brand.linear.image(size: 11))
+            case "github": Image(nsImage: Brand.github.image(size: 11))
+            case "mail": Image(systemName: "envelope")
+            default: Image(systemName: "link")
+            }
+            out = out + Text(icon).foregroundColor(Color(nsColor: .linkColor)) + Text("\u{2009}")
+            piece = AttributedString(linkLabel(String(piece.characters), kind: kind), attributes: run.attributes)
+        }
+        last = run.link
+        out = out + Text(piece)
+    }
+    return out
+}
+
+struct FactLines: View {
+    @ObservedObject var store: Store
+    let facts: [KnownFact]
+    var reviewing = false
+
+    var body: some View {
+        ForEach(Array(facts.enumerated()), id: \.element.id) { i, fact in
+            FactLine(store: store, fact: fact, reviewing: reviewing)
+            if i < facts.count - 1 { Divider() }
+        }
+    }
+}
+
+private func destination(_ s: KnownFact.Source) -> String {
+    switch s.kind {
+    case "slack": FileManager.default.fileExists(atPath: App.slack.url.path) ? "Opens in Slack" : "Opens Slack in your browser"
+    case "linear": FileManager.default.fileExists(atPath: App.linear.url.path) ? "Opens in Linear" : "Opens Linear in your browser"
+    case "github": "Opens on GitHub"
+    case "meeting": "Opens the meeting's notes and transcript"
+    case "session": "Opens the agent session's digest"
+    case "mail": "Opens in Mail"
+    default: "Opens \(s.url.host ?? "the link")"
+    }
+}
+
+private struct FactLine: View {
+    @ObservedObject var store: Store
+    let fact: KnownFact
+    let reviewing: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text([[fact.subject, fact.subjectTitle].compactMap { $0 }.joined(separator: " "), friendlyDay(fact.observed)].joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                ForEach(fact.replaces, id: \.self) { old in
+                    Text(old).strikethrough().foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Text((fact.replaces.isEmpty ? "" : "→ ") + fact.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                ForEach(Array(fact.sources.prefix(3).enumerated()), id: \.offset) { _, s in
+                    Button { openSource(s.url, kind: s.kind) } label: {
+                        HStack(spacing: 5) {
+                            SourceIcon(kind: s.kind, url: s.url, size: 10)
+                            Text(s.title).lineLimit(1).truncationMode(.tail)
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .help("\(destination(s)): \(s.url.absoluteString)")
+                    .accessibilityLabel("Source: \(s.title). \(destination(s))")
+                }
+                if fact.sources.count > 3 { Text("and \(fact.sources.count - 3) more").font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer(minLength: 4)
+            if reviewing {
+                HStack(spacing: 6) {
+                    Button { store.reviewed(fact: fact.id) } label: { Label("Looks right", systemImage: "checkmark") }
+                        .help("Keep it and take it off this list")
+                    Button { store.reject(fact: fact.id) } label: { Label("Wrong", systemImage: "xmark") }
+                        .help("Stop using it, and bring back what it replaced")
+                }
+                .controlSize(.small)
+                .fixedSize()
+            }
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Reject as wrong") { store.reject(fact: fact.id) }
+            if let s = fact.sources.first {
+                Button("Copy link to source") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s.url.absoluteString, forType: .string) }
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 }
