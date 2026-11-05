@@ -69,7 +69,7 @@ Click the gear in the popover.
 5. **Shortcut**: press **⌃⌥⌘P** from any app to open and close Pulse, even when the menu bar icon is hidden behind the notch. Change or turn it off under Startup.
 6. **Meetings**: recording is on by default. Recording starts when another app uses your mic during a Google Meet call, a Slack huddle or a calendar event with attendees, and stops a short while after the mic is released. The menu bar icon turns into a red record button while it records. Press **Stop** in the Meetings header (or right-click the icon and choose **Stop Recording**) to end or skip a meeting, and **Start recording** to record one Pulse didn't detect. The first time, macOS asks for microphone, screen and system audio recording, and calendar access, and Pulse downloads about 500 MB of speech models. The briefing agent writes each summary from the transcript. Let people know you're recording.
 7. **Code**: set the repository and the folder for new worktrees, then choose your IDEs and terminal agents. In an agent command, `{prompt}` is replaced with the path of a file holding the ticket prompt.
-8. **Briefing**: choose the agent command and the hour it runs. You can also press **Regenerate** at any time.
+8. **Briefing**: choose the agent command and the hour it runs. You can also press **Refresh** at any time.
 9. **Startup**: turn on **Open Pulse at login** so it is running after a restart.
 
 ### MCP servers for the briefing

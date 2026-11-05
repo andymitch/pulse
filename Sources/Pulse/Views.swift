@@ -124,7 +124,14 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent)
                     .help(updater.error ?? "Install the update and relaunch Pulse")
             }
-            Button("Refresh") { Task { await store.refresh() } }.disabled(store.syncing)
+            Button("Refresh") {
+                Task {
+                    await store.refresh()
+                    await store.synthesize()
+                }
+            }
+            .disabled(store.syncing || store.synthesizing)
+            .help("Sync GitHub and Linear, then rebuild the briefing")
             Button { store.showingSettings = true } label: {
                 Image(systemName: "gear").font(.system(size: 17)).foregroundStyle(.secondary)
             }
@@ -481,8 +488,6 @@ struct FocusHeader: View {
             } else if let at = store.synthesizedAt {
                 Text("Briefing \(at, format: .relative(presentation: .named))").font(.caption).foregroundStyle(.secondary)
             }
-            Button(store.synthesis == nil ? "Generate" : "Regenerate") { Task { await store.synthesize() } }
-                .disabled(store.synthesizing)
         }
     }
 }

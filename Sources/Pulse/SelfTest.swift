@@ -284,11 +284,11 @@ func selfTest() throws {
     let refreshed = try String(contentsOfFile: again[0], encoding: .utf8)
     check(again.first.map { URL(fileURLWithPath: $0).lastPathComponent } == "pi-old.md" && refreshed.contains("invite page"),
           "a session picked up again gets a fresh digest")
-    let prompt = { (since: String?) in synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", since: since) }
+    let prompt = { (since: String?) in synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasksOutput: "t.json", since: since) }
     let later = prompt("2026-11-03T22:00:00Z"), first = prompt(nil)
     check(later.contains("documents created since 2026-11-03T22:00:00Z") && later.contains("gather only what's new") && !later.contains("in the last 14 days")
-          && first.contains("documents created in the last 14 days") && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
-          "after a run the briefing reads only what's new, a first run reads 14 days, and memory is updated before the briefing is written")
+          && first.contains("documents created in the last 14 days") && later.range(of: "t.json")!.lowerBound < later.range(of: "n.json")!.lowerBound && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
+          "after a run the briefing reads only what's new, a first run reads 14 days, and tasks are written first, then memory, then the briefing")
     let d = "2026-11-03"
     check(withoutOwnDate("On 2026-11-03 Drew Osmond opened PR #2047.", d) == "Drew Osmond opened PR #2047."
           && withoutOwnDate("As of 2026-11-03 document unification met 9 of 10 criteria.", d) == "Document unification met 9 of 10 criteria."
@@ -340,6 +340,10 @@ func selfTest() throws {
         check(rows.map(\.id) == ["K-2", "K-3", "https://github.com/o/r/pull/1"] && rows.allSatisfy(\.done), "a briefing ticket that left the list for the backlog drops off, closed ones and merged PRs are done")
         store.recordDone()
         check(store.doneThisWeek.map(\.id) == ["K-2", "https://github.com/o/r/pull/1"], "only completed tickets and merged PRs go in the week's done log")
+        store.synthesizedAt = Date().addingTimeInterval(-2 * 86400)
+        store.draftTasks = [todo("T5")]
+        check(store.checklist.first?.id == "T5" && store.checklist.first?.why == "", "tasks from a briefing still being written show before it finishes, even when the last one is old")
+        store.draftTasks = nil
     }
     let mcpDir = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-mcp-\(UUID())")
     defer { try? FileManager.default.removeItem(at: mcpDir) }

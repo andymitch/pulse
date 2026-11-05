@@ -21,6 +21,7 @@ final class Store: ObservableObject {
     @Published var synthesis: Synthesis?
     @Published var synthesizedAt: Date?
     @Published var synthesizing = false
+    @Published var draftTasks: [Synthesis.Todo]?
     @Published var synthesisError: String?
     @Published var doneIDs: Set<String> = []
     @Published var pinnedIDs: [String] = []
@@ -249,7 +250,7 @@ final class Store: ObservableObject {
 
     private var plannedRows: [TodoRow] {
         let live = Dictionary(today.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        guard let plan = synthesis?.today, let planned = synthesizedAt, Calendar.current.isDateInToday(planned) else {
+        guard let plan = draftTasks ?? synthesis?.today, let planned = draftTasks == nil ? synthesizedAt : Date(), Calendar.current.isDateInToday(planned) else {
             let base = Array(today.filter { $0.kind != .notification && !removedIDs.contains($0.id) }.prefix(6))
             let ids = Set(base.map(\.id))
             let pinned = pinnedIDs.compactMap { id in today.first { $0.id == id } }.filter { !ids.contains($0.id) }
@@ -358,13 +359,14 @@ final class Store: ObservableObject {
         synthesizing = true
         synthesisError = nil
         do {
-            synthesis = try await runSynthesis(dir: dir, db: db, candidates: today, me: me ?? "me")
+            synthesis = try await runSynthesis(dir: dir, db: db, candidates: today, me: me ?? "me") { [weak self] in self?.draftTasks = $0 }
             synthesizedAt = Date()
             reloadFacts()
             recordDone()
         } catch {
             synthesisError = "\(error)"
         }
+        draftTasks = nil
         synthesizing = false
     }
 

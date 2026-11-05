@@ -33,7 +33,7 @@ func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
 }
 
 func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem],
-                     facts: String, factsOutput: String, since: String?, sessions: [String] = [], projects: [String] = [], people: [String] = []) -> String {
+                     facts: String, factsOutput: String, tasksOutput: String, since: String?, sessions: [String] = [], projects: [String] = [], people: [String] = []) -> String {
     let s = settings
     var who = ["Linear \"\(me)\""]
     if s.slack { who.append("the Slack user your Slack tools are logged in as") }
@@ -64,7 +64,9 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
 
     Work in this order.
 
-    First, update Pulse's memory from what you gathered. Write a JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
+    First, as soon as you've gathered, decide today's checklist by the rules for today below, and write it to \(tasksOutput) as a JSON array of today items, in the shape the briefing uses. \(me) sees these tasks while you finish, so write them before anything else.
+
+    Then update Pulse's memory from what you gathered. Write a JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
     {
       "sources": [{"id": int, "kind": \(kindList), "url": string, "title": string, "author": string | null, "date": "YYYY-MM-DD" | null, "excerpt": string | null}],
       "add": [{"subject": {"kind": "project" | "ticket" | "person" | "topic", "name": string, "aliases": [string]}, "kind": \(factKinds.map { "\"\($0)\"" }.joined(separator: " | ")), "text": string, "observed": "YYYY-MM-DD", "sources": [int], "supersedes": [int], "doubt": string | null}],
@@ -81,7 +83,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     - Settle everything you can yourself. \(me) is only asked about what you mark with doubt, so use it only when you can't tell what's true: sources disagree and none is clearly newer, or an unconfirmed fact contradicts a known one and nothing you read settles it. Work moving on, a newer source replacing an older one, and anything a source states plainly are never in doubt. The reason is one short line naming what conflicts. Mark a new fact by setting its doubt; it then waits for \(me) before replacing anything. Mark a known fact by listing its id under doubt.
     - Every fact and confirmation cites at least one source you actually saw. sources here are numbered on their own, from 1, with the same url rules as the briefing.
 
-    Then write the briefing, from the facts as they stand after your changes plus what you gathered, as one JSON file to \(output) with exactly this shape and nothing else:
+    Last, write the briefing, from the facts as they stand after your changes plus what you gathered, as one JSON file to \(output) with exactly this shape and nothing else. Its today items are the ones you already wrote, unless something you learned since changes them:
     {
       "focus": [{"headline": string, "summary": string, "sources": [int]}],
       "today": [{"ref": string | null, "title": string, "why": string, "url": string | null, "source": \(kindList) | null, "minutes": int, "reply": string | null}],
@@ -98,12 +100,12 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     """
 }
 
-func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async throws -> Synthesis {
-    let out = dir.appendingPathComponent("synthesis.next.json")
+func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String, onTasks: @escaping @MainActor ([Synthesis.Todo]) -> Void) async throws -> Synthesis {
+    let out = dir.appendingPathComponent("synthesis.next.json"), tasks = dir.appendingPathComponent("tasks.next.json")
     let prompt = dir.appendingPathComponent("synthesis-prompt.md")
     let facts = dir.appendingPathComponent("facts.json"), factsOut = dir.appendingPathComponent("facts.next.json")
     let started = Date()
-    for file in [out, factsOut] { try? FileManager.default.removeItem(at: file) }
+    for file in [out, factsOut, tasks] { try? FileManager.default.removeItem(at: file) }
     let known = try currentFacts(db)
     try JSONSerialization.data(withJSONObject: known, options: [.prettyPrinted, .withoutEscapingSlashes]).write(to: facts)
     let last = db.meta("facts_since").flatMap(iso.date(from:))
@@ -126,10 +128,23 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
     let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions"), folders: settings.codeReady ? [settings.repo, settings.worktrees] : []) }.value
         .filter { changedSince($0, newSince) }
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
-                        facts: facts.path, factsOutput: factsOut.path, since: since.map(iso.string(from:)), sessions: sessions,
+                        facts: facts.path, factsOutput: factsOut.path, tasksOutput: tasks.path, since: since.map(iso.string(from:)), sessions: sessions,
                         projects: db.ids("linear_projects"), people: try db.query("SELECT name FROM users").compactMap { ($0[0] as? String).flatMap { $0.contains("@") ? nil : $0 } })
         .write(to: prompt, atomically: true, encoding: .utf8)
 
+    let watcher = Task {
+        var last: Data?
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+            guard let data = try? Data(contentsOf: tasks), data != last, let todos = try? JSONDecoder().decode([Synthesis.Todo].self, from: data) else { continue }
+            last = data
+            await onTasks(todos)
+        }
+    }
+    defer {
+        watcher.cancel()
+        try? FileManager.default.removeItem(at: tasks)
+    }
     let log = try await runAgent(prompt: prompt)
     do {
         let changes = try JSONDecoder().decode(FactChanges.self, from: Data(contentsOf: factsOut))
