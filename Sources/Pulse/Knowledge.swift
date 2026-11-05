@@ -60,7 +60,7 @@ struct KnowledgeView: View {
     @ObservedObject var store: Store
     @State private var question = ""
     @State private var answers: [Answer] = []
-    @State private var asking = false
+    @State private var askingID: UUID?
     @State private var thought = ""
 
     var body: some View {
@@ -78,7 +78,7 @@ struct KnowledgeView: View {
                 }
             }
             ForEach(answers) { a in
-                AnswerView(store: store, answer: a, thought: a.id == answers.last?.id && asking ? thought : nil)
+                AnswerView(store: store, answer: a, thought: a.id == askingID ? thought : nil, retry: asking ? nil : { run(a.question, replacing: a.id) })
                     .padding(.horizontal, 14)
             }
             FocusHeader(store: store)
@@ -93,6 +93,7 @@ struct KnowledgeView: View {
 
     private func save() { try? store.db.set(answers, "ask_thread") }
 
+    private var asking: Bool { askingID != nil }
     private var blank: Bool { question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var agent: String { BriefingAgent.current.name }
 
@@ -100,12 +101,18 @@ struct KnowledgeView: View {
         let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !asking else { return }
         question = ""
+        run(q)
+    }
+
+    private func run(_ q: String, replacing old: UUID? = nil) {
+        guard !asking else { return }
         thought = ""
-        asking = true
-        let previous = answers.last
+        let index = old.flatMap { id in answers.firstIndex { $0.id == id } }
+        let previous = index.map { $0 > 0 ? answers[$0 - 1] : nil } ?? answers.last
         let facts = (try? factsFor(question: q, in: store.db)) ?? []
         let answer = Answer(question: q, factIDs: localModelReady ? facts.compactMap { $0["id"] as? Int } : [])
-        answers.append(answer)
+        if let index { answers[index] = answer } else { answers.append(answer) }
+        askingID = answer.id
         let me = store.me ?? "me"
         Task {
             var a = answer
@@ -134,7 +141,7 @@ struct KnowledgeView: View {
             }
             if let i = answers.firstIndex(where: { $0.id == a.id }) { answers[i] = a }
             save()
-            asking = false
+            askingID = nil
         }
     }
 }
@@ -143,7 +150,9 @@ private struct AnswerView: View {
     @ObservedObject var store: Store
     let answer: Answer
     let thought: String?
+    let retry: (() -> Void)?
     @State private var showFacts = false
+    @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -181,7 +190,33 @@ private struct AnswerView: View {
                     Text("From \(answer.factIDs.count) fact\(answer.factIDs.count == 1 ? "" : "s") Pulse knows").font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if answer.text != nil || answer.error != nil { actions }
         }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 14) {
+            if let text = answer.text.map(withoutCitations) {
+                SpeakButton(text: text)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(String(markdown(text).characters), forType: .string)
+                    copied = true
+                    Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+                } label: { action(copied ? "checkmark" : "doc.on.doc") }
+                .help(copied ? "Copied" : "Copy the answer")
+                .accessibilityLabel(copied ? "Copied" : "Copy the answer")
+            }
+            Button { retry?() } label: { action("arrow.clockwise") }
+                .disabled(retry == nil)
+                .help("Ask again")
+                .accessibilityLabel("Ask again")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func action(_ symbol: String) -> some View {
+        Image(systemName: symbol).font(.system(size: 13)).foregroundStyle(.secondary)
     }
 }
 
