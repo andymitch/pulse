@@ -9,12 +9,12 @@ struct ContentView: View {
     @ObservedObject private var meetings = Meetings.shared
 
     var body: some View {
-        Group {
-            if store.showingSettings {
-                SettingsView(store: store)
-            } else {
-                main
-            }
+        ZStack {
+            main
+                .opacity(store.showingSettings ? 0 : 1)
+                .allowsHitTesting(!store.showingSettings)
+                .accessibilityHidden(store.showingSettings)
+            if store.showingSettings { SettingsView(store: store) }
         }
         .overlayScrollers()
         .environment(\.openURL, OpenURLAction { url in
