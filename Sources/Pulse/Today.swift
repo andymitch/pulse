@@ -295,6 +295,7 @@ struct TodoRow: Identifiable {
 struct TodayView: View {
     @ObservedObject var store: Store
     @State private var showMore = false
+    @State private var showDone = false
 
     var body: some View {
         let rows = store.checklist
@@ -321,26 +322,37 @@ struct TodayView: View {
                 }
                 if !rows.isEmpty { Divider() }
             }
-            if rows.isEmpty && !store.triageWaiting {
+            let open = rows.filter { !$0.done }, done = rows.filter(\.done)
+            if open.isEmpty && !store.triageWaiting {
                 Text(store.syncing ? "Loading…" : "Nothing needs you right now.").foregroundStyle(.secondary)
             }
-            ForEach(rows) { row in
+            ForEach(open) { row in
                 TodoRowView(store: store, row: row)
-                if row.id != rows.last?.id || !week.isEmpty { Divider() }
+                if row.id != open.last?.id { Divider() }
             }
-            ForEach(week) { item in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(nsImage: store.checkbox(done: true)).frame(width: 16, height: 17)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Button { open(item.url) } label: { Text(item.title).strikethrough().lineLimit(2) }
-                            .buttonStyle(.plain)
-                            .help("Open")
-                        Text(["Done \(weekday(item.day))", item.source].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).lineLimit(1)
+            if !done.isEmpty || !week.isEmpty {
+                if !open.isEmpty || store.triageWaiting { Divider() }
+                DisclosureGroup(isExpanded: $showDone) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(done) { row in
+                            doneLine(row.item.title, day: "Today", url: row.item.url) {
+                                if let state = row.item.state, let team = row.item.teamID {
+                                    StatusMenu(store: store, item: row.item, state: state, states: store.workflow[team] ?? [state])
+                                } else {
+                                    Button { store.toggleDone(row.id) } label: { Image(nsImage: store.checkbox(done: true)) }
+                                        .buttonStyle(.plain)
+                                        .help("Not done yet")
+                                }
+                            }
+                        }
+                        ForEach(week) { item in
+                            doneLine(item.title, day: weekday(item.day), url: item.url) { Image(nsImage: store.checkbox(done: true)) }
+                        }
                     }
-                    .foregroundStyle(.secondary)
-                    Spacer()
+                    .padding(.top, 6)
+                } label: {
+                    Text("Done · \(done.count + week.count)").foregroundStyle(.secondary)
                 }
-                if item.id != week.last?.id { Divider() }
             }
         }
         let more = store.moreItems
@@ -362,6 +374,18 @@ struct TodayView: View {
                 .font(.caption)
                 .padding(.horizontal, 14)
         }
+    }
+
+    private func doneLine(_ title: String, day: String, url: URL, @ViewBuilder check: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            check().frame(width: 16, height: 17)
+            Button { Pulse.open(url) } label: { Text(title).strikethrough().lineLimit(1).truncationMode(.tail) }
+                .buttonStyle(.plain)
+                .help("Open")
+            Spacer(minLength: 8)
+            Text(day).font(.caption)
+        }
+        .foregroundStyle(.secondary)
     }
 
     private func weekday(_ day: String) -> String {
