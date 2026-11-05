@@ -62,7 +62,7 @@ A local build is versioned after the latest tag with a `-dev` suffix, such as `1
 Click the gear in the popover.
 
 1. **GitHub**: pick your `gh` account and organization, and your monthly PR target.
-2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's stored in your Keychain and can be replaced or removed there.
+2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's kept on this Mac in a file only your user can read, and can be replaced or removed in Settings.
 3. **Slack**: leave it on. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
 4. **Mail**: turn it on, and macOS asks once for permission to read Mail. Pulse reads your inbox only while Mail is open and never launches it.
 5. **Shortcut**: press **⌃⌥⌘P** from any app to open and close Pulse, even when the menu bar icon is hidden behind the notch. Change or turn it off under Startup.
@@ -91,6 +91,7 @@ The other read tools are `list_meetings` (search by text or days back), `get_mee
 Pulse keeps everything in `~/Library/Application Support/Pulse/`:
 - `pulse.db`: the SQLite cache behind Trends, and the facts Pulse has learned
 - `settings.json`
+- `linear-key`: your Linear API key, readable only by your user. Older versions kept it in the Keychain; Pulse moves it here the first time it runs.
 - `synthesis.json`: the latest briefing
 - `meetings/`: meeting summaries and transcripts, one Markdown file per meeting
 - `sessions/`: digests of finished pi and Claude Code sessions in your repo, one Markdown file per session
@@ -99,7 +100,7 @@ Pulse keeps everything in `~/Library/Application Support/Pulse/`:
 
 The speech models live in `~/Library/Application Support/FluidAudio/`.
 
-Delete the folder to start fresh. The Linear key lives in the Keychain under `pulse`.
+Delete the folder to start fresh.
 
 ## Development
 
