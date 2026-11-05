@@ -259,11 +259,12 @@ final class Store: ObservableObject {
         let refs = Set(plan.compactMap(\.ref))
         let arrived = today.filter { $0.urgent && !refs.contains($0.id) }
             .map { TodoRow(item: $0, why: "New since the briefing", minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
-        let rows = plan.compactMap { p -> TodoRow? in
+        var seen = Set<String>()
+        let rows = plan.filter { seen.insert($0.id).inserted }.compactMap { p -> TodoRow? in
             if let ref = p.ref, let item = live[ref] {
                 return TodoRow(item: item, why: p.why, minutes: p.minutes, done: item.closed || doneIDs.contains(item.id), reply: p.reply)
             }
-            guard let url = URL(string: p.url ?? "") ?? (p.ref.flatMap { URL(string: "https://linear.app/\(db.meta("linear_workspace") ?? "")/issue/\($0)") }) else { return nil }
+            guard let url = URL(string: threadLink(p.url) ?? "") ?? (p.ref.flatMap { URL(string: "https://linear.app/\(db.meta("linear_workspace") ?? "")/issue/\($0)") }) else { return nil }
             let id = p.id
             let ticket = p.ref.map { !$0.hasPrefix("http") } ?? false
             let state = ticket ? p.ref.flatMap { closedTickets?[$0] } : nil

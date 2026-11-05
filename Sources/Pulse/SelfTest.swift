@@ -107,6 +107,10 @@ func selfTest() throws {
     let inThread = slackThread(URL(string: "https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB")!)
     check(thread?.channel == "C08QBJ75EUB" && thread?.thread == "1761234567.123456" && inThread?.thread == "1761234567.123456" && slackThread(URL(string: "https://x.com/archives/C1/p1761234567123456")!) == nil
           && slackThread(URL(string: "https://acme.slack.com/archives/C1/p1")!) == nil, "Slack links give the channel and thread to reply in, and others are refused")
+    let threadTodo = { (url: String) in Synthesis.Todo(ref: nil, title: "Send the notice", why: "", url: url, source: "slack", minutes: 30) }
+    check(threadTodo("https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB").id == threadTodo("https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456").id
+          && threadLink("https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB") == "https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456"
+          && threadLink("message://%3Cm1%3E") == "message://%3Cm1%3E", "a task from any message in a Slack thread links to the thread and is the same task")
     let old = try JSONDecoder().decode(Synthesis.Todo.self, from: Data(#"{"ref": null, "title": "Reply", "why": "", "url": null, "source": "slack", "minutes": 5}"#.utf8))
     check(old.reply == nil, "a briefing from before suggested replies still loads")
     let archive = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-meetings-\(UUID())")

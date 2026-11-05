@@ -12,7 +12,7 @@ struct Synthesis: Codable {
         let minutes: Int?
         var reply: String?
 
-        var id: String { ref ?? "ai-" + (url ?? title) }
+        var id: String { ref ?? "ai-" + (threadLink(url) ?? title) }
     }
     struct Source: Codable {
         let id: Int
@@ -91,7 +91,8 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     Rules for the briefing:
     - newest wins: work backwards from the most recent facts, messages, meetings and updates to find where things stand now. When they disagree, trust the newest one. A fact you superseded no longer counts, an unconfirmed fact is only a lead, and older items are only background that nothing newer contradicts. Never present something as current if a later source changed or settled it.
     - focus: cut through the noise. Usually exactly one entry: the single thing the team is pushing on right now. Add a second or third only if there are genuinely separate efforts in flight that matter as much; never more than 3. headline is one short line. summary is 3 to 5 plain sentences distilled from everything you know: what the goal is, where it stands, what is blocking it, and what \(me)'s part is. Leave out minor threads. Use inline Markdown to make it scannable: **bold** for the goal, the blocker and \(me)'s part, *italics* for people and docs, and `code` for ticket IDs and endpoints. No headings or lists. Each entry cites the 2 to 4 sources that best back it up.
-    - today: \(me)'s checklist for today, at most 7 items that fit in about 5 hours of focused work, in the order to do them. Put first what unblocks other people (reviews, replies, merges), then work that is nearly done, then the most important work for the focus. For an item from the open work list, set ref to its ref exactly and keep its title. Other items are unanswered questions or requests, open commitments \(me) made, or meeting action items assigned to \(me) by name: set ref to null, title starts with a verb, and url points at the thread, message, email or doc. why is one short line. minutes is an honest estimate.
+    - today: \(me)'s checklist for today, at most 7 items that fit in about 5 hours of focused work, in the order to do them. Put first what unblocks other people (reviews, replies, merges), then work that is nearly done, then the most important work for the focus. For an item from the open work list, set ref to its ref exactly and keep its title. Other items are unanswered questions or requests, open commitments \(me) made, or meeting action items assigned to \(me) by name: set ref to null, title starts with a verb, and url points at the thread, message, email or doc; for a Slack thread, the thread's first message. why is one short line. minutes is an honest estimate.
+    - One item per piece of work. When questions, requests and commitments are about the same thing, even from different sources (a Slack thread and an agent session, say), make them one item, and put any step that has to come first, such as checking something with someone, in its title or why.
     - reply: only for a today item that answers someone in Slack (source "slack"). If their question or request has a clear answer from what you know, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
     - sources: every cited item, numbered from 1. When you rely on a known fact, cite its own sources. url must be a link you actually saw; never invent one, and drop any claim you cannot link. For a meeting transcript or agent session file, url is "file://" followed by its path, author is null, and title is just the meeting's title or the session's first line. title is what the item is (a ticket title, a doc name, an email subject, or "Maya in #engineering"). excerpt is the most telling one or two sentences, quoted or closely paraphrased. author and date are who wrote it and when, if known.
     - Write plainly. No hype, no filler.
@@ -148,6 +149,11 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
     try? FileManager.default.removeItem(at: dir.appendingPathComponent("synthesis.json"))
     try FileManager.default.moveItem(at: out, to: dir.appendingPathComponent("synthesis.json"))
     return synthesis
+}
+
+func threadLink(_ link: String?) -> String? {
+    guard let link, let url = URL(string: link), let host = url.host, let thread = slackThread(url) else { return link }
+    return "https://\(host)/archives/\(thread.channel)/p\(thread.thread.replacingOccurrences(of: ".", with: ""))"
 }
 
 func slackThread(_ url: URL) -> (channel: String, thread: String)? {
