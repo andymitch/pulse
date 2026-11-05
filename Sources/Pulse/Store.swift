@@ -188,13 +188,8 @@ final class Store: ObservableObject {
         reloadFacts()
     }
 
-    func confirm(_ fact: PendingFact, text: String? = nil) {
-        do { try confirmFact(db, id: fact.id, text: text == fact.text ? nil : text) } catch { lastError = "\(error)" }
-        reloadFacts()
-    }
-
-    func reject(_ fact: PendingFact) {
-        do { try rejectFact(db, id: fact.id) } catch { lastError = "\(error)" }
+    func confirm(fact id: Int, text: String? = nil) {
+        do { try confirmFact(db, id: id, text: text) } catch { lastError = "\(error)" }
         reloadFacts()
     }
 

@@ -20,8 +20,9 @@ Pulse opens on **Home**: your tasks, the focus briefing and today's meetings, wi
 - **Trends**: PRs merged per GitHub login, or Linear tickets closed per assignee, over 7 days, 5 weeks or 12 months, with a people filter for the chart you're looking at. Below it, **My PRs this month** shows your running total against a diagonal line to your monthly target (40 by default, set in Settings).
 
 <p align="center">
-  <img src="docs/screenshot-today.png" alt="The Home tab: today's checklist, the focus briefing and meetings" width="49%">
-  <img src="docs/screenshot-trends.png" alt="The Trends tab: PRs merged per month, stacked by teammate" width="49%">
+  <img src="docs/screenshot-today.png" alt="The Home tab: today's checklist with the Review what Pulse learned task, the focus briefing and meetings" width="32%">
+  <img src="docs/screenshot-knowledge.png" alt="The Knowledge tab: Ask, the focus, a fact an agent noted and a fact Pulse changed its mind about, each with Looks right and Wrong" width="32%">
+  <img src="docs/screenshot-trends.png" alt="The Trends tab: PRs merged per month by GitHub login, and my PRs this month against a monthly target" width="32%">
 </p>
 
 Everything runs on your Mac. Pulse has no server and sends no telemetry. Your data goes only to the services you connect and to the AI agent you choose for the briefing and meeting summaries.

@@ -6,7 +6,7 @@ struct KnownFact: Identifiable, Equatable {
     let subject, kind, text, observed, status: String
     let subjectTitle: String?
     let replaced: Bool
-    let replaces: [String]
+    var replaces: [String]
     let sources: [Source]
 
     init(_ d: [String: Any]) {
@@ -83,12 +83,12 @@ struct KnowledgeView: View {
             FocusHeader(store: store)
             PrioritiesView(store: store)
             if !store.pendingFacts.isEmpty {
-                Panel(title: "Agents noted") {
-                    ForEach(store.pendingFacts) { fact in
-                        PendingFactRow(store: store, fact: fact)
-                        if fact.id != store.pendingFacts.last?.id { Divider() }
-                    }
+                let noted = ((try? factsByID(store.db, store.pendingFacts.map(\.id))) ?? []).map(KnownFact.init).map { fact in
+                    var f = fact
+                    f.replaces = store.pendingFacts.first { $0.id == fact.id }?.replaces ?? []
+                    return f
                 }
+                Panel(title: "Agents noted") { FactLines(store: store, facts: noted, reviewing: true, pending: true) }
             }
             let changed = store.changed.map(KnownFact.init)
             if !changed.isEmpty {
@@ -232,10 +232,11 @@ struct FactLines: View {
     @ObservedObject var store: Store
     let facts: [KnownFact]
     var reviewing = false
+    var pending = false
 
     var body: some View {
         ForEach(Array(facts.enumerated()), id: \.element.id) { i, fact in
-            FactLine(store: store, fact: fact, reviewing: reviewing)
+            FactLine(store: store, fact: fact, reviewing: reviewing, pending: pending)
             if i < facts.count - 1 { Divider() }
         }
     }
@@ -257,6 +258,8 @@ private struct FactLine: View {
     @ObservedObject var store: Store
     let fact: KnownFact
     let reviewing: Bool
+    let pending: Bool
+    @State private var draft: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -266,7 +269,19 @@ private struct FactLine: View {
                 ForEach(fact.replaces, id: \.self) { old in
                     Text(old).strikethrough().foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                Text((fact.replaces.isEmpty ? "" : "→ ") + fact.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                if let draft {
+                    TextField("Fact", text: Binding(get: { draft }, set: { self.draft = $0 }), axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(save)
+                    HStack(spacing: 12) {
+                        Button("Save", action: save).disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Cancel") { self.draft = nil }
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                } else {
+                    Text((fact.replaces.isEmpty ? "" : "→ ") + fact.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
                 ForEach(Array(fact.sources.prefix(3).enumerated()), id: \.offset) { _, s in
                     Button { openSource(s.url, kind: s.kind) } label: {
                         HStack(spacing: 5) {
@@ -284,8 +299,8 @@ private struct FactLine: View {
             Spacer(minLength: 4)
             if reviewing {
                 HStack(spacing: 6) {
-                    Button { store.reviewed(fact: fact.id) } label: { Label("Looks right", systemImage: "checkmark") }
-                        .help("Keep it and take it off this list")
+                    Button { pending ? store.confirm(fact: fact.id) : store.reviewed(fact: fact.id) } label: { Label("Looks right", systemImage: "checkmark") }
+                        .help(pending ? "Confirm it, so Pulse and your agents can rely on it" : "Keep it and take it off this list")
                     Button { store.reject(fact: fact.id) } label: { Label("Wrong", systemImage: "xmark") }
                         .help("Stop using it, and bring back what it replaced")
                 }
@@ -295,11 +310,18 @@ private struct FactLine: View {
         }
         .contentShape(Rectangle())
         .contextMenu {
+            if pending { Button("Edit…") { draft = fact.text } }
             Button("Reject as wrong") { store.reject(fact: fact.id) }
             if let s = fact.sources.first {
                 Button("Copy link to source") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s.url.absoluteString, forType: .string) }
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private func save() {
+        guard let draft else { return }
+        store.confirm(fact: fact.id, text: draft)
+        self.draft = nil
     }
 }
