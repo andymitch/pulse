@@ -315,10 +315,7 @@ struct TodayView: View {
                         store.checkTriage()
                         store.page = .knowledge
                     } label: {
-                        HStack(spacing: 5) {
-                            Text("Review")
-                            Image(systemName: "arrow.up.right.square")
-                        }
+                        Text("Review ↗")
                     }
                     .help("Open Knowledge to resolve them")
                 }
@@ -544,10 +541,8 @@ private struct Buttons: View {
     }
 }
 
-struct SplitButton<Title: View, Items: View>: View {
+private struct SplitButton<Title: View, Items: View>: View {
     let help: String
-    var width: CGFloat? = 104
-    var actionDisabled = false
     let action: () -> Void
     @ViewBuilder let title: Title
     @ViewBuilder let items: Items
@@ -561,13 +556,11 @@ struct SplitButton<Title: View, Items: View>: View {
             Button(action: action) {
                 title.labelStyle(.titleAndIcon)
                     .padding(.leading, 9)
-                    .padding(.trailing, width == nil ? 7 : 0)
-                    .frame(maxWidth: width == nil ? nil : .infinity, maxHeight: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(Pressable())
             .help(help)
-            .disabled(actionDisabled)
             Divider().padding(.vertical, 5)
             Menu { items } label: { Image(systemName: "chevron.down") }
                 .menuStyle(.borderlessButton)
@@ -576,8 +569,7 @@ struct SplitButton<Title: View, Items: View>: View {
                 .help("More actions")
                 .accessibilityLabel("More actions")
         }
-        .frame(width: width, height: 24)
-        .fixedSize(horizontal: width == nil, vertical: false)
+        .frame(width: 104, height: 24)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
     }
 }

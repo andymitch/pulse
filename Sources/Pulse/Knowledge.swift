@@ -60,30 +60,17 @@ struct KnowledgeView: View {
     @State private var question = ""
     @State private var answers: [Answer] = []
     @State private var asking = false
-    @AppStorage("askOnThisMac") private var onThisMac = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 TextField(settings.codeReady ? "Ask about \(settings.repoName)…" : "Ask about your work…", text: $question)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit { ask(question, local: local) }
+                    .onSubmit(ask)
                     .disabled(asking)
                 if asking { ProgressView().controlSize(.small) }
-                if localModelReady {
-                    SplitButton(help: local ? "Answer on this Mac from what Pulse knows, and ask \(agent) if it doesn't know" : "Ask \(agent), which can also look in Linear, Slack and GitHub",
-                                width: nil, actionDisabled: asking || blank) {
-                        ask(question, local: local)
-                    } title: {
-                        Text(local ? "Ask" : "Ask \(agent)")
-                    } items: {
-                        Button("Ask on this Mac") { onThisMac = true; ask(question, local: true) }
-                        Button("Ask \(agent)") { onThisMac = false; ask(question, local: false) }.disabled(demoMode)
-                    }
-                } else {
-                    Button("Ask \(agent)") { ask(question, local: false) }.disabled(asking || blank || demoMode)
-                        .help("Ask \(agent), which can also look in Linear, Slack and GitHub")
-                }
+                Button("Ask", action: ask).disabled(asking || blank)
+                    .help(localModelReady ? "Answers on this Mac from what Pulse knows, and asks \(agent) when it doesn't know" : "Asks \(agent), which can also look in Linear, Slack and GitHub")
                 if !answers.isEmpty {
                     Button("Clear") { answers = []; save() }.disabled(asking).help("Clear the questions and answers")
                 }
@@ -121,29 +108,31 @@ struct KnowledgeView: View {
     private func save() { try? store.db.set(answers, "ask_thread") }
 
     private var blank: Bool { question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var local: Bool { localModelReady && (onThisMac || demoMode) }
     private var agent: String { BriefingAgent.current.name }
 
-    private func ask(_ text: String, local: Bool) {
-        let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func ask() {
+        let q = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty, !asking else { return }
-        if text == question { question = "" }
+        question = ""
         asking = true
         let previous = answers.last
-        let facts = (try? factsFor(question: q, in: store.db)) ?? []
-        answers.append(Answer(question: q, by: local ? "On this Mac" : BriefingAgent.current.name, factIDs: local ? facts.compactMap { $0["id"] as? Int } : []))
+        let facts = localModelReady ? (try? factsFor(question: q, in: store.db)) ?? [] : []
+        let answer = Answer(question: q, factIDs: facts.compactMap { $0["id"] as? Int })
+        answers.append(answer)
         let me = store.me ?? "me"
         Task {
-            var a = answers[answers.count - 1]
-            do {
-                a.text = local ? try await localAnswer(q, facts: facts, previous: previous) : try await agentAnswer(q, me: me)
-            } catch {
-                a.error = "\(error)"
+            var a = answer
+            if localModelReady {
+                a.text = try? await localAnswer(q, facts: facts, previous: previous)
+            }
+            if a.text == nil || a.text?.contains("doesn't know") == true, !demoMode {
+                a.text = nil
+                a.factIDs = []
+                do { a.text = try await agentAnswer(q, me: me) } catch { a.error = "\(error)" }
             }
             if let i = answers.firstIndex(where: { $0.id == a.id }) { answers[i] = a }
             save()
             asking = false
-            if local, !demoMode, a.error != nil || a.text?.contains("doesn't know") == true { ask(q, local: false) }
         }
     }
 }
@@ -157,26 +146,52 @@ private struct AnswerView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(answer.question).font(.callout.weight(.medium))
             if let text = answer.text {
-                Text(markdown(answer.by == "On this Mac" ? withoutCitations(text) : text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                linkedText(withoutCitations(text)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             } else if let error = answer.error {
                 Text(error).font(.caption).foregroundStyle(.red).lineLimit(4)
             } else {
                 Text("Thinking…").foregroundStyle(.secondary)
             }
-            if !answer.factIDs.isEmpty {
+            if answer.text != nil, !answer.factIDs.isEmpty {
                 DisclosureGroup(isExpanded: $showFacts) {
                     VStack(alignment: .leading, spacing: 8) {
                         FactLines(store: store, facts: ((try? factsByID(store.db, answer.factIDs)) ?? []).map(KnownFact.init))
                     }
                     .padding(.top, 4)
                 } label: {
-                    Text("\(answer.by) · from \(answer.factIDs.count) fact\(answer.factIDs.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                    Text("From \(answer.factIDs.count) fact\(answer.factIDs.count == 1 ? "" : "s") Pulse knows").font(.caption).foregroundStyle(.secondary)
                 }
-            } else if answer.text != nil {
-                Text(answer.by).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
+}
+
+func linkLabel(_ text: String, kind: String) -> String {
+    kind == "github" ? text.replacingOccurrences(of: "^(PR|pull request|Pull request) ", with: "", options: .regularExpression) : text
+}
+
+func linkedText(_ text: String) -> Text {
+    let attributed = markdown(text)
+    var out = Text("")
+    var last: URL?
+    for run in attributed.runs {
+        var piece = AttributedString(attributed[run.range])
+        if let link = run.link, link != last {
+            let kind = sourceKind(link, given: "")
+            let icon: Image = switch kind {
+            case "slack": Image(nsImage: Brand.slack.image(size: 11))
+            case "linear": Image(nsImage: Brand.linear.image(size: 11))
+            case "github": Image(nsImage: Brand.github.image(size: 11))
+            case "mail": Image(systemName: "envelope")
+            default: Image(systemName: "link")
+            }
+            out = out + Text(icon).foregroundColor(Color(nsColor: .linkColor)) + Text("\u{2009}")
+            piece = AttributedString(linkLabel(String(piece.characters), kind: kind), attributes: run.attributes)
+        }
+        last = run.link
+        out = out + Text(piece)
+    }
+    return out
 }
 
 struct FactLines: View {

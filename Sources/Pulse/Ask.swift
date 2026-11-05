@@ -7,7 +7,6 @@ struct Answer: Identifiable, Codable {
     var id = UUID()
     let question: String
     var text: String?
-    var by = ""
     var factIDs: [Int] = []
     var error: String?
 }
@@ -59,7 +58,7 @@ func agentAnswer(_ question: String, me: String) async throws -> String {
 
         Start with what Pulse already knows: if you have Pulse's MCP tools, use search and subject. Then check Linear, Slack or GitHub only if that isn't enough. Newer information wins over older.
 
-        Write one JSON file to \(out.path) with exactly {"answer": string}. The answer is one to four plain sentences that name the tickets, people and dates involved, with Markdown links to the sources you used. If you can't find it, say so.
+        Write one JSON file to \(out.path) with exactly {"answer": string}. The answer is one to four plain sentences that name the tickets, people and dates involved, with Markdown links to the sources you used. Put each link on the words it backs up, where they appear in the sentence: a ticket ID like [KLE-123](…), a PR number like [#1490](…), or the few words a message or doc supports, like [Chad Schwab reported](…) or [done 31 Aug](…). Never add a separate link such as "(Slack)" or "source" at the end. If you can't find it, say so.
         """
     return try JSONDecoder().decode(Out.self, from: try await runAgent(prompt, output: out, name: "ask")).answer
 }

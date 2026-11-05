@@ -186,6 +186,7 @@ func selfTest() throws {
     check(picked.first == "Due Friday" && worded.contains("Invites merged") && !worded.contains("Invites are in review") && filler.isEmpty,
           "a question gets the current facts about the subjects it names and the words it uses, not replaced facts or filler words")
     check(withoutCitations("[2] Chad owns it [1, 3].") == "Chad owns it." && withoutCitations("See [the doc](https://x).") == "See [the doc](https://x).", "on-device answers drop citation numbers but keep links")
+    check(linkLabel("PR #1490", kind: "github") == "#1490" && linkLabel("PR #1490", kind: "slack") == "PR #1490" && linkLabel("KLE-630", kind: "linear") == "KLE-630", "GitHub links in answers read as #123")
     let pending = try unconfirmedFacts(mem)
     check(pending.map(\.text) == ["Invites shipped to everyone"] && pending[0].replaces == ["Invites merged"], "unconfirmed facts are listed with what they'd replace")
     try confirmFact(mem, id: pending[0].id, text: "Invites shipped to all workspaces")
