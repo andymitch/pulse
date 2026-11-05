@@ -191,6 +191,8 @@ func selfTest() throws {
     let filler = try factsFor(question: "what is the", in: mem)
     check(picked.first == "Due Friday" && worded.contains("Invites merged") && !worded.contains("Invites are in review") && filler.isEmpty,
           "a question gets the current facts about the subjects it names and the words it uses, not replaced facts or filler words")
+    let bySubjectWord = try factsFor(question: "What's the teammates deadline?", in: mem).map { $0["text"] as? String ?? "" }
+    check(Set(bySubjectWord).isSuperset(of: ["Due Friday", "Invites merged"]), "a question finds facts whose subject shares one of its words, even when the fact's text doesn't")
     check(withoutCitations("[2] Chad owns it [1, 3].") == "Chad owns it." && withoutCitations("See [the doc](https://x).") == "See [the doc](https://x).", "on-device answers drop citation numbers but keep links")
     check(linkLabel("PR #1490", kind: "github") == "#1490" && linkLabel("PR #1490", kind: "slack") == "PR #1490" && linkLabel("KLE-630", kind: "linear") == "KLE-630", "GitHub links in answers read as #123")
     let codemode = #"{"type":"tool_execution_start","toolName":"codemode","args":{"code":"const a = await tools.mcp__pulse__search({ query: 'allianz' });\nconst b = await tools.mcp__linear__list_issues({ query: \"allianz credit\" });"}}"#

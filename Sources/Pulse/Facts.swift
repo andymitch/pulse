@@ -273,15 +273,21 @@ private let stopwords: Set<String> = ["the", "a", "an", "and", "or", "of", "to",
 
 func factsFor(question: String, in db: DB, limit: Int = 8) throws -> [[String: Any]] {
     let lower = question.lowercased()
-    var ids: [Int] = []
-    let named = try db.query("SELECT s.id, s.name, s.aliases FROM subjects s").filter { r in
-        let names = [r[1] as? String ?? ""] + ((try? JSONDecoder().decode([String].self, from: Data((r[2] as? String ?? "[]").utf8))) ?? [])
-        return names.contains { $0.count >= 4 && lower.contains($0.lowercased()) }
-    }.compactMap { $0[0] as? Int }
-    for subject in named {
-        ids += try db.query("SELECT id FROM facts WHERE subject_id = ? AND \(live) ORDER BY observed_at DESC LIMIT 4", [subject]).compactMap { $0[0] as? Int }
-    }
     let words = question.split { !$0.isLetter && !$0.isNumber }.map { $0.lowercased() }.filter { !stopwords.contains($0) && $0.count > 1 }
+    let subjects = try db.query("SELECT s.id, s.name, s.aliases FROM subjects s").map { r in
+        (id: r[0] as! Int, names: [r[1] as? String ?? ""] + ((try? JSONDecoder().decode([String].self, from: Data((r[2] as? String ?? "[]").utf8))) ?? []))
+    }
+    let named = subjects.filter { $0.names.contains { $0.count >= 4 && lower.contains($0.lowercased()) } }
+    let matches = { (names: [String]) in
+        Set(names.flatMap { $0.lowercased().split { !$0.isLetter && !$0.isNumber } }.filter { $0.count >= 4 })
+            .filter { w in words.contains { $0.count >= 4 && (w.hasPrefix($0) || $0.hasPrefix(w)) } }.count
+    }
+    let worded = subjects.filter { s in !named.contains { $0.id == s.id } }.map { ($0, matches($0.names)) }.filter { $0.1 > 0 }
+        .sorted { $0.1 > $1.1 }.prefix(2).map(\.0)
+    var ids: [Int] = []
+    for subject in named + worded {
+        ids += try db.query("SELECT id FROM facts WHERE subject_id = ? AND \(live) ORDER BY observed_at DESC LIMIT 4", [subject.id]).compactMap { $0[0] as? Int }
+    }
     if !words.isEmpty {
         ids += try db.query("""
             SELECT f.id FROM facts_fts JOIN facts f ON f.id = facts_fts.rowid WHERE facts_fts MATCH ? AND f.\(live)
