@@ -185,9 +185,7 @@ func selfTest() throws {
     let agentAdded = try noted("KLE-1", "Invites shipped to everyone", 2)
     let stillCurrent = texts(try searchFacts(mem, query: "invites")).contains("Invites merged")
     check(agentAdded == FactCounts(added: 1) && stillCurrent, "an agent's fact needs no source and doesn't replace a confirmed one yet")
-    let before = try changedFacts(mem, since: "2026-11-03T00:00:00Z"), afterwards = try changedFacts(mem, since: "2026-11-03T13:00:00Z")
-    check(before.map { $0["text"] as? String } == ["Due Friday", "Invites merged"] && afterwards.isEmpty && (before[1]["replaces"] as? [Any])?.count == 2,
-          "since you last looked lists confirmed facts learned after that time, newest first, with what they replaced, and skips agents' unconfirmed ones")
+    check(try doubtedFacts(mem).isEmpty, "a briefing's replacements and agents' notes don't ask me anything")
     let picked = try factsFor(question: "When is KLE-3 due?", in: mem).map { $0["text"] as? String ?? "" }
     let worded = try factsFor(question: "What about the invites?", in: mem).map { $0["text"] as? String ?? "" }
     let filler = try factsFor(question: "what is the", in: mem)
@@ -206,19 +204,30 @@ func selfTest() throws {
           && streaming("my-agent {prompt}") == "my-agent {prompt}", "pi and Claude Code run with streaming output, other commands as they are")
     check(lookedIn(["Checking what Pulse knows", "Looking in Linear for \"a\"", "Looking in Slack", "Looking in Linear"]) == "Looked in Pulse, Linear and Slack", "the steps fold into where it looked")
     check(latestThought("I should check Linear. Then look at the Slack thread for the cause") == "Then look at the Slack thread for the cause", "the latest line of reasoning is shown")
-    let pending = try unconfirmedFacts(mem)
-    check(pending.map(\.text) == ["Invites shipped to everyone"] && pending[0].replaces == ["Invites merged"], "unconfirmed facts are listed with what they'd replace")
-    try confirmFact(mem, id: pending[0].id, text: "Invites shipped to all workspaces")
-    let afterConfirm = (try searchFacts(mem, query: "workspaces"), try searchFacts(mem, query: "invites"), try unconfirmedFacts(mem))
+    let unconfirmed = { try mem.query("SELECT id FROM facts WHERE status = 'unconfirmed' AND superseded_by IS NULL").compactMap { $0[0] as? Int } }
+    let note = try unconfirmed()[0]
+    try confirmFact(mem, id: note, text: "Invites shipped to all workspaces")
+    let afterConfirm = (try searchFacts(mem, query: "workspaces"), try searchFacts(mem, query: "invites"), try unconfirmed())
     check(texts(afterConfirm.0) == ["Invites shipped to all workspaces"] && !texts(afterConfirm.1).contains("Invites merged") && afterConfirm.2.isEmpty,
           "confirming with an edit saves the new text, finds it in search, and replaces the old fact")
-    try rejectFact(mem, id: pending[0].id)
+    try rejectFact(mem, id: note)
     let afterReject = (try searchFacts(mem, query: "invites"), try searchFacts(mem, query: "workspaces", superseded: true))
     check(texts(afterReject.0).contains("Invites merged") && afterReject.1.isEmpty, "rejecting a fact hides it and makes what it replaced current again")
     _ = try noted("KLE-3", "Due next Friday", 4)
-    let checked = try changes("{\(slack), \"confirm\": [{\"id\": \(try unconfirmedFacts(mem)[0].id), \"sources\": [1]}]}")
+    let checked = try changes("{\(slack), \"confirm\": [{\"id\": \(try unconfirmed()[0]), \"sources\": [1]}]}")
     let due = try searchFacts(mem, query: "KLE-3")
     check(checked == FactCounts(confirmed: 1) && texts(due) == ["Due next Friday"], "a briefing run confirming an agent's fact applies what it replaces")
+    let dueID = due[0]["id"] as! Int
+    _ = try changes("{\(slack), \"add\": [\(fact("KLE-3", "Due in December", "2026-11-03", ", \"supersedes\": [\(dueID)], \"doubt\": \"Maya and the ticket give different dates\""))]}")
+    let unsure = try doubtedFacts(mem)
+    check(texts(try searchFacts(mem, query: "KLE-3")) == ["Due in December", "Due next Friday"] && texts(unsure) == ["Due in December"]
+          && unsure[0]["doubt"] as? String == "Maya and the ticket give different dates" && (unsure[0]["replaces"] as? [[String: Any]])?.first?["id"] as? Int == dueID,
+          "a fact the briefing is unsure of asks me, with its reason and what it would replace, and replaces nothing yet")
+    try confirmFact(mem, id: unsure[0]["id"] as! Int)
+    let settled = (try searchFacts(mem, query: "KLE-3"), try doubtedFacts(mem))
+    check(texts(settled.0) == ["Due in December"] && settled.1.isEmpty, "confirming it applies the replacement and stops asking")
+    _ = try changes("{\"doubt\": [{\"id\": \(unsure[0]["id"] as! Int), \"reason\": \"A new thread says Friday again\"}, {\"id\": \(dueID), \"reason\": \"replaced\"}]}")
+    check(texts(try doubtedFacts(mem)) == ["Due in December"], "the briefing can flag a known current fact, but not a replaced one")
     let piLog = [
         #"{"type":"session","cwd":"/code/app","timestamp":"2026-11-03T10:00:00Z"}"#,
         #"{"type":"message","message":{"role":"user","content":[{"type":"text","text":"Ship the invite flow"}]}}"#,

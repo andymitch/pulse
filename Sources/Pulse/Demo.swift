@@ -94,6 +94,9 @@ private func seedDemoFacts(_ db: DB, now: Date) throws {
         FactChanges.Add(subject: .init(kind: "project", name: "Billing v2", aliases: nil), kind: "decision",
                         text: "Billing v2 moves annual plans to invoicing in December, after the onboarding launch.", observed: day(0), sources: [], supersedes: nil),
     ], confirm: nil), to: db, now: now, origin: "agent")
+    if let billing = try db.query("SELECT id FROM facts WHERE text LIKE 'Billing v2 moves%'").first?[0] as? Int {
+        _ = try applyFacts(FactChanges(sources: nil, add: nil, confirm: nil, doubt: [.init(id: billing, reason: "Omar said in #launch that invoicing waits until January; nothing says which is current.")]), to: db, now: now)
+    }
 }
 
 @MainActor

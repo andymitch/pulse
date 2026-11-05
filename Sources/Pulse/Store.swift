@@ -29,8 +29,7 @@ final class Store: ObservableObject {
     @Published var doneThisWeek: [DoneItem] = []
     @Published var workflow: [String: [WorkflowState]] = [:]
     var closedTickets: [String: WorkflowState]?
-    @Published var pendingFacts: [PendingFact] = []
-    @Published var changed: [[String: Any]] = []
+    @Published var doubts: [[String: Any]] = []
     @Published var factsVersion = 0
     private var localBranches: Set<String> = []
 
@@ -157,35 +156,18 @@ final class Store: ObservableObject {
         reloadFacts()
     }
 
-    var reviewCount: Int { pendingFacts.count + changed.count }
+    private var doubtIDs: [String] { doubts.compactMap { ($0["id"] as? Int).map(String.init) } }
 
-    var triageWaiting: Bool {
-        let checked = db.meta("triage_checked_at") ?? ""
-        return changed.contains { ($0["recorded"] as? String ?? "") > checked } || pendingFacts.contains { $0.recorded > checked }
-    }
+    var triageWaiting: Bool { !Set(doubtIDs).isSubset(of: db.ids("triage_seen")) }
 
     func checkTriage() {
-        try? db.setMeta("triage_checked_at", iso.string(from: Date()))
+        try? db.set(doubtIDs, "triage_seen")
         reloadFacts()
     }
 
     func reloadFacts() {
-        pendingFacts = (try? unconfirmedFacts(db)) ?? []
-        let since = db.meta("facts_reviewed_at") ?? iso.string(from: Date().addingTimeInterval(-3 * 86400))
-        let reviewed = Set(db.ids("facts_reviewed_ids").compactMap(Int.init))
-        changed = ((try? changedFacts(db, since: since)) ?? []).filter { $0["replaces"] != nil && !reviewed.contains($0["id"] as? Int ?? 0) }
+        doubts = (try? doubtedFacts(db)) ?? []
         factsVersion += 1
-    }
-
-    func markReviewed() {
-        try? db.setMeta("facts_reviewed_at", iso.string(from: Date()))
-        try? db.set([String](), "facts_reviewed_ids")
-        reloadFacts()
-    }
-
-    func reviewed(fact id: Int) {
-        try? db.set(db.ids("facts_reviewed_ids") + [String(id)], "facts_reviewed_ids")
-        reloadFacts()
     }
 
     func confirm(fact id: Int, text: String? = nil) {

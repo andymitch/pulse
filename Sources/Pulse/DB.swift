@@ -39,6 +39,9 @@ final class DB: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS pending_replaces (
                 fact_id INTEGER NOT NULL REFERENCES facts(id), replaces_id INTEGER NOT NULL REFERENCES facts(id), PRIMARY KEY (fact_id, replaces_id));
             """)
+        if try query("SELECT 1 FROM pragma_table_info('facts') WHERE name = 'doubt'").isEmpty {
+            try exec("ALTER TABLE facts ADD COLUMN doubt TEXT")
+        }
         if try query("SELECT 1 FROM sqlite_master WHERE name = 'facts_fts'").isEmpty {
             try exec("""
                 CREATE VIRTUAL TABLE facts_fts USING fts5(text, content = 'facts', content_rowid = 'id', tokenize = 'porter unicode61');

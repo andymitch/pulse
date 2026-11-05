@@ -67,16 +67,18 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     First, update Pulse's memory from what you gathered. Write a JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
     {
       "sources": [{"id": int, "kind": \(kindList), "url": string, "title": string, "author": string | null, "date": "YYYY-MM-DD" | null, "excerpt": string | null}],
-      "add": [{"subject": {"kind": "project" | "ticket" | "person" | "topic", "name": string, "aliases": [string]}, "kind": \(factKinds.map { "\"\($0)\"" }.joined(separator: " | ")), "text": string, "observed": "YYYY-MM-DD", "sources": [int], "supersedes": [int]}],
-      "confirm": [{"id": int, "sources": [int]}]
+      "add": [{"subject": {"kind": "project" | "ticket" | "person" | "topic", "name": string, "aliases": [string]}, "kind": \(factKinds.map { "\"\($0)\"" }.joined(separator: " | ")), "text": string, "observed": "YYYY-MM-DD", "sources": [int], "supersedes": [int], "doubt": string | null}],
+      "confirm": [{"id": int, "sources": [int]}],
+      "doubt": [{"id": int, "reason": string}]
     }
 
     Rules for facts:
     - A fact is one short sentence that still makes sense on its own a month from now: name the people and tickets instead of saying "he" or "it", and write a date that matters as a date instead of "tomorrow". Keep what someone on the team would want to know later: decisions and why, where work stands, blockers, who owns what, who promised what by when, open questions, and \(me)'s own preferences. Skip chatter and anything only true for an hour. Never keep personal matters that aren't about the work, such as a job search, a résumé, health or family, from any source.
     - subject is what the fact is about, and it's a real thing: a ticket by its ID (KLE-123) with the title as an alias\(projects.isEmpty ? "" : ", a Linear project by its exact name (\(projects.joined(separator: ", ")))")\(people.isEmpty ? "" : ", or a teammate by full name (\(people.joined(separator: ", ")))"). Anything else is a topic with a short plain name. Reuse the exact subject of a known fact when it's the same thing.
     - observed is the date the source said it, not today. Pulse shows it next to the fact, so don't put it in the text ("On 2026-11-04 …", "(decided 2026-11-04)"); mention a date only when it's the point, such as a deadline or a launch day.
-    - Facts with status "unconfirmed" were noted by other agents and haven't been checked. Confirm one when a source you read backs it up, and supersede it with a new fact when a source contradicts it. Otherwise leave it alone.
+    - Facts with status "unconfirmed" were noted by other agents and haven't been checked. Confirm one when a source you read backs it up, and supersede it with a new fact when a source contradicts it. Otherwise leave it alone: it stays a lead, and \(me) isn't asked about it.
     - When a new fact replaces a known one (a status moved on, a decision changed, a blocker cleared, an owner changed), put the old id in supersedes. When a source only restates a known fact, confirm it instead of adding it again.
+    - Settle everything you can yourself. \(me) is only asked about what you mark with doubt, so use it only when you can't tell what's true: sources disagree and none is clearly newer, or an unconfirmed fact contradicts a known one and nothing you read settles it. Work moving on, a newer source replacing an older one, and anything a source states plainly are never in doubt. The reason is one short line naming what conflicts. Mark a new fact by setting its doubt; it then waits for \(me) before replacing anything. Mark a known fact by listing its id under doubt.
     - Every fact and confirmation cites at least one source you actually saw. sources here are numbered on their own, from 1, with the same url rules as the briefing.
 
     Then write the briefing, from the facts as they stand after your changes plus what you gathered, as one JSON file to \(output) with exactly this shape and nothing else:

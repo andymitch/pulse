@@ -6,11 +6,13 @@ let subjectKinds = ["project", "ticket", "person", "topic"]
 struct FactChanges: Decodable {
     struct Subject: Decodable { let kind, name: String; let aliases: [String]? }
     struct Source: Decodable { let id: Int; let kind, url, title: String; let author, date, excerpt: String? }
-    struct Add: Decodable { let subject: Subject; let kind, text, observed: String; let sources: [Int]; let supersedes: [Int]? }
+    struct Add: Decodable { let subject: Subject; let kind, text, observed: String; let sources: [Int]; let supersedes: [Int]?; var doubt: String? = nil }
     struct Confirm: Decodable { let id: Int; let sources: [Int] }
+    struct Doubt: Decodable { let id: Int; let reason: String }
     let sources: [Source]?
     let add: [Add]?
     let confirm: [Confirm]?
+    var doubt: [Doubt]? = nil
 }
 
 struct FactCounts: Equatable { var added = 0, superseded = 0, confirmed = 0 }
@@ -64,7 +66,7 @@ private func supersede(_ db: DB, new: Int, observed: String, olds: [Int]) throws
 
 private func confirm(_ db: DB, _ id: Int, seen: String) throws {
     guard let observed = try current(db, id) else { return }
-    try db.query("UPDATE facts SET status = 'confirmed', last_seen = max(last_seen, ?) WHERE id = ?", [seen, id])
+    try db.query("UPDATE facts SET status = 'confirmed', doubt = NULL, last_seen = max(last_seen, ?) WHERE id = ?", [seen, id])
     let olds = try db.query("SELECT replaces_id FROM pending_replaces WHERE fact_id = ?", [id]).compactMap { $0[0] as? Int }
     _ = try supersede(db, new: id, observed: observed, olds: olds)
     try db.query("DELETE FROM pending_replaces WHERE fact_id = ?", [id])
@@ -98,12 +100,13 @@ func applyFacts(_ changes: FactChanges, to db: DB, now: Date = Date(), origin: S
                 counts.confirmed += 1
                 continue
             }
+            let doubt = agent ? nil : a.doubt.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
             let fact = try db.query("""
-                INSERT INTO facts (subject_id, kind, text, observed_at, last_seen, recorded_at, status, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-                """, [subject, a.kind, text, observed, observed, iso.string(from: now), agent ? "unconfirmed" : "confirmed", origin])[0][0] as! Int
+                INSERT INTO facts (subject_id, kind, text, observed_at, last_seen, recorded_at, status, origin, doubt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                """, [subject, a.kind, text, observed, observed, iso.string(from: now), agent || doubt != nil ? "unconfirmed" : "confirmed", origin, doubt])[0][0] as! Int
             try cite(fact, a.sources)
             counts.added += 1
-            if agent {
+            if agent || doubt != nil {
                 for old in a.supersedes ?? [] {
                     if try current(db, old) != nil { try db.query("INSERT OR IGNORE INTO pending_replaces VALUES (?, ?)", [fact, old]) }
                 }
@@ -116,6 +119,11 @@ func applyFacts(_ changes: FactChanges, to db: DB, now: Date = Date(), origin: S
             try cite(c.id, c.sources)
             try confirm(db, c.id, seen: today)
             counts.confirmed += 1
+        }
+        for d in changes.doubt ?? [] where !agent {
+            let reason = d.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reason.isEmpty, try current(db, d.id) != nil else { continue }
+            try db.query("UPDATE facts SET doubt = ? WHERE id = ?", [reason, d.id])
         }
     }
     return counts
@@ -182,11 +190,11 @@ private func factJSON(_ db: DB, _ r: [Any?]) throws -> [String: Any] {
             "kind": r[1]!, "name": r[2]!,
             "title": r[1] as? String == "ticket" ? (try? JSONDecoder().decode([String].self, from: Data((r[9] as? String ?? "[]").utf8)))?.first : nil,
         ] as [String: Any?]).compactMapValues { $0 }, "kind": r[3], "text": r[4], "observed": r[5], "lastSeen": r[6], "status": r[7],
-        "supersededBy": r[8], "recorded": r[10], "sources": sources, "replaces": replaces.isEmpty ? nil : replaces,
+        "supersededBy": r[8], "recorded": r[10], "doubt": r[11], "sources": sources, "replaces": replaces.isEmpty ? nil : replaces,
     ] as [String: Any?]).compactMapValues { $0 }
 }
 
-private let factColumns = "SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status, f.superseded_by, s.aliases, f.recorded_at FROM facts f JOIN subjects s ON s.id = f.subject_id"
+private let factColumns = "SELECT f.id, s.kind, s.name, f.kind, f.text, f.observed_at, f.last_seen, f.status, f.superseded_by, s.aliases, f.recorded_at, f.doubt FROM facts f JOIN subjects s ON s.id = f.subject_id"
 
 func searchFacts(_ db: DB, query: String = "", since: String? = nil, kind: String? = nil, superseded: Bool = false, limit: Int = 30) throws -> [[String: Any]] {
     var conditions = ["f.status != 'rejected'"], args: [Any?] = []
@@ -245,33 +253,18 @@ func rejectFact(_ db: DB, id: Int) throws {
     }
 }
 
-struct PendingFact: Identifiable, Equatable {
-    let id: Int
-    let subject, kind, text, observed, recorded: String
-    let source: URL?
-    let replaces: [String]
-}
-
-func unconfirmedFacts(_ db: DB) throws -> [PendingFact] {
-    try db.query("""
-        SELECT f.id, s.name, f.kind, f.text, f.observed_at, f.recorded_at,
-               (SELECT so.url FROM sources so JOIN fact_sources fs ON fs.source_id = so.id WHERE fs.fact_id = f.id LIMIT 1)
-        FROM facts f JOIN subjects s ON s.id = f.subject_id WHERE f.status = 'unconfirmed' AND f.superseded_by IS NULL ORDER BY f.recorded_at DESC, f.id DESC
-        """).map { r in
-        let id = r[0] as! Int
-        let replaces = try db.query("SELECT o.text FROM pending_replaces p JOIN facts o ON o.id = p.replaces_id WHERE p.fact_id = ? AND o.\(live)", [id]).compactMap { $0[0] as? String }
-        return PendingFact(id: id, subject: r[1] as! String, kind: r[2] as! String, text: r[3] as! String, observed: r[4] as! String,
-                           recorded: r[5] as! String, source: (r[6] as? String).flatMap(URL.init), replaces: replaces)
+func doubtedFacts(_ db: DB) throws -> [[String: Any]] {
+    try db.query("\(factColumns) WHERE f.doubt IS NOT NULL AND f.\(live) ORDER BY f.recorded_at DESC, f.id DESC").map { r in
+        var fact = try factJSON(db, r)
+        let pending = try db.query("SELECT o.id, o.text, o.observed_at FROM pending_replaces p JOIN facts o ON o.id = p.replaces_id WHERE p.fact_id = ? AND o.\(live)", [fact["id"]])
+            .map { ["id": $0[0]!, "text": $0[1]!, "observed": $0[2]!] }
+        if !pending.isEmpty { fact["replaces"] = pending }
+        return fact
     }
 }
 
 func factsByID(_ db: DB, _ ids: [Int]) throws -> [[String: Any]] {
     try ids.compactMap { id in try db.query("\(factColumns) WHERE f.id = ?", [id]).first.map { try factJSON(db, $0) } }
-}
-
-func changedFacts(_ db: DB, since: String, limit: Int = 100) throws -> [[String: Any]] {
-    try db.query("\(factColumns) WHERE f.recorded_at > ? AND f.\(live) AND f.status = 'confirmed' ORDER BY f.recorded_at DESC, f.observed_at DESC, f.id DESC LIMIT ?",
-                 [since, limit]).map { try factJSON(db, $0) }
 }
 
 private let stopwords: Set<String> = ["the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "is", "are", "was", "were", "be", "it", "its",
