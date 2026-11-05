@@ -51,7 +51,7 @@ private let mcpTools: [[String: Any]] = [
     tool("today", "Today's briefing: the team focus (the current priorities) with its sources, and the task list with ids, refs, links and estimates. done, later and removed reflect what was marked in Pulse today; live ticket and PR status isn't fetched. stale is true when the briefing wasn't made today.", [:]),
     tool("stats", "PRs merged and tickets closed per person per period, plus PR stats (median hours to merge, median lines added, PRs over 500 lines), as shown on Trends.", [
         "range": ["type": "string", "enum": TrendRange.allCases.map(\.rawValue), "description": "Period, default 5 weeks"],
-        "person": ["type": "string", "description": "Only this person, by name"],
+        "person": ["type": "string", "description": "Only this person: a GitHub login for PRs, a Linear name for tickets"],
     ]),
     tool("update_task", "Mark one of today's tasks done or not done, move it to later or back up, or remove it for the day or restore it. Uses the ids from today. Only the fields given change.", [
         "id": ["type": "string", "description": "The task id from today"],
@@ -203,7 +203,7 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         let person = args["person"] as? String
         let db = try DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true)
         let buckets = range.buckets()
-        let t = try db.trends(since: buckets[0], range: range, org: Settings.load().githubOrg)
+        let t = try db.trends(since: buckets[0], range: range)
         let matches = { (name: String) in person.map { name.caseInsensitiveCompare($0) == .orderedSame } ?? true }
         let prs = t.prs.filter { matches($0.person) }
         let closed = t.completed.filter { matches($0.person) }

@@ -11,16 +11,16 @@ Pulse is a context nexus for your work. It runs in your Mac's menu bar, gathers 
 
 ## Tools built on it
 
-Pulse opens on **Home**: your tasks, the focus briefing, today's meetings and a trends summary, with Meetings, Knowledge and Trends each on their own tab.
+Pulse opens on **Home**: your pace toward this week's PR target, your tasks, the focus briefing and today's meetings, with Knowledge, Meetings and Trends each on their own tab.
 
 - **Tasks**: a short checklist planned each morning to fit about 5 hours, covering reviews to unblock, replies you owe, and the tickets that matter most. Linear tickets show their real status, which you can change from the list. An item's dropdown can also move it to the bottom for later, or remove it for the day. Finished tasks stay on the list, checked off, until the week is over. **Start** creates a git worktree on the ticket's branch, moves the ticket to In Progress, and opens it in your IDE's agent panel (Zed, Cursor, VS Code) or in a terminal agent (pi, Claude Code, or your own).
 - **Focus**: one distilled summary of what the team is pushing on, written from the facts, with source cards. Each focus item and meeting summary has its own button that reads it aloud.
 - **Meetings**: Pulse notices Google Meet calls, Slack huddles and calendar meetings, records them, transcribes them on your Mac, and saves a summary with the decisions and important points. Each meeting can be copied as Markdown or moved to the Trash from its card.
 - **Knowledge**: a place to **ask** about your work, the Focus, and a short triage list. When something needs resolving, Tasks shows one **Review what Pulse learned** item; **Review** opens Knowledge and hides the item until there's something new. Answers come from this Mac's on-device model using the facts Pulse has (shown under each answer), and when that doesn't know, Pulse asks your briefing agent instead, handing it the facts it found; the agent can also look in Linear, Slack and GitHub. While it works, the latest few steps show under the question ("Looking in Linear"), and its answer links the words each source backs up, with the source's logo. The thread stays until you clear it. The triage list shows only what needs you: facts other agents noted, to confirm, edit or reject, and facts that replaced something Pulse knew, as the old fact crossed out above the new one, each with **Looks right** and **Wrong**. Each source is listed with what it is, and Slack links open at the message in the Slack app.
-- **Trends**: PRs merged and Linear tickets closed per person, over 7 days, 5 weeks or 12 months.
+- **Trends**: PRs merged per GitHub login and Linear tickets closed per assignee, as two charts with their own people filters, over 7 days, 5 weeks or 12 months. Your PRs merged this week also show on Home against a weekly target you set in Settings (10 by default).
 
 <p align="center">
-  <img src="docs/screenshot-today.png" alt="The Home tab: today's checklist, the focus briefing, meetings and a trends summary" width="49%">
+  <img src="docs/screenshot-today.png" alt="The Home tab: this week's PR pace, today's checklist, the focus briefing and meetings" width="49%">
   <img src="docs/screenshot-trends.png" alt="The Trends tab: PRs merged per month, stacked by teammate" width="49%">
 </p>
 
@@ -61,7 +61,7 @@ A local build is versioned after the latest tag with a `-dev` suffix, such as `1
 
 Click the gear in the popover.
 
-1. **GitHub**: pick your `gh` account and organization. Pulse matches GitHub people to Linear people automatically, first by GitHub profile name, then by login.
+1. **GitHub**: pick your `gh` account and organization, and your weekly PR target.
 2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's stored in your Keychain and can be replaced or removed there.
 3. **Slack**: leave it on. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
 4. **Mail**: turn it on, and macOS asks once for permission to read Mail. Pulse reads your inbox only while Mail is open and never launches it.

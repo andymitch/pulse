@@ -5,7 +5,6 @@ private let palette: [Color] = [.blue, .green, .orange, .purple, .red, .teal, .y
 
 struct ContentView: View {
     @ObservedObject var store: Store
-    @State private var metric = TrendMetric.prs
     @ObservedObject private var updater = Updater.shared
     @ObservedObject private var meetings = Meetings.shared
 
@@ -53,51 +52,37 @@ struct ContentView: View {
     }
 
     @ViewBuilder private var home: some View {
+        WeeklyPace(store: store)
         TodayView(store: store)
         FocusHeader(store: store)
         PrioritiesView(store: store)
         MeetingsView(todayOnly: true) { store.page = .meetings }
-        SectionHeader(title: "Trends", open: { store.page = .trends }) {
-            Text("Last \(store.range.rawValue): \(trendsSummary)").font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    private var trendsSummary: String {
-        let prs = store.trends.prs.filter { store.includes($0.person) }.count
-        let tickets = store.trends.completed.filter { store.includes($0.person) }.map(\.n).reduce(0, +)
-        return "\(prs) PRs merged" + (store.hasLinearKey ? ", \(tickets) tickets closed" : "")
     }
 
     @ViewBuilder private var trends: some View {
         SectionHeader(title: "Trends") {
-            Picker("", selection: $metric) {
-                ForEach(TrendMetric.allCases.filter { $0 == .prs || store.hasLinearKey }, id: \.self) { m in
-                    Label { Text(m.rawValue) } icon: { Image(nsImage: m.brand.padded(size: 13, trailing: 5)) }.tag(m)
-                }
-            }
-            .labelsHidden()
-            .fixedSize()
             Picker("", selection: $store.range) {
                 ForEach(TrendRange.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-            PeoplePicker(store: store)
         }
-        VStack(alignment: .leading, spacing: 10) {
-            switch metric {
-            case .prs:
-                StackedChart(store: store, counts: prCounts, unit: "PRs")
-                PRStatsTable(store: store)
-            case .closed:
-                StackedChart(store: store, counts: store.trends.completed, unit: "Tickets")
+        let prs = store.trends.prs.filter { store.prPeople.isEmpty || store.prPeople.contains($0.person) }
+        Panel(title: "PRs merged", brand: .github, accessory: {
+            PeoplePicker(people: store.prAuthors, me: settings.githubAccount, selection: $store.prPeople)
+        }) {
+            StackedChart(store: store, counts: prCounts, unit: "PRs", order: store.prOrder, selection: store.prPeople)
+            PRStatsTable(store: store, prs: prs)
+        }
+        if store.hasLinearKey {
+            Panel(title: "Tickets closed", brand: .linear, accessory: {
+                PeoplePicker(people: store.ticketAssignees, me: store.me, selection: $store.ticketPeople)
+            }) {
+                StackedChart(store: store, counts: store.trends.completed, unit: "Tickets", order: store.ticketOrder, selection: store.ticketPeople)
                 Text("Tickets completed, by assignee.").font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var prCounts: [Count] {
@@ -144,14 +129,9 @@ struct ContentView: View {
 }
 
 enum PulseTab: String, CaseIterable {
-    case home = "Home", meetings = "Meetings", knowledge = "Knowledge", trends = "Trends"
+    case home = "Home", knowledge = "Knowledge", meetings = "Meetings", trends = "Trends"
 }
 
-enum TrendMetric: String, CaseIterable {
-    case prs = "PRs merged", closed = "Tickets closed"
-
-    var brand: Brand { self == .prs ? .github : .linear }
-}
 
 struct SectionHeader<Accessory: View>: View {
     let title: String
@@ -180,33 +160,57 @@ struct SectionHeader<Accessory: View>: View {
 }
 
 struct PeoplePicker: View {
-    @ObservedObject var store: Store
+    let people: [String]
+    let me: String?
+    @Binding var selection: Set<String>
+    @State private var open = false
 
     private var label: String {
-        switch store.selected.count {
+        switch selection.count {
         case 0: "Everyone"
-        case 1: store.selected.first == store.me ? "Just me" : store.selected.first!
-        default: "\(store.selected.count) people"
+        case 1: selection.first == me ? "Just me" : selection.first!
+        default: "\(selection.count) people"
         }
     }
-
-    @State private var open = false
 
     var body: some View {
         Button { open.toggle() } label: { Label(label, systemImage: "person.2") }
             .popover(isPresented: $open, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Button("Everyone") { store.selected = [] }
-                        if let me = store.me { Button("Just me") { store.selected = [me] } }
+                        Button("Everyone") { selection = [] }
+                        if let me, !me.isEmpty { Button("Just me") { selection = [me] } }
                     }
                     Divider()
-                    ForEach(store.people, id: \.self) { p in
-                        Toggle(p, isOn: Binding(get: { store.selected.contains(p) }, set: { _ in store.toggle(p) }))
+                    ForEach(people, id: \.self) { p in
+                        Toggle(p, isOn: Binding(get: { selection.contains(p) }, set: { on in if on { selection.insert(p) } else { selection.remove(p) } }))
                     }
                 }
                 .padding(12)
             }
+    }
+}
+
+struct WeeklyPace: View {
+    @ObservedObject var store: Store
+
+    var body: some View {
+        let target = max(settings.weeklyPRTarget, 1), merged = store.mergedThisWeek
+        if !settings.githubAccount.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("PRs merged this week").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(merged) of \(target)").font(.caption.monospacedDigit()).foregroundStyle(merged >= target ? .green : .secondary)
+                }
+                ProgressView(value: Double(min(merged, target)), total: Double(target))
+                    .tint(merged >= target ? .green : .accentColor)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("PRs merged this week: \(merged) of \(target)")
+        }
     }
 }
 
@@ -243,6 +247,8 @@ struct StackedChart: View {
     @ObservedObject var store: Store
     let counts: [Count]
     let unit: String
+    let order: [String]
+    let selection: Set<String>
     @State private var selected: String?
 
     private struct Bar: Identifiable {
@@ -252,11 +258,11 @@ struct StackedChart: View {
     }
 
     var body: some View {
-        let everyone = store.people
+        let includes = { (p: String) in selection.isEmpty || selection.contains(p) }
         let present = Set(counts.map(\.person))
-        let shown = everyone.filter { present.contains($0) && store.includes($0) }
+        let shown = order.filter { present.contains($0) && includes($0) }
         let bars = store.buckets.flatMap { m in
-            counts.filter { $0.bucket == m && store.includes($0.person) }
+            counts.filter { $0.bucket == m && includes($0.person) }
                 .sorted { ($0.n, $1.person) > ($1.n, $0.person) }
                 .enumerated()
                 .map { Bar(bucket: m, person: $1.person, n: $1.n, order: $0) }
@@ -279,9 +285,13 @@ struct StackedChart: View {
         }
         .chartXSelection(value: $selected)
         .chartXScale(domain: store.buckets.map(store.label))
-        .chartForegroundStyleScale(domain: shown, range: shown.map { palette[store.colorIndex($0) % palette.count] })
+        .chartForegroundStyleScale(domain: shown, range: shown.map { palette[colorIndex($0) % palette.count] })
         .chartLegend(position: .bottom, alignment: .leading)
         .frame(height: 200)
+    }
+
+    private func colorIndex(_ person: String) -> Int {
+        order.firstIndex(of: person) ?? order.count + abs(person.unicodeScalars.reduce(0) { $0 &+ Int($1.value) })
     }
 
     private func tooltip(_ period: String, _ bars: [Bar]) -> some View {
@@ -289,7 +299,7 @@ struct StackedChart: View {
             Text(period).font(.caption.weight(.semibold))
             ForEach(bars) { b in
                 HStack(spacing: 6) {
-                    Circle().fill(palette[store.colorIndex(b.person) % palette.count]).frame(width: 7, height: 7)
+                    Circle().fill(palette[colorIndex(b.person) % palette.count]).frame(width: 7, height: 7)
                     Text(b.person)
                     Spacer(minLength: 12)
                     Text("\(b.n)").monospacedDigit()
@@ -318,9 +328,10 @@ private func hours(_ h: Double) -> String {
 
 struct PRStatsTable: View {
     @ObservedObject var store: Store
+    let prs: [PRRow]
 
     var body: some View {
-        let stats = prStats(store.trends.prs.filter { store.includes($0.person) })
+        let stats = prStats(prs)
         Grid(alignment: .trailing, horizontalSpacing: 6, verticalSpacing: 4) {
             GridRow {
                 Text("")
