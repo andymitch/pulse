@@ -61,7 +61,39 @@ func seedDemo(_ db: DB) throws {
                 }
             }
         }
+        try db.set(["Self-serve onboarding", "Billing v2"], "linear_projects")
     }
+    try seedDemoFacts(db, now: now)
+}
+
+private func seedDemoFacts(_ db: DB, now: Date) throws {
+    let day = { (back: Int) in Calendar.current.date(byAdding: .day, value: -back, to: now)!.formatted(localDay) }
+    let sources: [FactChanges.Source] = [
+        .init(id: 1, kind: "slack", url: "https://acme.slack.com/archives/C2/p1", title: "Omar in #launch: launch checklist", author: "Omar Reyes", date: day(1), excerpt: nil),
+        .init(id: 2, kind: "linear", url: "https://linear.app/acme/issue/ACME-198", title: "ACME-198 Invite teammates from the onboarding checklist", author: "Jane Doe", date: day(1), excerpt: nil),
+        .init(id: 3, kind: "meeting", url: "file:///demo/meetings/planning.md", title: "Launch planning", author: nil, date: day(0), excerpt: nil),
+        .init(id: 4, kind: "github", url: "https://github.com/acmecorp/web/pull/412", title: "Invite teammates from the checklist (web#412)", author: "Jane Doe", date: day(0), excerpt: nil),
+        .init(id: 5, kind: "linear", url: "https://linear.app/acme/issue/ACME-214", title: "ACME-214 Add CSV export to the usage report", author: "Jane Doe", date: day(2), excerpt: nil),
+    ]
+    let fact = { (subject: String, kind: String, text: String, back: Int, sources: [Int]) in
+        FactChanges.Add(subject: .init(kind: "topic", name: subject, aliases: nil), kind: kind, text: text, observed: day(back), sources: sources, supersedes: nil)
+    }
+    _ = try applyFacts(FactChanges(sources: sources, add: [
+        fact("Self-serve onboarding", "decision", "Sign-ups open November 4 if teammate invites merge this week.", 0, [3, 1]),
+        fact("Self-serve onboarding", "status", "The checklist, sample data and billing step are live behind a flag.", 2, [1]),
+        fact("ACME-198", "status", "Invites are blocked on the role picker design.", 3, [2]),
+        fact("ACME-214", "commitment", "Jane promised the pilot customers a CSV export of the usage report before launch.", 2, [5]),
+        fact("Priya Shah", "owner", "Priya Shah owns the onboarding analytics events and names them before Friday.", 0, [3]),
+    ], confirm: nil), to: db, now: now)
+    let blocked = try db.query("SELECT id FROM facts WHERE text LIKE 'Invites are blocked%'").first?[0] as? Int
+    _ = try applyFacts(FactChanges(sources: sources, add: [
+        FactChanges.Add(subject: .init(kind: "ticket", name: "ACME-198", aliases: nil), kind: "status",
+                        text: "The invites PR (web#412) is waiting on review with two small comments left; the role picker uses the inviter's role.", observed: day(0), sources: [4, 2], supersedes: blocked.map { [$0] }),
+    ], confirm: nil), to: db, now: now)
+    _ = try applyFacts(FactChanges(sources: nil, add: [
+        FactChanges.Add(subject: .init(kind: "project", name: "Billing v2", aliases: nil), kind: "decision",
+                        text: "Billing v2 moves annual plans to invoicing in December, after the onboarding launch.", observed: day(0), sources: [], supersedes: nil),
+    ], confirm: nil), to: db, now: now, origin: "agent")
 }
 
 @MainActor
