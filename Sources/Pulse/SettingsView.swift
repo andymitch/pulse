@@ -48,7 +48,7 @@ struct SettingsView: View {
                         Text("None").tag("")
                         ForEach(orgs, id: \.self) { Text($0).tag($0) }
                     }
-                    Stepper("Monthly PR target: \(draft.monthlyPRTarget)", value: $draft.monthlyPRTarget, in: 5...200, step: 5)
+                    Stepper("Monthly PR target: \(draft.monthlyPRTarget)", value: $draft.monthlyPRTarget, in: 1...200)
                 }
             } header: { header("GitHub", .github) }
 
