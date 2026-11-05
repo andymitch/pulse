@@ -23,7 +23,6 @@ final class Store: ObservableObject {
     @Published var synthesizing = false
     @Published var synthesisError: String?
     @Published var doneIDs: Set<String> = []
-    @Published var pinnedIDs: [String] = []
     @Published var laterIDs: Set<String> = []
     @Published var removedIDs: Set<String> = []
     @Published var doneThisWeek: [DoneItem] = []
@@ -149,7 +148,6 @@ final class Store: ObservableObject {
     private func loadDay() {
         loadedDay = day
         doneIDs = Set(db.ids(doneKey))
-        pinnedIDs = db.ids(pinKey)
         laterIDs = Set(db.ids(laterKey))
         removedIDs = Set(db.ids(removedKey))
         doneThisWeek = db.decode(weekKey) ?? []
@@ -207,7 +205,6 @@ final class Store: ObservableObject {
         save(log, weekKey)
     }
     private var doneKey: String { "done-" + day }
-    private var pinKey: String { "pinned-" + day }
     private var laterKey: String { "later-" + day }
     private var removedKey: String { "removed-" + day }
 
@@ -236,12 +233,6 @@ final class Store: ObservableObject {
         save([String](), removedKey)
     }
 
-    func pin(_ id: String) {
-        guard !pinnedIDs.contains(id), !checklist.contains(where: { $0.id == id }) else { return }
-        pinnedIDs.append(id)
-        save(pinnedIDs, pinKey)
-    }
-
     var checklist: [TodoRow] {
         let rows = plannedRows.filter { !removedIDs.contains($0.id) }
         return rows.filter { !laterIDs.contains($0.id) } + rows.filter { laterIDs.contains($0.id) }
@@ -250,10 +241,7 @@ final class Store: ObservableObject {
     private var plannedRows: [TodoRow] {
         let live = Dictionary(today.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         guard let plan = synthesis?.today, let planned = synthesizedAt, Calendar.current.isDateInToday(planned) else {
-            let base = Array(today.filter { $0.kind != .notification && !removedIDs.contains($0.id) }.prefix(6))
-            let ids = Set(base.map(\.id))
-            let pinned = pinnedIDs.compactMap { id in today.first { $0.id == id } }.filter { !ids.contains($0.id) }
-            return (base + pinned).map { TodoRow(item: $0, why: nil, minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
+            return today.map { TodoRow(item: $0, why: nil, minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
         }
 
         let refs = Set(plan.compactMap(\.ref))
@@ -274,14 +262,9 @@ final class Store: ObservableObject {
             return TodoRow(item: item, why: resolved ? nil : p.why, minutes: p.minutes, done: resolved || doneIDs.contains(id), reply: p.reply)
         }
         let shown = Set((arrived + rows).map(\.id))
-        let pinned = pinnedIDs.compactMap { live[$0] }.filter { !shown.contains($0.id) }
-            .map { TodoRow(item: $0, why: "Added today", minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
-        return arrived + rows + pinned
-    }
-
-    var moreItems: [ActionItem] {
-        let shown = Set(checklist.map(\.id))
-        return today.filter { !shown.contains($0.id) && !removedIDs.contains($0.id) }
+        let rest = today.filter { !shown.contains($0.id) }
+            .map { TodoRow(item: $0, why: nil, minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
+        return arrived + rows + rest
     }
 
     func setState(_ state: WorkflowState, for item: ActionItem) async {
@@ -311,7 +294,6 @@ final class Store: ObservableObject {
 
     func launch(_ choice: Launch, item: ActionItem) async {
         guard let ticket = item.ticket, let branch = item.branch else { return }
-        if choice != .prompt { pin(item.id) }
         try? db.setMeta(item.started ? "last_open" : "last_start", choice.rawValue)
         objectWillChange.send()
         do {

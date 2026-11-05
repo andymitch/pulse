@@ -294,7 +294,6 @@ struct TodoRow: Identifiable {
 
 struct TodayView: View {
     @ObservedObject var store: Store
-    @State private var showMore = false
     @State private var showDone = false
 
     var body: some View {
@@ -354,19 +353,6 @@ struct TodayView: View {
                     Text("Done · \(done.count + week.count)").foregroundStyle(.secondary)
                 }
             }
-        }
-        let more = store.moreItems
-        if !more.isEmpty {
-            DisclosureGroup("More · \(more.count)", isExpanded: $showMore) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(more) { item in
-                        TodoRowView(store: store, row: TodoRow(item: item, why: nil, minutes: nil, done: false), checkable: false)
-                    }
-                }
-                .padding(.top, 6)
-            }
-            .padding(.horizontal, 14)
-            .foregroundStyle(.secondary)
         }
         if !store.removedIDs.isEmpty {
             Button("Restore \(store.removedIDs.count) removed today") { store.restoreRemoved() }
@@ -444,7 +430,6 @@ private struct ReplySuggestion: View {
 private struct TodoRowView: View {
     @ObservedObject var store: Store
     let row: TodoRow
-    var checkable = true
 
     var body: some View {
         let item = row.item
@@ -452,7 +437,7 @@ private struct TodoRowView: View {
         HStack(alignment: .top, spacing: 10) {
             if let state = item.state, let team = item.teamID {
                 StatusMenu(store: store, item: item, state: state, states: store.workflow[team] ?? [state]).frame(width: 16, height: 17)
-            } else if checkable {
+            } else {
                 Button { store.toggleDone(item.id) } label: {
                     Image(nsImage: store.checkbox(done: row.done))
                 }
@@ -466,7 +451,7 @@ private struct TodoRowView: View {
                 if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
             }
             Spacer()
-            if !row.done { Buttons(store: store, item: item, canDefer: checkable) }
+            if !row.done { Buttons(store: store, item: item) }
         }
     }
 }
@@ -546,19 +531,18 @@ private struct StatusMenu: View {
 private struct Buttons: View {
     @ObservedObject var store: Store
     let item: ActionItem
-    let canDefer: Bool
 
     var body: some View {
-        let triage = Triage(store: store, id: item.id, canDefer: canDefer)
+        let triage = Triage(store: store, id: item.id)
         HStack(spacing: 6) {
             if item.ticket != nil, item.branch != nil {
                 TicketButton(store: store, item: item, triage: triage)
             } else if let pr = item.pr {
-                AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { store.pin(item.id); open(pr) }
+                AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { open(pr) }
             } else {
                 let slack = item.url.host?.hasSuffix("slack.com") == true
                 let linear = item.url.host == "linear.app"
-                AppButton(slack ? .slack : linear ? .linear : item.url.host == "github.com" ? .github : nil, "Open", symbol: item.url.scheme == "message" ? "envelope" : "arrow.up.right.square", menu: triage) { store.pin(item.id); open(item.url, in: slack ? .slack : linear ? .linear : nil) }
+                AppButton(slack ? .slack : linear ? .linear : item.url.host == "github.com" ? .github : nil, "Open", symbol: item.url.scheme == "message" ? "envelope" : "arrow.up.right.square", menu: triage) { open(item.url, in: slack ? .slack : linear ? .linear : nil) }
             }
             if let id = item.notificationID { AppButton(nil, "Mark read", icon: false) { await store.markRead(id) } }
         }
@@ -601,10 +585,9 @@ private struct SplitButton<Title: View, Items: View>: View {
 private struct Triage: View {
     @ObservedObject var store: Store
     let id: String
-    let canDefer: Bool
 
     var body: some View {
-        if canDefer || store.laterIDs.contains(id) { Button(store.laterIDs.contains(id) ? "Move back up" : "Do later") { store.toggleLater(id) } }
+        Button(store.laterIDs.contains(id) ? "Move back up" : "Do later") { store.toggleLater(id) }
         Button("Remove for today") { store.remove(id) }
     }
 }

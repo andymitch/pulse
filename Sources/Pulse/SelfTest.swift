@@ -312,8 +312,7 @@ func selfTest() throws {
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
         store.remove("T2")
         store.toggleLater("T1")
-        check(store.checklist.map(\.id) == ["T3", "T4", "T5", "T6", "T7", "T1"], "without a plan, a removed item is backfilled and a later one moves to the bottom")
-        check(!store.moreItems.map(\.id).contains("T2"), "a removed item isn't in More either")
+        check(store.checklist.map(\.id) == ["T3", "T4", "T5", "T6", "T7", "T8", "T1"], "without a plan, all open work is listed, a removed item drops out and a later one moves to the bottom")
         store.restoreRemoved()
         check(store.checklist.map(\.id).first == "T2", "restoring brings removed items back")
         store.toggleDone("T3")
@@ -338,6 +337,7 @@ func selfTest() throws {
         store.closedTickets = ["K-2": state("completed"), "K-3": state("canceled")]
         let rows = store.checklist.filter { !$0.id.hasPrefix("T") }
         check(rows.map(\.id) == ["K-2", "K-3", "https://github.com/o/r/pull/1"] && rows.allSatisfy(\.done), "a briefing ticket that left the list for the backlog drops off, closed ones and merged PRs are done")
+        check(store.checklist.map(\.id) == ["K-2", "K-3", "https://github.com/o/r/pull/1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T1"], "open work the briefing didn't pick comes after its tasks, with later ones still last")
         store.recordDone()
         check(store.doneThisWeek.map(\.id) == ["K-2", "https://github.com/o/r/pull/1"], "only completed tickets and merged PRs go in the week's done log")
     }
