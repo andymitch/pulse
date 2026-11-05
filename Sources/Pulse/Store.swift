@@ -4,11 +4,15 @@ import AppKit
 final class Store: ObservableObject {
     @Published var trends = Trends()
     private var colorOrder: [String] = []
+    @Published var mergedThisWeek = 0
     @Published var syncing = false
     @Published var lastSync: Date?
     @Published var lastError: String?
     @Published var hasLinearKey = demoMode || linearKey() != nil
     @Published var selected: Set<String> = []
+    @Published var metric = TrendMetric.prs {
+        didSet { selected = []; load() }
+    }
     @Published var me: String?
     @Published var today: [ActionItem] = []
     @Published var showingSettings = false
@@ -56,10 +60,11 @@ final class Store: ObservableObject {
 
     func load() {
         do {
-            trends = try db.trends(since: buckets[0], range: range, org: settings.githubOrg)
-            let year = range == .year ? trends : try db.trends(since: TrendRange.year.buckets()[0], range: .year, org: settings.githubOrg)
+            trends = try db.trends(since: buckets[0], range: range)
+            let year = range == .year ? trends : try db.trends(since: TrendRange.year.buckets()[0], range: .year)
             colorOrder = ranked(year)
             me = db.meta("me")
+            mergedThisWeek = db.mergedSince(thisMonday, author: settings.githubAccount)
         } catch {
             lastError = "\(error)"
         }
@@ -70,17 +75,14 @@ final class Store: ObservableObject {
     func colorIndex(_ person: String) -> Int { colorOrder.firstIndex(of: person) ?? colorOrder.count + abs(person.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }) }
 
     private func ranked(_ t: Trends) -> [String] {
-        var totals: [String: Int] = [:]
-        for r in t.prs { totals[r.person, default: 0] += 1 }
-        for c in t.completed { totals[c.person, default: 0] += c.n }
+        let counts = metric == .prs ? t.prs.map { ($0.person, 1) } : t.completed.map { ($0.person, $0.n) }
+        let totals = Dictionary(counts, uniquingKeysWith: +)
         return totals.keys.sorted { (totals[$0]!, $1) > (totals[$1]!, $0) }
     }
 
-    func includes(_ person: String) -> Bool { selected.isEmpty || selected.contains(person) }
+    var meInTrends: String? { metric == .prs ? (settings.githubAccount.isEmpty ? nil : settings.githubAccount) : me }
 
-    func toggle(_ person: String) {
-        if selected.contains(person) { selected.remove(person) } else { selected.insert(person) }
-    }
+    func includes(_ person: String) -> Bool { selected.isEmpty || selected.contains(person) }
 
     func refresh() async {
         guard !syncing, !demoMode else { return }

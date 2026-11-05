@@ -18,11 +18,11 @@ func selfTest() throws {
     try db.query("INSERT INTO issues VALUES ('i1', 'i1', '', '', 'kai@x.com', NULL, '2026-09-05T00:00:00Z', '2026-10-02T00:00:00Z')")
     try db.query("INSERT INTO issues VALUES ('i2', 'i2', '', '', NULL, 'Omar Reyes', '2026-09-06T00:00:00Z', NULL)")
 
-    let t = try db.trends(since: "2026-01-01", org: "acmecorp")
+    let t = try db.trends(since: "2026-01-01")
     func check(_ ok: Bool, _ what: String, line: Int = #line) {
         if !ok { FileHandle.standardError.write("FAIL line \(line): \(what)\n".data(using: .utf8)!); exit(1) }
     }
-    check(t.prs.map(\.person) == ["Jane Doe", "Omar Reyes", "someone", "Jane Doe"], "github logins map to Linear names")
+    check(t.prs.map(\.person) == ["jane-acme", "acme-omar", "someone", "jane-acme"], "PRs are counted by GitHub login, with no guessing at Linear names")
     let stats = prStats(t.prs.filter { $0.person != "someone" })
     check(stats["2026-09"]?.merged == 2 && stats["2026-10"]?.merged == 1, "merged per month")
     check(abs(stats["2026-09"]!.medianHours - 15) < 1e-6, "median hours")
@@ -45,15 +45,12 @@ func selfTest() throws {
     check(merged.map(\.id) == ["KLE-1", "rev", "pr9", "KLE-2"], "ticket absorbs its PR and takes its urgency")
     check(merged[0].kind == .failing && merged[0].pr == u && merged[0].reason.hasSuffix("CI failing"), "merged ticket carries PR state")
     check(!merged[3].started && merged[3].pr == nil, "todo ticket stays startable")
-    let weeks = try db.trends(since: "2026-09-01", range: .month, org: "acmecorp")
+    let weeks = try db.trends(since: "2026-09-01", range: .month)
     check(Set(weeks.prs.map(\.bucket)) == ["2026-08-31", "2026-09-28"], "weeks start on Monday")
     check(TrendRange.month.buckets(now: iso.date(from: "2026-10-21T12:00:00Z")!) == ["2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"], "last 5 weeks")
     check(TrendRange.week.buckets(now: iso.date(from: "2026-10-21T12:00:00Z")!).last == "2026-10-21", "last 7 days end today")
-    check(autoAffix(org: "acmecorp", logins: ["jane-acme", "priyaacme", "acme-omar", "someone"]) == "acme", "affix from org name")
-    check(autoAffix(org: "acme", logins: ["jane", "bob"]) == "", "no affix when logins don't share it")
-    try db.query("INSERT INTO prs VALUES ('r', 6, 'zz-handle', '2026-09-04T00:00:00Z', '2026-09-04T01:00:00Z', 1)")
-    try db.query("INSERT INTO github_users VALUES ('zz-handle', 'Sam Lee')")
-    check(try db.trends(since: "2026-09-04", org: "acmecorp").prs.first?.person == "Sam Lee", "GitHub profile name wins")
+    check(db.mergedSince(iso.date(from: "2026-09-01T00:00:00Z")!, author: "jane-acme") == 2 && db.mergedSince(iso.date(from: "2026-10-02T00:00:00Z")!, author: "jane-acme") == 0,
+          "the weekly pace counts my PRs merged since a date")
     check(Version("v2")! > Version("1.4.0")!, "major beats minor")
     check(Version("2.0.0-beta.3")! < Version("v2")!, "stable beats its beta")
     check(Version("v2-beta.2")! < Version("v2-beta.10")!, "beta numbers compare as numbers")
@@ -287,6 +284,9 @@ func selfTest() throws {
           "dates read as today, yesterday, a weekday this week, or a short date")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
+        store.selected = ["jane-acme"]
+        store.metric = .closed
+        check(store.selected.isEmpty, "switching the Trends chart resets the people filter, since PRs and tickets list different people")
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
         store.remove("T2")
         store.toggleLater("T1")
