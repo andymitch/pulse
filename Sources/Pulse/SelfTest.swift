@@ -133,6 +133,13 @@ func selfTest() throws {
     let counts = try mem.query("SELECT (SELECT count(*) FROM subjects), (SELECT count(*) FROM sources)")[0]
     check(counts[0] as? Int == 2 && counts[1] as? Int == 1, "subjects and sources are reused")
     let texts = { (facts: [[String: Any]]) in facts.map { $0["text"] as? String ?? "" } }
+    let secret = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-secret-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: secret) }
+    try writePrivate(Data("one".utf8), to: secret)
+    try writePrivate(Data("two".utf8), to: secret)
+    let mode = (try FileManager.default.attributesOfItem(atPath: secret.path)[.posixPermissions] as? Int) ?? 0
+    let saved = try String(contentsOf: secret, encoding: .utf8)
+    check(mode == 0o600 && saved == "two", "the Linear key file is readable only by its owner, and saving again replaces it")
     let state = FileManager.default.temporaryDirectory.appendingPathComponent("slack-state-\(UUID()).json")
     defer { try? FileManager.default.removeItem(at: state) }
     try Data(#"{"workspaces": {"T02ABC": {"domain": "acme", "name": "Acme"}}}"#.utf8).write(to: state)

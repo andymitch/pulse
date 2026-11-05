@@ -54,7 +54,7 @@ struct SettingsView: View {
 
             Section {
                 if store.hasLinearKey && !replacingKey {
-                    LabeledContent("API key", value: "Saved in Keychain")
+                    LabeledContent("API key", value: "Saved on this Mac")
                     HStack {
                         Button("Replace") { replacingKey = true }
                         Button("Remove", role: .destructive) {

@@ -375,7 +375,7 @@ struct LinearKeyForm: View {
     @State private var saving = false
 
     var body: some View {
-        Text("Paste a Linear personal API key (Settings → Security & access). It's stored in your Keychain.")
+        Text("Paste a Linear personal API key (Settings → Security & access). It's kept on this Mac in a file only you can read.")
         HStack {
             SecureField("lin_api_…", text: $key).frame(width: 320).onSubmit(save)
             Button("Save", action: save).disabled(blank || saving)
