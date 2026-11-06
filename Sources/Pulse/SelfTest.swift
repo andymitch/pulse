@@ -101,14 +101,24 @@ func selfTest() throws {
     let converted = (0..<10).compactMap { _ in convert(high, with: converter)?.frameLength }.reduce(0, +)
     check(abs(Int(converted) - 16000) < 300, "mic audio is converted when the input format changes")
     check(spokenWords("[0:26] Andrew Mitchell: Uh") == 1 && spokenWords("[61:02] Jane: Note: ship it\n[61:05] Speaker 1: Sure") == 4, "spoken words skip timestamps and speakers")
-    let reply = { (title: String) in Synthesis.Todo(ref: nil, title: title, why: "", url: "message://%3Cm1%3E", source: "mail", minutes: 5) }
-    check(reply("Reply to Dana").id == reply("Reply to Dana about the date").id, "a reworded briefing item keeps its done state")
+    let notice = PulseTask(id: "a", title: "Send the notice", why: "", url: "https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456", source: "slack")
+    let dana = PulseTask(id: "b", title: "Reply to Dana", why: "", url: "message://%3Cm1%3E", source: "mail")
+    let taskChanges = try JSONDecoder().decode(TaskChanges.self, from: Data(#"""
+        {"add": [{"title": "Ask Jed who gets the notice, then send it", "why": "Jed asked", "url": "https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB", "source": "slack"},
+                 {"title": "Book the room", "why": "", "url": "message://%3Cm2%3E", "source": "mail"}],
+         "update": [{"id": "b", "title": null, "why": "Dana asked again", "url": null, "reply": null}],
+         "close": [{"id": "b", "reason": "Answered"}, {"id": "nope", "reason": ""}]}
+        """#.utf8))
+    let applied = applyTaskChanges(taskChanges, to: [notice, dana], open: ["a", "b"], newID: { "c" })
+    check(applied.tasks.map(\.id) == ["a", "b", "c"] && applied.tasks[0].title == "Ask Jed who gets the notice, then send it" && applied.tasks[0].url == notice.url
+          && applied.tasks[1].why == "Answered" && applied.closed == ["b"] && applied.tasks[2].title == "Book the room",
+          "a new task from the same Slack thread updates the open one, a new link adds a task, and a closed task keeps the reason")
+    check(applyTaskChanges(try JSONDecoder().decode(TaskChanges.self, from: Data("{}".utf8)), to: [notice], open: ["a"]).tasks == [notice], "no changes leave the tasks alone")
     let thread = slackThread(URL(string: "https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456")!)
     let inThread = slackThread(URL(string: "https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB")!)
     check(thread?.channel == "C08QBJ75EUB" && thread?.thread == "1761234567.123456" && inThread?.thread == "1761234567.123456" && slackThread(URL(string: "https://x.com/archives/C1/p1761234567123456")!) == nil
           && slackThread(URL(string: "https://acme.slack.com/archives/C1/p1")!) == nil, "Slack links give the channel and thread to reply in, and others are refused")
-    let old = try JSONDecoder().decode(Synthesis.Todo.self, from: Data(#"{"ref": null, "title": "Reply", "why": "", "url": null, "source": "slack", "minutes": 5}"#.utf8))
-    check(old.reply == nil, "a briefing from before suggested replies still loads")
+    check((try? JSONDecoder().decode(Synthesis.self, from: Data(#"{"focus": [], "today": [{"ref": null}], "sources": []}"#.utf8))) != nil, "a briefing from before the task list still loads")
     let archive = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-meetings-\(UUID())")
     try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: archive) }
@@ -284,11 +294,11 @@ func selfTest() throws {
     let refreshed = try String(contentsOfFile: again[0], encoding: .utf8)
     check(again.first.map { URL(fileURLWithPath: $0).lastPathComponent } == "pi-old.md" && refreshed.contains("invite page"),
           "a session picked up again gets a fresh digest")
-    let prompt = { (since: String?) in synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", since: since) }
+    let prompt = { (since: String?) in synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasks: "t.json", tasksOutput: "u.json", since: since) }
     let later = prompt("2026-11-03T22:00:00Z"), first = prompt(nil)
     check(later.contains("documents created since 2026-11-03T22:00:00Z") && later.contains("gather only what's new") && !later.contains("in the last 14 days")
-          && first.contains("documents created in the last 14 days") && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
-          "after a run the briefing reads only what's new, a first run reads 14 days, and memory is updated before the briefing is written")
+          && first.contains("documents created in the last 14 days") && later.range(of: "u.json")!.lowerBound < later.range(of: "n.json")!.lowerBound && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
+          "after a run the briefing reads only what's new, a first run reads 14 days, and tasks are written first, then memory, then the briefing")
     let d = "2026-11-03"
     check(withoutOwnDate("On 2026-11-03 Drew Osmond opened PR #2047.", d) == "Drew Osmond opened PR #2047."
           && withoutOwnDate("As of 2026-11-03 document unification met 9 of 10 criteria.", d) == "Document unification met 9 of 10 criteria."
@@ -312,44 +322,49 @@ func selfTest() throws {
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
         store.remove("T2")
         store.toggleLater("T1")
-        check(store.checklist.map(\.id) == ["T3", "T4", "T5", "T6", "T7", "T1"], "without a plan, a removed item is backfilled and a later one moves to the bottom")
-        check(!store.moreItems.map(\.id).contains("T2"), "a removed item isn't in More either")
+        check(store.checklist.map(\.id) == ["T3", "T4", "T5", "T6", "T7", "T8", "T1"], "all open work is listed, a removed item drops out and a later one moves to the bottom")
         store.restoreRemoved()
         check(store.checklist.map(\.id).first == "T2", "restoring brings removed items back")
         store.toggleDone("T3")
         check(store.doneThisWeek.isEmpty, "nothing is logged before a successful fetch")
         store.fetchedOK = true
         store.recordDone()
-        check(store.doneThisWeek.map(\.id) == ["T3"] && store.earlierThisWeek.isEmpty, "checking an item off logs it for the week, but today's stay in the checklist")
+        check(store.doneThisWeek.map(\.id) == ["T3"] && store.earlierThisWeek.isEmpty, "checking an item off logs it for the week, but it stays in the checklist")
         check(Store(db: store.db, dir: store.dir).doneThisWeek.map(\.id) == ["T3"], "the week's done list survives a restart")
         store.toggleDone("T3")
-        check(store.doneThisWeek.isEmpty, "unchecking it today takes it back out")
+        check(store.doneThisWeek.isEmpty, "unchecking it takes it back out")
         store.doneThisWeek = [DoneItem(id: "old", title: "Old", url: URL(string: "https://x")!, source: "", day: "2000-01-03"),
                               DoneItem(id: "T4", title: "T4", url: URL(string: "https://x")!, source: "", day: "2000-01-03")]
         store.recordDone()
-        check(store.earlierThisWeek.map(\.id) == ["old"], "earlier days show unless the item is back on today's list")
-        let todo = { (ref: String) in Synthesis.Todo(ref: ref, title: ref, why: "", url: nil, source: "linear", minutes: 30) }
-        let state = { (type: String) in WorkflowState(id: type, name: type, type: type, color: "#000000", position: 0) }
+        check(store.earlierThisWeek.map(\.id) == ["old"], "earlier days show unless the item is back on the list")
         store.doneThisWeek = []
-        store.synthesis = Synthesis(focus: [], today: ["K-1", "K-2", "K-3", "https://github.com/o/r/pull/1"].map(todo), sources: [])
-        store.synthesizedAt = Date()
-        store.closedTickets = nil
-        check(store.checklist.filter { $0.id.hasPrefix("K-") }.allSatisfy { !$0.done }, "briefing tickets stay unchecked when Linear couldn't be read")
-        store.closedTickets = ["K-2": state("completed"), "K-3": state("canceled")]
-        let rows = store.checklist.filter { !$0.id.hasPrefix("T") }
-        check(rows.map(\.id) == ["K-2", "K-3", "https://github.com/o/r/pull/1"] && rows.allSatisfy(\.done), "a briefing ticket that left the list for the backlog drops off, closed ones and merged PRs are done")
-        store.recordDone()
-        check(store.doneThisWeek.map(\.id) == ["K-2", "https://github.com/o/r/pull/1"], "only completed tickets and merged PRs go in the week's done log")
+        store.applyTasks(try JSONDecoder().decode(TaskChanges.self, from: Data(#"{"add": [{"title": "Reply to Dana", "why": "", "url": "message://%3Cm1%3E", "source": "mail"}, {"title": "Send the notice", "why": "", "url": "https://x/1", "source": "slack"}]}"#.utf8)))
+        check(store.checklist.map(\.item.title) == ["T2", "T3", "T4", "T5", "T6", "T7", "T8", "Reply to Dana", "Send the notice", "T1"], "the briefing's tasks join the list after tickets and PRs, with later ones still last")
+        let danaID = store.tasks[0].id
+        store.applyTasks(try JSONDecoder().decode(TaskChanges.self, from: Data(#"{"close": [{"id": "\#(danaID)", "reason": "Answered"}]}"#.utf8)))
+        check(store.checklist.first { $0.id == danaID }?.done == true && store.openTasks.map(\.title) == ["Send the notice"] && store.doneThisWeek.map(\.id) == [danaID],
+              "a task the briefing closes is done and logged for the week")
+        check(Store(db: store.db, dir: store.dir).tasks.count == 2, "tasks survive a restart")
+        try store.db.set([danaID: "2000-01-03"], "task-done")
+        let monday = Store(db: store.db, dir: store.dir)
+        check(monday.tasks.map(\.title) == ["Send the notice"] && monday.doneIDs.isEmpty, "a new week clears tasks done the week before")
+        let state = { (type: String) in WorkflowState(id: type, name: type, type: type, color: "#000000", position: 0) }
+        let url = URL(string: "https://x")!
+        store.today = [ActionItem(id: "K-1", kind: .ticket, title: "", reason: "", url: url, state: state("unstarted"), since: Date()),
+                       ActionItem(id: "K-2", kind: .ticket, title: "", reason: "", url: url, state: state("started"), since: Date()),
+                       ActionItem(id: "PR", kind: .review, title: "", reason: "", url: url, pr: url, since: Date()),
+                       ActionItem(id: "N", kind: .notification, title: "", reason: "", url: url, since: Date())]
+        check(store.toDoCount == 4, "the menu bar counts everything open except Linear tickets that are in progress or in review")
     }
     let mcpDir = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-mcp-\(UUID())")
     defer { try? FileManager.default.removeItem(at: mcpDir) }
     try FileManager.default.createDirectory(at: mcpDir.appendingPathComponent("meetings"), withIntermediateDirectories: true)
     try meetingMarkdown(standup, notes: notes, transcript: "[0:01] Jane: One\n[0:02] Omar: Two\n[0:03] Jane: Three")
         .write(to: mcpDir.appendingPathComponent("meetings/0.md"), atomically: true, encoding: .utf8)
-    try JSONEncoder().encode(Synthesis(focus: [], today: [reply("Reply to Dana"), Synthesis.Todo(ref: "T-1", title: "Ship it", why: "", url: nil, source: "linear", minutes: 30)], sources: []))
-        .write(to: mcpDir.appendingPathComponent("synthesis.json"))
+    try JSONEncoder().encode(Synthesis(focus: [], sources: [])).write(to: mcpDir.appendingPathComponent("synthesis.json"))
     let mcpDB = try DB(path: mcpDir.appendingPathComponent("pulse.db").path)
-    try mcpDB.setMeta("done-" + Date().formatted(localDay), "[\"\(reply("Reply to Dana").id)\"]")
+    try mcpDB.set([dana, PulseTask(id: "T-1", title: "Ship it", why: "", url: "https://x/2", source: "slack")], "tasks")
+    try mcpDB.set([dana.id: Date().formatted(localDay)], "task-done")
     let call = { (name: String, args: [String: Any]) -> Any? in
         let result = mcpResponse(["id": 1, "method": "tools/call", "params": ["name": name, "arguments": args]], dir: mcpDir)?["result"] as? [String: Any]
         let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
@@ -361,7 +376,7 @@ func selfTest() throws {
     let page = call("get_meeting", ["id": "0", "transcript": true, "offset": 1, "lines": 1]) as? [String: Any]
     check(page?["transcript"] as? [String] == ["[0:02] Omar: Two"] && page?["transcriptLines"] as? Int == 3 && page?["decisions"] as? [String] == notes.decisions, "MCP pages a meeting transcript")
     check(call("get_meeting", ["id": "../x"]) == nil, "MCP rejects a meeting id that isn't a timestamp")
-    check(((call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]])?.map { $0["done"] as? Bool } == [true, false], "MCP today marks done items")
+    check(((call("today", [:]) as? [String: Any])?["tasks"] as? [[String: Any]])?.map { $0["done"] as? Bool } == [true, false], "MCP today marks done items")
     check((call("stats", ["range": "7 days"]) as? [Any])?.count == 7, "MCP stats has one entry per period")
     _ = try applyFacts(try JSONDecoder().decode(FactChanges.self, from: Data("{\(slack), \"add\": [\(fact("KLE-1", "Invites merged", "2026-11-03", ""))]}".utf8)), to: mcpDB)
     check(((call("search", ["query": "merged"]) as? [[String: Any]])?.first?["sources"] as? [[String: Any]])?.first?["url"] as? String == "https://x.slack.com/archives/C1/p1", "MCP search returns facts with their sources")
@@ -370,10 +385,10 @@ func selfTest() throws {
     check(remembered?["status"] as? String == "unconfirmed" && call("remember", ["subject": "KLE-1", "subjectKind": "ticket", "fact": "x", "kind": "rumor"]) == nil, "MCP remember saves an unconfirmed fact and refuses an unknown kind")
     check((call("forget", ["id": remembered?["id"] as? Int ?? 0]) as? [String: Any])?["forgotten"] as? Bool == true && (call("search", ["query": "flag"]) as? [Any])?.isEmpty == true, "MCP forget hides a fact")
     _ = call("update_task", ["id": "T-1", "done": true, "removed": true])
-    let tasks = (call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]]
+    let tasks = (call("today", [:]) as? [String: Any])?["tasks"] as? [[String: Any]]
     check(tasks?.last?["id"] as? String == "T-1" && tasks?.last?["done"] as? Bool == true && tasks?.last?["removed"] as? Bool == true, "MCP marks a task done and removed")
     _ = call("update_task", ["id": "T-1", "removed": false])
-    check(((call("today", [:]) as? [String: Any])?["today"] as? [[String: Any]])?.last?["removed"] as? Bool == false, "MCP restores a removed task and leaves done alone")
+    check(((call("today", [:]) as? [String: Any])?["tasks"] as? [[String: Any]])?.last?["removed"] as? Bool == false, "MCP restores a removed task and leaves done alone")
     check(call("update_task", ["id": "nope", "done": true]) == nil, "MCP refuses a task id that isn't in today")
     let edited = call("update_meeting", ["id": "0", "summary": "Shipped.", "decisions": ["Line one\nline two"]]) as? [String: Any]
     let after = call("get_meeting", ["id": "0", "transcript": true]) as? [String: Any]

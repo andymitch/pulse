@@ -28,7 +28,7 @@ struct PrioritiesView: View {
                 .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
             }
         } else if !store.synthesizing {
-            Panel(title: "Focus") { Text("No briefing yet. Pulse makes one each morning, or press Generate.").foregroundStyle(.secondary) }
+            Panel(title: "Focus") { Text("No briefing yet. Pulse makes one each morning, or press Refresh.").foregroundStyle(.secondary) }
         }
     }
 }

@@ -128,15 +128,6 @@ extension Store {
                 headline: "Ship self-serve onboarding before the November launch",
                 summary: "The goal is **new workspaces that set themselves up without a sales call**, so the launch can open sign-ups to everyone. The checklist, sample data and billing step are live behind a flag, and *Priya* is wiring the analytics. **The blocker is invites**: teammates can't be added from the checklist yet, which is `ACME-198`, your PR waiting on review. **Your part is landing `ACME-198` this week**, then the CSV export (`ACME-214`) that the first pilot customers asked for.",
                 sources: [1, 2, 3, 4])],
-            today: [
-                Synthesis.Todo(ref: nil, title: "Reply to Dana about the pilot start date", why: "She needs a date for the customer kickoff", url: "message://%3Cdemo%40acme.com%3E", source: "mail", minutes: 10),
-                Synthesis.Todo(ref: "https://github.com/acmecorp/web/pull/419", title: "Cache invoice totals per workspace", why: "Omar is blocked until it merges", url: nil, source: "github", minutes: 30),
-                Synthesis.Todo(ref: "ACME-198", title: "Invite teammates from the onboarding checklist", why: "The launch blocker; answer the two review comments", url: nil, source: "linear", minutes: 45),
-                Synthesis.Todo(ref: nil, title: "Answer Priya's question about event names", why: "She's naming the onboarding analytics events today", url: "https://acme.slack.com/archives/C08ACME1234/p1761234567123456", source: "slack", minutes: 10,
-                               reply: "Let's keep the existing `onboarding_` prefix, so `onboarding_step_completed` and `onboarding_invite_sent`. I'll add them to the tracking plan."),
-                Synthesis.Todo(ref: "ACME-214", title: "Add CSV export to the usage report", why: "Pilot customers asked for it in Tuesday's call", url: nil, source: "linear", minutes: 120),
-                Synthesis.Todo(ref: "ACME-205", title: "Retry failed webhook deliveries with backoff", why: "Nearly done; finish the tests", url: nil, source: "linear", minutes: 60),
-            ],
             sources: [
                 Synthesis.Source(id: 1, title: "Omar in #launch: launch checklist", url: "https://acme.slack.com/archives/C2/p1", kind: "slack", author: "Omar Reyes", date: "2026-10-20",
                                  excerpt: "Everything on the list is green except teammate invites. If that lands this week we can open sign-ups on the 4th."),
@@ -149,7 +140,13 @@ extension Store {
             ])
         synthesizedAt = Calendar.current.date(bySettingHour: 7, minute: 5, second: 0, of: Date())
         lastSync = Date().addingTimeInterval(-90)
-        doneIDs = ["ai-message://%3Cdemo%40acme.com%3E"]
+        tasks = [
+            PulseTask(id: "demo-dana", title: "Reply to Dana about the pilot start date", why: "She needs a date for the customer kickoff", url: "message://%3Cdemo%40acme.com%3E", source: "mail"),
+            PulseTask(id: "demo-priya", title: "Answer Priya's question about event names", why: "She's naming the onboarding analytics events today", url: "https://acme.slack.com/archives/C08ACME1234/p1761234567123456", source: "slack",
+                      reply: "Let's keep the existing `onboarding_` prefix, so `onboarding_step_completed` and `onboarding_invite_sent`. I'll add them to the tracking plan."),
+            PulseTask(id: "demo-omar", title: "Send Omar the pilot list before Friday", why: "You said you would in launch planning", url: "https://acme.slack.com/archives/C2/p1761234599000100", source: "meeting"),
+        ]
+        doneIDs = ["demo-dana": Date().formatted(localDay)]
         let cal = Calendar(identifier: .iso8601)
         let monday = thisMonday
         doneThisWeek = [
