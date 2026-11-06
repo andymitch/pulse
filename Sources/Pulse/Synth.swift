@@ -5,23 +5,57 @@ struct Synthesis: Codable {
         let headline, summary: String
         let sources: [Int]
     }
-    struct Todo: Codable {
-        let ref: String?
-        let title, why: String
-        let url, source: String?
-        let minutes: Int?
-        var reply: String?
-
-        var id: String { ref ?? "ai-" + (url ?? title) }
-    }
     struct Source: Codable {
         let id: Int
         let title, url, kind: String
         let author, date, excerpt: String?
     }
     let focus: [Focus]
-    let today: [Todo]
     let sources: [Source]
+}
+
+struct PulseTask: Codable, Equatable {
+    let id: String
+    var title, why, url: String
+    var source, reply: String?
+}
+
+struct TaskChanges: Decodable {
+    struct Add: Decodable { let title, why, url: String; let source, reply: String? }
+    struct Update: Decodable { let id: String; let title, why, url, reply: String? }
+    struct Close: Decodable { let id: String; let reason: String? }
+    let add: [Add]?
+    let update: [Update]?
+    let close: [Close]?
+}
+
+func applyTaskChanges(_ changes: TaskChanges, to tasks: [PulseTask], open: Set<String>, newID: () -> String = { UUID().uuidString }) -> (tasks: [PulseTask], closed: [String]) {
+    var tasks = tasks
+    let edit = { (i: Int, title: String?, why: String?, url: String?, reply: String?) in
+        if let title, !title.isEmpty { tasks[i].title = title }
+        if let why { tasks[i].why = why }
+        if let url = threadLink(url), !url.isEmpty { tasks[i].url = url }
+        if let reply { tasks[i].reply = reply.isEmpty ? nil : reply }
+    }
+    for u in changes.update ?? [] {
+        if let i = tasks.firstIndex(where: { $0.id == u.id }) { edit(i, u.title, u.why, u.url, u.reply) }
+    }
+    for a in changes.add ?? [] where !a.title.isEmpty {
+        let url = threadLink(a.url) ?? a.url
+        if let i = tasks.firstIndex(where: { open.contains($0.id) && $0.url == url }) {
+            edit(i, a.title, a.why, nil, a.reply)
+        } else {
+            tasks.append(PulseTask(id: newID(), title: a.title, why: a.why, url: url, source: a.source, reply: a.reply))
+        }
+    }
+    var closed: [String] = []
+    for c in changes.close ?? [] {
+        guard let i = tasks.firstIndex(where: { $0.id == c.id }) else { continue }
+        if let reason = c.reason, !reason.isEmpty { tasks[i].why = reason }
+        tasks[i].reply = nil
+        closed.append(c.id)
+    }
+    return (tasks, closed)
 }
 
 func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
@@ -33,7 +67,7 @@ func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
 }
 
 func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem],
-                     facts: String, factsOutput: String, since: String?, sessions: [String] = [], projects: [String] = [], people: [String] = []) -> String {
+                     facts: String, factsOutput: String, tasks: String, tasksOutput: String, since: String?, sessions: [String] = [], projects: [String] = [], people: [String] = []) -> String {
     let s = settings
     var who = ["Linear \"\(me)\""]
     if s.slack { who.append("the Slack user your Slack tools are logged in as") }
@@ -62,9 +96,25 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     Gather, using your Linear and Slack tools (MCP servers; in pi, call them through codemode):
     \(gather.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n"))
 
+    \(tasks) holds \(me)'s open tasks, as JSON, each with an id. Pulse keeps them until they're done, and your job is to keep them current.
+
     Work in this order.
 
-    First, update Pulse's memory from what you gathered. Write a JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
+    First, as soon as you've gathered, update the tasks. \(me) sees them while you finish, so write them before anything else, as one JSON file to \(tasksOutput) with exactly this shape, using empty lists when there is nothing:
+    {
+      "add": [{"title": string, "why": string, "url": string, "source": \(kindList), "reply": string | null}],
+      "update": [{"id": string, "title": string | null, "why": string | null, "url": string | null, "reply": string | null}],
+      "close": [{"id": string, "reason": string}]
+    }
+
+    Rules for tasks:
+    - A task is something \(me) has to do: an unanswered question or request to \(me), an open commitment \(me) made, or a meeting action item assigned to \(me) by name. Tickets and PRs in the open work list are already on \(me)'s list, so never add a task for one.
+    - Before adding a task, check the open tasks. When what you found belongs to one of them (another message in the same thread, a follow-up question, the same commitment seen in an agent session or a meeting), update that task instead, and put any step that has to come first, such as checking something with someone, in its title or why. In an update, give only the fields that change and null for the rest.
+    - Close a task when a source shows it's done or no longer needed: the question was answered, the commitment was met, or plans changed. reason is one short line saying what happened.
+    - title starts with a verb. why is one short line. url is a link you actually saw that points at the thread, message, email or doc; for a Slack thread, the thread's first message.
+    - reply: only for a Slack task that answers someone. If their question or request has a clear answer from what you know, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
+
+    Then update Pulse's memory from what you gathered. Write a JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
     {
       "sources": [{"id": int, "kind": \(kindList), "url": string, "title": string, "author": string | null, "date": "YYYY-MM-DD" | null, "excerpt": string | null}],
       "add": [{"subject": {"kind": "project" | "ticket" | "person" | "topic", "name": string, "aliases": [string]}, "kind": \(factKinds.map { "\"\($0)\"" }.joined(separator: " | ")), "text": string, "observed": "YYYY-MM-DD", "sources": [int], "supersedes": [int], "doubt": string | null}],
@@ -81,29 +131,29 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     - Settle everything you can yourself. \(me) is only asked about what you mark with doubt, so use it only when you can't tell what's true: sources disagree and none is clearly newer, or an unconfirmed fact contradicts a known one and nothing you read settles it. Work moving on, a newer source replacing an older one, and anything a source states plainly are never in doubt. The reason is one short line naming what conflicts. Mark a new fact by setting its doubt; it then waits for \(me) before replacing anything. Mark a known fact by listing its id under doubt.
     - Every fact and confirmation cites at least one source you actually saw. sources here are numbered on their own, from 1, with the same url rules as the briefing.
 
-    Then write the briefing, from the facts as they stand after your changes plus what you gathered, as one JSON file to \(output) with exactly this shape and nothing else:
+    Last, write the briefing, from the facts as they stand after your changes plus what you gathered, as one JSON file to \(output) with exactly this shape and nothing else:
     {
       "focus": [{"headline": string, "summary": string, "sources": [int]}],
-      "today": [{"ref": string | null, "title": string, "why": string, "url": string | null, "source": \(kindList) | null, "minutes": int, "reply": string | null}],
       "sources": [{"id": int, "title": string, "url": string, "kind": \(kindList), "author": string | null, "date": "YYYY-MM-DD" | null, "excerpt": string | null}]
     }
 
     Rules for the briefing:
     - newest wins: work backwards from the most recent facts, messages, meetings and updates to find where things stand now. When they disagree, trust the newest one. A fact you superseded no longer counts, an unconfirmed fact is only a lead, and older items are only background that nothing newer contradicts. Never present something as current if a later source changed or settled it.
     - focus: cut through the noise. Usually exactly one entry: the single thing the team is pushing on right now. Add a second or third only if there are genuinely separate efforts in flight that matter as much; never more than 3. headline is one short line. summary is 3 to 5 plain sentences distilled from everything you know: what the goal is, where it stands, what is blocking it, and what \(me)'s part is. Leave out minor threads. Use inline Markdown to make it scannable: **bold** for the goal, the blocker and \(me)'s part, *italics* for people and docs, and `code` for ticket IDs and endpoints. No headings or lists. Each entry cites the 2 to 4 sources that best back it up.
-    - today: \(me)'s checklist for today, at most 7 items that fit in about 5 hours of focused work, in the order to do them. Put first what unblocks other people (reviews, replies, merges), then work that is nearly done, then the most important work for the focus. For an item from the open work list, set ref to its ref exactly and keep its title. Other items are unanswered questions or requests, open commitments \(me) made, or meeting action items assigned to \(me) by name: set ref to null, title starts with a verb, and url points at the thread, message, email or doc. why is one short line. minutes is an honest estimate.
-    - reply: only for a today item that answers someone in Slack (source "slack"). If their question or request has a clear answer from what you know, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
     - sources: every cited item, numbered from 1. When you rely on a known fact, cite its own sources. url must be a link you actually saw; never invent one, and drop any claim you cannot link. For a meeting transcript or agent session file, url is "file://" followed by its path, author is null, and title is just the meeting's title or the session's first line. title is what the item is (a ticket title, a doc name, an email subject, or "Maya in #engineering"). excerpt is the most telling one or two sentences, quoted or closely paraphrased. author and date are who wrote it and when, if known.
     - Write plainly. No hype, no filler.
     """
 }
 
-func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async throws -> Synthesis {
+func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], tasks open: [PulseTask], me: String,
+                  onTasks: @escaping @MainActor (TaskChanges) -> Void) async throws -> Synthesis {
     let out = dir.appendingPathComponent("synthesis.next.json")
+    let tasks = dir.appendingPathComponent("tasks.json"), tasksOut = dir.appendingPathComponent("tasks.next.json")
     let prompt = dir.appendingPathComponent("synthesis-prompt.md")
     let facts = dir.appendingPathComponent("facts.json"), factsOut = dir.appendingPathComponent("facts.next.json")
     let started = Date()
-    for file in [out, factsOut] { try? FileManager.default.removeItem(at: file) }
+    for file in [out, factsOut, tasksOut] { try? FileManager.default.removeItem(at: file) }
+    try JSONEncoder().encode(open).write(to: tasks)
     let known = try currentFacts(db)
     try JSONSerialization.data(withJSONObject: known, options: [.prettyPrinted, .withoutEscapingSlashes]).write(to: facts)
     let last = db.meta("facts_since").flatMap(iso.date(from:))
@@ -126,11 +176,29 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
     let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions"), folders: settings.codeReady ? [settings.repo, settings.worktrees] : []) }.value
         .filter { changedSince($0, newSince) }
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
-                        facts: facts.path, factsOutput: factsOut.path, since: since.map(iso.string(from:)), sessions: sessions,
+                        facts: facts.path, factsOutput: factsOut.path, tasks: tasks.path, tasksOutput: tasksOut.path, since: since.map(iso.string(from:)), sessions: sessions,
                         projects: db.ids("linear_projects"), people: try db.query("SELECT name FROM users").compactMap { ($0[0] as? String).flatMap { $0.contains("@") ? nil : $0 } })
         .write(to: prompt, atomically: true, encoding: .utf8)
 
-    let log = try await runAgent(prompt: prompt)
+    let readTasks = { () -> TaskChanges? in
+        guard let changes = (try? Data(contentsOf: tasksOut)).flatMap({ try? JSONDecoder().decode(TaskChanges.self, from: $0) }) else { return nil }
+        try? FileManager.default.removeItem(at: tasksOut)
+        return changes
+    }
+    let watcher = Task {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+            if let changes = readTasks() {
+                await onTasks(changes)
+                return
+            }
+        }
+    }
+    let log: String
+    do { log = try await runAgent(prompt: prompt) } catch { watcher.cancel(); throw error }
+    watcher.cancel()
+    await watcher.value
+    if let changes = readTasks() { await onTasks(changes) }
     do {
         let changes = try JSONDecoder().decode(FactChanges.self, from: Data(contentsOf: factsOut))
         _ = try applyFacts(changes, to: db)
@@ -148,6 +216,11 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], me: String) async 
     try? FileManager.default.removeItem(at: dir.appendingPathComponent("synthesis.json"))
     try FileManager.default.moveItem(at: out, to: dir.appendingPathComponent("synthesis.json"))
     return synthesis
+}
+
+func threadLink(_ link: String?) -> String? {
+    guard let link, let url = URL(string: link), let host = url.host, let thread = slackThread(url) else { return link }
+    return "https://\(host)/archives/\(thread.channel)/p\(thread.thread.replacingOccurrences(of: ".", with: ""))"
 }
 
 func slackThread(_ url: URL) -> (channel: String, thread: String)? {

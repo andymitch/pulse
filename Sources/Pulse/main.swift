@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         badge = store.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
             guard let self else { return }
-            let n = self.store.checklist.filter { !$0.done }.count
+            let n = self.store.toDoCount
             self.statusItem.button?.title = n > 0 ? "\(n)" : ""
             self.statusItem.button?.imagePosition = .imageLeading
         }
@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return window.contentView
     }
 
-    @objc private func refresh() { Task { await store.refresh() } }
+    @objc private func refresh() { Task { await store.refreshAll() } }
 
     @objc private func stopRecording() { Task { await Meetings.shared.stop(skip: true) } }
 

@@ -22,12 +22,12 @@ final class Store: ObservableObject {
     @Published var synthesizedAt: Date?
     @Published var synthesizing = false
     @Published var synthesisError: String?
-    @Published var doneIDs: Set<String> = []
+    @Published var tasks: [PulseTask] = []
+    @Published var doneIDs: [String: String] = [:]
     @Published var laterIDs: Set<String> = []
-    @Published var removedIDs: Set<String> = []
+    @Published var removedIDs: [String: String] = [:]
     @Published var doneThisWeek: [DoneItem] = []
     @Published var workflow: [String: [WorkflowState]] = [:]
-    var closedTickets: [String: WorkflowState]?
     @Published var doubts: [[String: Any]] = []
     @Published var factsVersion = 0
     private var localBranches: Set<String> = []
@@ -105,12 +105,11 @@ final class Store: ObservableObject {
     func refreshToday() async -> String? {
         if loadedDay != day { loadDay() }
         var errors: [String] = []
-        var github: [ActionItem] = [], linear: [ActionItem] = [], closed: [String: WorkflowState]?
+        var github: [ActionItem] = [], linear: [ActionItem] = []
         do { github = try await fetchGitHubToday(token: try ghToken()) } catch { errors.append("\(error)") }
         if let key = linearKey() {
-            do { (linear, workflow, closed) = try await fetchLinearToday(key: key) } catch { errors.append("\(error)") }
+            do { (linear, workflow) = try await fetchLinearToday(key: key) } catch { errors.append("\(error)") }
         }
-        closedTickets = closed
         today = mergeTicketsAndPRs(github + linear)
         localBranches = localBranchNames()
         todayFetched = Date()
@@ -147,12 +146,45 @@ final class Store: ObservableObject {
 
     private func loadDay() {
         loadedDay = day
-        doneIDs = Set(db.ids(doneKey))
-        laterIDs = Set(db.ids(laterKey))
-        removedIDs = Set(db.ids(removedKey))
+        tasks = db.decode("tasks") ?? []
+        doneIDs = db.decode("task-done") ?? [:]
+        laterIDs = Set(db.ids("task-later"))
+        removedIDs = db.decode("task-removed") ?? [:]
         doneThisWeek = db.decode(weekKey) ?? []
+        let monday = thisMonday.formatted(localDay)
+        let old = Set(tasks.map(\.id).filter { (doneIDs[$0] ?? removedIDs[$0] ?? monday) < monday })
+        if !old.isEmpty {
+            tasks.removeAll { old.contains($0.id) }
+            forget(old)
+        }
         reloadFacts()
     }
+
+    private func forget(_ ids: Set<String>) {
+        doneIDs = doneIDs.filter { !ids.contains($0.key) }
+        removedIDs = removedIDs.filter { !ids.contains($0.key) }
+        laterIDs.subtract(ids)
+        saveTasks()
+    }
+
+    private func saveTasks() {
+        save(tasks, "tasks")
+        save(doneIDs, "task-done")
+        save(Array(laterIDs), "task-later")
+        save(removedIDs, "task-removed")
+    }
+
+    var openTasks: [PulseTask] { tasks.filter { doneIDs[$0.id] == nil && removedIDs[$0.id] == nil } }
+
+    func applyTasks(_ changes: TaskChanges) {
+        let (updated, closed) = applyTaskChanges(changes, to: tasks, open: Set(openTasks.map(\.id)))
+        tasks = updated
+        for id in closed where doneIDs[id] == nil { doneIDs[id] = day }
+        saveTasks()
+        recordDone()
+    }
+
+    var toDoCount: Int { checklist.filter { !$0.done && $0.item.toDo }.count }
 
     private var doubtIDs: [String] { doubts.compactMap { ($0["id"] as? Int).map(String.init) } }
 
@@ -188,83 +220,60 @@ final class Store: ObservableObject {
 
     var earlierThisWeek: [DoneItem] {
         let shown = Set(checklist.map(\.id))
-        return doneThisWeek.filter { $0.day != day && !shown.contains($0.id) }
+        return doneThisWeek.filter { !shown.contains($0.id) }
     }
+
+    func doneDay(_ id: String) -> String { doneIDs[id] ?? doneThisWeek.first { $0.id == id }?.day ?? day }
 
     func recordDone() {
         guard fetchedOK else { return }
         if loadedDay != day { loadDay() }
+        let known = Set(today.map(\.id) + tasks.map(\.id))
+        let gone = Set(doneIDs.keys).union(removedIDs.keys).union(laterIDs).subtracting(known)
+        if !gone.isEmpty { forget(gone) }
         let rows = checklist
         let done = Set(rows.filter { $0.done && ($0.item.state?.type ?? "completed") == "completed" }.map(\.id)), shown = Set(rows.map(\.id))
-        var log = doneThisWeek.filter { $0.day != day || done.contains($0.id) || !shown.contains($0.id) }
+        var log = doneThisWeek.filter { done.contains($0.id) || !shown.contains($0.id) }
         let logged = Set(log.map(\.id))
         log += rows.filter { done.contains($0.id) && !logged.contains($0.id) }
-            .map { DoneItem(id: $0.id, title: $0.item.title, url: $0.item.url, source: $0.item.reason == "Done" ? "" : $0.item.reason, day: day) }
+            .map { DoneItem(id: $0.id, title: $0.item.title, url: $0.item.url, source: $0.item.reason, day: doneIDs[$0.id] ?? day) }
         guard log != doneThisWeek else { return }
         doneThisWeek = log
         save(log, weekKey)
     }
-    private var doneKey: String { "done-" + day }
-    private var laterKey: String { "later-" + day }
-    private var removedKey: String { "removed-" + day }
-
 
     private func save(_ value: some Encodable, _ key: String) { try? db.set(value, key) }
 
-    private func flip(_ ids: inout Set<String>, _ id: String, _ key: String) {
-        if ids.remove(id) == nil { ids.insert(id) }
-        save(Array(ids), key)
-    }
-
     func toggleDone(_ id: String) {
-        flip(&doneIDs, id, doneKey)
+        doneIDs[id] = doneIDs[id] == nil ? day : nil
+        saveTasks()
         recordDone()
     }
 
-    func toggleLater(_ id: String) { flip(&laterIDs, id, laterKey) }
+    func toggleLater(_ id: String) {
+        if laterIDs.remove(id) == nil { laterIDs.insert(id) }
+        saveTasks()
+    }
 
     func remove(_ id: String) {
-        removedIDs.insert(id)
-        save(Array(removedIDs), removedKey)
+        removedIDs[id] = day
+        saveTasks()
     }
 
     func restoreRemoved() {
-        removedIDs = []
-        save([String](), removedKey)
+        removedIDs = [:]
+        saveTasks()
     }
 
     var checklist: [TodoRow] {
-        let rows = plannedRows.filter { !removedIDs.contains($0.id) }
+        let synced = today.map { TodoRow(item: $0, why: nil, done: $0.closed || doneIDs[$0.id] != nil) }
+        let mine = tasks.compactMap { t -> TodoRow? in
+            guard let url = URL(string: t.url) else { return nil }
+            let item = ActionItem(id: t.id, kind: .followUp, title: t.title, reason: (t.source ?? "").capitalized, url: url, since: .distantPast)
+            return TodoRow(item: item, why: t.why, done: doneIDs[t.id] != nil, reply: t.reply)
+        }
+        let rows = (synced + mine).filter { removedIDs[$0.id] == nil }
         return rows.filter { !laterIDs.contains($0.id) } + rows.filter { laterIDs.contains($0.id) }
-    }
-
-    private var plannedRows: [TodoRow] {
-        let live = Dictionary(today.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        guard let plan = synthesis?.today, let planned = synthesizedAt, Calendar.current.isDateInToday(planned) else {
-            return today.map { TodoRow(item: $0, why: nil, minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
-        }
-
-        let refs = Set(plan.compactMap(\.ref))
-        let arrived = today.filter { $0.urgent && !refs.contains($0.id) }
-            .map { TodoRow(item: $0, why: "New since the briefing", minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
-        let rows = plan.compactMap { p -> TodoRow? in
-            if let ref = p.ref, let item = live[ref] {
-                return TodoRow(item: item, why: p.why, minutes: p.minutes, done: item.closed || doneIDs.contains(item.id), reply: p.reply)
-            }
-            guard let url = URL(string: p.url ?? "") ?? (p.ref.flatMap { URL(string: "https://linear.app/\(db.meta("linear_workspace") ?? "")/issue/\($0)") }) else { return nil }
-            let id = p.id
-            let ticket = p.ref.map { !$0.hasPrefix("http") } ?? false
-            let state = ticket ? p.ref.flatMap { closedTickets?[$0] } : nil
-            if ticket, closedTickets != nil, state == nil { return nil }
-            let resolved = p.ref != nil && (!ticket || state != nil)
-            let item = ActionItem(id: id, kind: .followUp, title: p.title, reason: resolved ? state?.name ?? "Done" : (p.source ?? "").capitalized,
-                                  url: url, state: state, since: planned)
-            return TodoRow(item: item, why: resolved ? nil : p.why, minutes: p.minutes, done: resolved || doneIDs.contains(id), reply: p.reply)
-        }
-        let shown = Set((arrived + rows).map(\.id))
-        let rest = today.filter { !shown.contains($0.id) }
-            .map { TodoRow(item: $0, why: nil, minutes: nil, done: $0.closed || doneIDs.contains($0.id)) }
-        return arrived + rows + rest
     }
 
     func setState(_ state: WorkflowState, for item: ActionItem) async {
@@ -335,12 +344,17 @@ final class Store: ObservableObject {
         }
     }
 
+    func refreshAll() async {
+        await refresh()
+        await synthesize()
+    }
+
     func synthesize() async {
         guard !synthesizing, !demoMode else { return }
         synthesizing = true
         synthesisError = nil
         do {
-            synthesis = try await runSynthesis(dir: dir, db: db, candidates: today, me: me ?? "me")
+            synthesis = try await runSynthesis(dir: dir, db: db, candidates: today, tasks: openTasks, me: me ?? "me") { [weak self] in self?.applyTasks($0) }
             synthesizedAt = Date()
             reloadFacts()
             recordDone()

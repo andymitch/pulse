@@ -1,6 +1,6 @@
 # Pulse
 
-Pulse is a context nexus for your work. It runs in your Mac's menu bar, gathers what's happening across GitHub, Linear, Slack, Mail, your meetings and your coding-agent sessions, and keeps it as short, dated facts with links to their sources. The agents you work with ask it what's going on over MCP, so they start every task already knowing what was decided, who owns what and what changed. A few everyday tools are built on the same context: your tasks for the day, the team's focus, meeting notes and trends.
+Pulse is a context nexus for your work. It runs in your Mac's menu bar, gathers what's happening across GitHub, Linear, Slack, Mail, your meetings and your coding-agent sessions, and keeps it as short, dated facts with links to their sources. The agents you work with ask it what's going on over MCP, so they start every task already knowing what was decided, who owns what and what changed. A few everyday tools are built on the same context: your task list, the team's focus, meeting notes and trends.
 
 ## How it works
 
@@ -13,7 +13,7 @@ Pulse is a context nexus for your work. It runs in your Mac's menu bar, gathers 
 
 Pulse opens on **Home**: your tasks, the focus briefing and today's meetings, with Knowledge, Meetings and Trends each on their own tab.
 
-- **Tasks**: a short checklist planned each morning to fit about 5 hours, covering reviews to unblock, replies you owe, and the tickets that matter most. Linear tickets show their real status, which you can change from the list. An item's dropdown can also move it to the bottom for later, or remove it for the day. Finished tasks move into a collapsed **Done** group below the open ones, one line each, until the week is over; unchecking one moves it back. **Start** creates a git worktree on the ticket's branch, moves the ticket to In Progress, and opens it in your IDE's agent panel (Zed, Cursor, VS Code) or in a terminal agent (pi, Claude Code, or your own).
+- **Tasks**: one running list of everything open: your Linear tickets and GitHub PRs, straight from the sync, and the tasks the briefing finds in Slack, mail, meetings and agent sessions (replies you owe, questions, things you promised). Each briefing adds new tasks, folds anything new about a task into it instead of adding another, and closes tasks a source shows are done. Tasks stay until they're done. Linear tickets show their real status, which you can change from the list. An item's dropdown can also move it to the bottom for later, or remove it. Finished tasks move into a collapsed **Done** group below the open ones, one line each, and are cleared on Monday; unchecking one moves it back. The menu bar shows how many tasks are still to do; tickets in progress or in review and PRs don't count. **Start** creates a git worktree on the ticket's branch, moves the ticket to In Progress, and opens it in your IDE's agent panel (Zed, Cursor, VS Code) or in a terminal agent (pi, Claude Code, or your own).
 - **Focus**: one distilled summary of what the team is pushing on, written from the facts, with source cards. Each focus item and meeting summary has its own button that reads it aloud.
 - **Meetings**: Pulse notices Google Meet calls, Slack huddles and calendar meetings, records them, transcribes them on your Mac, and saves a summary with the decisions and important points. Each meeting can be copied as Markdown or moved to the Trash from its card.
 - **Knowledge**: a place to **ask** about your work, and the Focus. The briefing settles what it learns in the background, and only asks you when it can't tell what's true. Then Knowledge shows a short **Needs you** list, and Tasks shows one **Review what Pulse learned** item; **Review** opens Knowledge and hides the item until there's something new. Each fact on the list says why Pulse is unsure, shows what it would replace crossed out above it, and has **Looks right** (which you can edit first) and **Wrong**. Answers come from this Mac's on-device model using the facts Pulse has (shown under each answer), and when that doesn't know, Pulse asks your briefing agent instead, handing it the facts it found; the agent can also look in Linear, Slack and GitHub. While it works, the latest few steps show under the question ("Looking in Linear"), and its answer links the words each source backs up, with the source's logo. Each answer can be read aloud, copied or asked again. The thread stays until you clear it. Each source is listed with what it is, and Slack links open at the message in the Slack app.
@@ -69,7 +69,7 @@ Click the gear in the popover.
 5. **Shortcut**: press **⌃⌥⌘P** from any app to open and close Pulse, even when the menu bar icon is hidden behind the notch. Change or turn it off under Startup.
 6. **Meetings**: recording is on by default. Recording starts when another app uses your mic during a Google Meet call, a Slack huddle or a calendar event with attendees, and stops a short while after the mic is released. The menu bar icon turns into a red record button while it records. Press **Stop** in the Meetings header (or right-click the icon and choose **Stop Recording**) to end or skip a meeting, and **Start recording** to record one Pulse didn't detect. The first time, macOS asks for microphone, screen and system audio recording, and calendar access, and Pulse downloads about 500 MB of speech models. The briefing agent writes each summary from the transcript. Let people know you're recording.
 7. **Code**: set the repository and the folder for new worktrees, then choose your IDEs and terminal agents. In an agent command, `{prompt}` is replaced with the path of a file holding the ticket prompt.
-8. **Briefing**: choose the agent command and the hour it runs. You can also press **Regenerate** at any time.
+8. **Briefing**: choose the agent command and the hour it runs. **Refresh** also syncs GitHub and Linear and then runs it, and the tasks update before the focus is written.
 9. **Startup**: turn on **Open Pulse at login** so it is running after a restart.
 
 ### MCP servers for the briefing
@@ -77,7 +77,7 @@ Click the gear in the popover.
 - **pi**: add the servers to `~/.pi/agent/mcp.json`.
 - **Claude Code**: run `claude mcp add` once for Linear and once for Slack.
 
-The briefing only reads: the prompt tells the agent never to post or change anything. It writes a single JSON file, which Pulse checks before using.
+The briefing only reads: the prompt tells the agent never to post or change anything. It writes JSON files for the task changes, the facts and the briefing, which Pulse checks before using.
 
 ### Pulse as an MCP server
 
@@ -85,12 +85,12 @@ Other agents on this Mac can read what Pulse knows, and keep it current, through
 
 Tools for the facts: `search` finds them by words, subject or date (`since` alone lists what changed), and `subject` shows where a ticket, project, person or topic stands, with its history, or lists them all. `remember` adds what an agent learns; it stays unconfirmed, and never replaces a confirmed fact, until a later briefing finds a source that backs it up. It only asks you about one when it contradicts something Pulse knows and no source settles it. `forget` hides a fact you say is wrong and brings back whatever it had replaced. Session digests come only from the repo and worktrees folder set in Settings, and personal matters that aren't about the work are left out.
 
-The other read tools are `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and task list) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `update_task` (done, later or removed), `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never changes settings, tokens or keys.
+The other read tools are `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and the briefing's tasks) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `update_task` (done, later or removed), `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never changes settings, tokens or keys.
 
 ## Data
 
 Pulse keeps everything in `~/Library/Application Support/Pulse/`:
-- `pulse.db`: the SQLite cache behind Trends, and the facts Pulse has learned
+- `pulse.db`: the SQLite cache behind Trends, the facts Pulse has learned, and your tasks
 - `settings.json`
 - `linear-key`: your Linear API key, readable only by your user. Older versions kept it in the Keychain; Pulse moves it here the first time it runs.
 - `synthesis.json`: the latest briefing

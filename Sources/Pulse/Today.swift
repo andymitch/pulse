@@ -20,8 +20,8 @@ struct ActionItem: Identifiable {
     var priority = 5
     let since: Date
 
-    var urgent: Bool { kind.rawValue <= Kind.pr.rawValue }
     var closed: Bool { ["completed", "canceled", "duplicate"].contains(state?.type ?? "") }
+    var toDo: Bool { state.map { $0.type == "unstarted" } ?? (pr == nil && kind != .notification) }
     var summary: String { "\(kind) \(ticket ?? "") \(reason) — \(title)" }
 }
 
@@ -36,8 +36,7 @@ query($review: String!, $mine: String!) {
 """
 
 private let linearToday = """
-{ viewer { assignedIssues(first: 100, filter: {state: {type: {in: ["started", "unstarted"]}}}) { nodes { id identifier title url priority createdAt branchName state { id name type color position } team { id } cycle { isActive } } }
-    closed: assignedIssues(first: 50, filter: {state: {type: {in: ["completed", "canceled", "duplicate"]}}, updatedAt: {gt: "-P7D"}}) { nodes { identifier state { id name type color position } } } }
+{ viewer { assignedIssues(first: 100, filter: {state: {type: {in: ["started", "unstarted"]}}}) { nodes { id identifier title url priority createdAt branchName state { id name type color position } team { id } cycle { isActive } } } }
   teams(first: 50) { nodes { id states { nodes { id name type color position } } } }
   notifications(first: 50) { nodes { id type readAt createdAt actor { name } ... on IssueNotification { issue { identifier title url } } } } }
 """
@@ -85,8 +84,7 @@ private struct LinearToday: Decodable {
         let actor: Named?
         let issue: Ref?
     }
-    struct Closed: Decodable { let identifier: String; let state: WorkflowState }
-    struct Viewer: Decodable { let assignedIssues: Nodes<Issue>; let closed: Nodes<Closed> }
+    struct Viewer: Decodable { let assignedIssues: Nodes<Issue> }
     let viewer: Viewer
     let teams: Nodes<TeamStates>
     let notifications: Nodes<Notification>
@@ -176,7 +174,7 @@ func fetchGitHubToday(token: String) async throws -> [ActionItem] {
     return items
 }
 
-func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflow: [String: [WorkflowState]], closed: [String: WorkflowState]) {
+func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflow: [String: [WorkflowState]]) {
     let d: LinearToday = try await gql(linearURL, auth: key, linearToday)
     let tickets = d.viewer.assignedIssues.nodes
         .filter { $0.state.type == "started" || $0.cycle?.isActive == true }
@@ -198,7 +196,7 @@ func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflo
     let workflow = Dictionary(uniqueKeysWithValues: d.teams.nodes.map { team in
         (team.id, team.states.nodes.sorted { (WorkflowState.order.firstIndex(of: $0.type) ?? 9, $0.position) < (WorkflowState.order.firstIndex(of: $1.type) ?? 9, $1.position) })
     })
-    return (tickets + notes, workflow, Dictionary(d.viewer.closed.nodes.map { ($0.identifier, $0.state) }) { a, _ in a })
+    return (tickets + notes, workflow)
 }
 
 func mergeTicketsAndPRs(_ items: [ActionItem]) -> [ActionItem] {
@@ -286,7 +284,6 @@ struct DoneItem: Codable, Equatable, Identifiable {
 struct TodoRow: Identifiable {
     let item: ActionItem
     let why: String?
-    let minutes: Int?
     let done: Bool
     var reply: String?
     var id: String { item.id }
@@ -298,11 +295,10 @@ struct TodayView: View {
 
     var body: some View {
         let rows = store.checklist
-        let left = rows.filter { !$0.done && !store.laterIDs.contains($0.id) }.compactMap(\.minutes).reduce(0, +)
+        let monday = thisMonday.formatted(localDay)
+        let open = rows.filter { !$0.done }, done = rows.filter { $0.done && store.doneDay($0.id) >= monday }
         let week = store.earlierThisWeek.sorted { $0.day > $1.day }
-        Panel(title: "Tasks · \(rows.filter(\.done).count) of \(rows.count) done today", accessory: {
-            if left > 0 { Text("about \(duration(left)) left").font(.caption).foregroundStyle(.secondary) }
-        }) {
+        Panel(title: "Tasks · \(open.count) open") {
             if store.triageWaiting {
                 HStack(alignment: .top, spacing: 10) {
                     Color.clear.frame(width: 16, height: 17)
@@ -321,7 +317,6 @@ struct TodayView: View {
                 }
                 if !rows.isEmpty { Divider() }
             }
-            let open = rows.filter { !$0.done }, done = rows.filter(\.done)
             if open.isEmpty && !store.triageWaiting {
                 Text(store.syncing ? "Loading…" : "Nothing needs you right now.").foregroundStyle(.secondary)
             }
@@ -334,7 +329,7 @@ struct TodayView: View {
                 DisclosureGroup(isExpanded: $showDone) {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(done) { row in
-                            doneLine(row.item.title, day: "Today", url: row.item.url) {
+                            doneLine(row.item.title, day: friendlyDay(store.doneDay(row.id)), url: row.item.url) {
                                 if let state = row.item.state, let team = row.item.teamID {
                                     StatusMenu(store: store, item: row.item, state: state, states: store.workflow[team] ?? [state])
                                 } else {
@@ -345,7 +340,7 @@ struct TodayView: View {
                             }
                         }
                         ForEach(week) { item in
-                            doneLine(item.title, day: weekday(item.day), url: item.url) { Image(nsImage: store.checkbox(done: true)) }
+                            doneLine(item.title, day: friendlyDay(item.day), url: item.url) { Image(nsImage: store.checkbox(done: true)) }
                         }
                     }
                     .padding(.top, 6)
@@ -355,7 +350,7 @@ struct TodayView: View {
             }
         }
         if !store.removedIDs.isEmpty {
-            Button("Restore \(store.removedIDs.count) removed today") { store.restoreRemoved() }
+            Button("Restore \(store.removedIDs.count) removed") { store.restoreRemoved() }
                 .buttonStyle(.link)
                 .font(.caption)
                 .padding(.horizontal, 14)
@@ -373,14 +368,6 @@ struct TodayView: View {
         }
         .foregroundStyle(.secondary)
     }
-
-    private func weekday(_ day: String) -> String {
-        (try? Date(day, strategy: localDay))?.formatted(.dateTime.weekday(.wide)) ?? day
-    }
-}
-
-private func duration(_ minutes: Int) -> String {
-    minutes < 60 ? "\(minutes)m" : minutes % 60 == 0 ? "\(minutes / 60)h" : "\(minutes / 60)h \(minutes % 60)m"
 }
 
 private struct ReplySuggestion: View {
@@ -446,7 +433,7 @@ private struct TodoRowView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).lineLimit(2).strikethrough(row.done).foregroundStyle(row.done ? .secondary : .primary)
-                Text([later ? "Later" : nil, row.why, item.reason, row.minutes.map { "~" + duration($0) }].compactMap { $0 }.joined(separator: " · "))
+                Text([later ? "Later" : nil, row.why, item.reason].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
             }
@@ -588,7 +575,7 @@ private struct Triage: View {
 
     var body: some View {
         Button(store.laterIDs.contains(id) ? "Move back up" : "Do later") { store.toggleLater(id) }
-        Button("Remove for today") { store.remove(id) }
+        Button("Remove") { store.remove(id) }
     }
 }
 

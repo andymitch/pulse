@@ -48,12 +48,12 @@ private let mcpTools: [[String: Any]] = [
     tool("forget", "Mark a fact as wrong so Pulse stops using it. Only when I say it's wrong; a fact that's just out of date should be replaced with remember instead. Any facts it replaced become current again.", [
         "id": ["type": "integer", "description": "The fact id from search or subject"],
     ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": true, "idempotentHint": true]),
-    tool("today", "Today's briefing: the team focus (the current priorities) with its sources, and the task list with ids, refs, links and estimates. done, later and removed reflect what was marked in Pulse today; live ticket and PR status isn't fetched. stale is true when the briefing wasn't made today.", [:]),
+    tool("today", "The briefing's team focus (the current priorities) with its sources, and my tasks from Slack, mail, meetings and agent sessions, with ids, links and whether each is done (doneOn is the day), put off until later or removed. Tasks stay until they're done; done ones are cleared each Monday. Open tickets and PRs aren't included, since Pulse lists them live from Linear and GitHub. stale is true when the briefing wasn't made today.", [:]),
     tool("stats", "PRs merged and tickets closed per person per period, plus PR stats (median hours to merge, median lines added, PRs over 500 lines), as shown on Trends.", [
         "range": ["type": "string", "enum": TrendRange.allCases.map(\.rawValue), "description": "Period, default 5 weeks"],
         "person": ["type": "string", "description": "Only this person: a GitHub login for PRs, a Linear name for tickets"],
     ]),
-    tool("update_task", "Mark one of today's tasks done or not done, move it to later or back up, or remove it for the day or restore it. Uses the ids from today. Only the fields given change.", [
+    tool("update_task", "Mark one of my tasks done or not done, move it to later or back up, or remove it or restore it. Uses the ids from today. Only the fields given change.", [
         "id": ["type": "string", "description": "The task id from today"],
         "done": ["type": "boolean"], "later": ["type": "boolean"], "removed": ["type": "boolean"],
     ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": false, "idempotentHint": true]),
@@ -65,7 +65,7 @@ private let mcpTools: [[String: Any]] = [
     tool("delete_meeting", "Move a meeting's notes and transcript to the Trash.", [
         "id": ["type": "string", "description": "The meeting id from list_meetings"],
     ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": true]),
-    tool("regenerate_briefing", "Ask the running Pulse app to rebuild today's briefing. It runs in the background and takes a few minutes; check briefedAt in today afterwards.", [:],
+    tool("regenerate_briefing", "Ask the running Pulse app to update the tasks and rebuild the briefing. It runs in the background and takes a few minutes; check briefedAt in today afterwards.", [:],
          hints: ["readOnlyHint": false, "destructiveHint": false]),
 ]
 
@@ -179,24 +179,23 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         changed(dir)
         return ["id": id, "forgotten": true]
     case "today":
-        let s = try briefing(dir)
-        let file = dir.appendingPathComponent("synthesis.json")
-        let briefed = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let s = try? briefing(dir)
+        let briefed = (try? dir.appendingPathComponent("synthesis.json").resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let db = try? DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true)
-        let day = Date().formatted(localDay)
-        let ids = { (key: String) in Set(db?.ids(key + "-" + day) ?? []) }
-        let done = ids("done"), later = ids("later"), removed = ids("removed")
-        let focus: [[String: Any]] = s.focus.map { f in
-            let sources: [[String: Any]] = f.sources.compactMap { id in s.sources.first { $0.id == id } }.map { ["title": $0.title, "url": $0.url, "kind": $0.kind] }
+        let tasks: [PulseTask] = db?.decode("tasks") ?? []
+        let done: [String: String] = db?.decode("task-done") ?? [:], removed: [String: String] = db?.decode("task-removed") ?? [:]
+        let later = Set(db?.ids("task-later") ?? [])
+        let focus: [[String: Any]] = (s?.focus ?? []).map { f in
+            let sources: [[String: Any]] = f.sources.compactMap { id in s?.sources.first { $0.id == id } }.map { ["title": $0.title, "url": $0.url, "kind": $0.kind] }
             return ["headline": f.headline, "summary": f.summary, "sources": sources]
         }
-        let today: [[String: Any]] = s.today.map { t in
+        let list: [[String: Any]] = tasks.map { t in
             ([
-                "id": t.id, "title": t.title, "why": t.why, "done": done.contains(t.id), "later": later.contains(t.id), "removed": removed.contains(t.id),
-                "ref": t.ref, "url": t.url, "source": t.source, "minutes": t.minutes,
+                "id": t.id, "title": t.title, "why": t.why, "url": t.url, "source": t.source, "reply": t.reply,
+                "done": done[t.id] != nil, "doneOn": done[t.id], "later": later.contains(t.id), "removed": removed[t.id] != nil,
             ] as [String: Any?]).compactMapValues { $0 }
         }
-        return (["focus": focus, "today": today, "briefedAt": briefed.map(iso.string(from:)),
+        return (["focus": focus, "tasks": list, "briefedAt": briefed.map(iso.string(from:)),
                  "stale": !(briefed.map(Calendar.current.isDateInToday) ?? false)] as [String: Any?]).compactMapValues { $0 }
     case "stats":
         let range = (args["range"] as? String).flatMap(TrendRange.init) ?? .month
@@ -216,24 +215,28 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
                     "medianHoursToMerge": s.medianHours, "medianLinesAdded": s.medianAdditions, "prsOver500Lines": s.over500] as [String: Any]
         }
     case "update_task":
-        let s = try briefing(dir)
-        let briefed = (try? dir.appendingPathComponent("synthesis.json").resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        guard briefed.map(Calendar.current.isDateInToday) == true else { throw SyncError(description: "The briefing isn't from today, so its tasks aren't on the list.") }
-        guard let id = args["id"] as? String, let task = s.today.first(where: { $0.id == id }) else {
+        let db = try DB(path: dir.appendingPathComponent("pulse.db").path)
+        let tasks: [PulseTask] = db.decode("tasks") ?? []
+        guard let id = args["id"] as? String, let task = tasks.first(where: { $0.id == id }) else {
             throw SyncError(description: "Unknown task id. Use the ids from today.")
         }
-        let db = try DB(path: dir.appendingPathComponent("pulse.db").path)
         let day = Date().formatted(localDay)
         var out: [String: Any] = ["id": id, "title": task.title]
         try db.transaction {
-            for key in ["done", "later", "removed"] {
-                var ids = Set(db.ids(key + "-" + day))
+            for key in ["done", "removed"] {
+                var days: [String: String] = db.decode("task-" + key) ?? [:]
                 if let on = args[key] as? Bool {
-                    if on { ids.insert(id) } else { ids.remove(id) }
-                    try db.set(Array(ids), key + "-" + day)
+                    days[id] = on ? days[id] ?? day : nil
+                    try db.set(days, "task-" + key)
                 }
-                out[key] = ids.contains(id)
+                out[key] = days[id] != nil
             }
+            var later = Set(db.ids("task-later"))
+            if let on = args["later"] as? Bool {
+                if on { later.insert(id) } else { later.remove(id) }
+                try db.set(Array(later), "task-later")
+            }
+            out["later"] = later.contains(id)
         }
         changed(dir)
         return out
