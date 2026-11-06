@@ -345,7 +345,12 @@ func selfTest() throws {
         check(store.checklist.first { $0.id == danaID }?.done == true && store.openTasks.map(\.title) == ["Send the notice"] && store.doneThisWeek.map(\.id) == [danaID],
               "a task the briefing closes is done and logged for the week")
         check(Store(db: store.db, dir: store.dir).tasks.count == 2, "tasks survive a restart")
-        try store.db.set([danaID: "2000-01-03"], "task-done")
+        try store.db.saveTask(PulseTask(id: "from-agent", title: "Follow up with Jed", why: "", url: "https://x/3", source: "agent"))
+        store.applyTasks(try JSONDecoder().decode(TaskChanges.self, from: Data(#"{"add": [{"title": "Book the room", "why": "", "url": "https://x/4", "source": "mail"}]}"#.utf8)))
+        check(store.openTasks.map(\.title) == ["Send the notice", "Follow up with Jed", "Book the room"], "a task an agent adds while the app is open isn't lost when the briefing adds its own")
+        try store.db.deleteTasks(["from-agent", store.tasks.last!.id])
+        store.reloadDay()
+        try store.db.mark(danaID, done: "2000-01-03")
         let monday = Store(db: store.db, dir: store.dir)
         check(monday.tasks.map(\.title) == ["Send the notice"] && monday.doneIDs.isEmpty, "a new week clears tasks done the week before")
         let state = { (type: String) in WorkflowState(id: type, name: type, type: type, color: "#000000", position: 0) }
@@ -363,14 +368,15 @@ func selfTest() throws {
         .write(to: mcpDir.appendingPathComponent("meetings/0.md"), atomically: true, encoding: .utf8)
     try JSONEncoder().encode(Synthesis(focus: [], sources: [])).write(to: mcpDir.appendingPathComponent("synthesis.json"))
     let mcpDB = try DB(path: mcpDir.appendingPathComponent("pulse.db").path)
-    try mcpDB.set([dana, PulseTask(id: "T-1", title: "Ship it", why: "", url: "https://x/2", source: "slack")], "tasks")
-    try mcpDB.set([dana.id: Date().formatted(localDay)], "task-done")
+    try mcpDB.saveTask(dana)
+    try mcpDB.saveTask(PulseTask(id: "T-1", title: "Ship it", why: "", url: "https://x/2", source: "slack"))
+    try mcpDB.mark(dana.id, done: Date().formatted(localDay))
     let call = { (name: String, args: [String: Any]) -> Any? in
         let result = mcpResponse(["id": 1, "method": "tools/call", "params": ["name": name, "arguments": args]], dir: mcpDir)?["result"] as? [String: Any]
         let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
         return try? JSONSerialization.jsonObject(with: Data(text.utf8))
     }
-    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 12, "MCP lists its twelve tools")
+    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 14, "MCP lists its fourteen tools")
     check((mcpResponse(["id": 1, "method": "nope"], dir: mcpDir)?["error"] as? [String: Any])?["code"] as? Int == -32601 && mcpResponse(["method": "notifications/initialized"], dir: mcpDir) == nil, "MCP rejects unknown methods and doesn't answer notifications")
     check((call("list_meetings", ["query": "launch"]) as? [[String: Any]])?.first?["id"] as? String == "0", "MCP finds a meeting by text")
     let page = call("get_meeting", ["id": "0", "transcript": true, "offset": 1, "lines": 1]) as? [String: Any]
@@ -389,7 +395,19 @@ func selfTest() throws {
     check(tasks?.last?["id"] as? String == "T-1" && tasks?.last?["done"] as? Bool == true && tasks?.last?["removed"] as? Bool == true, "MCP marks a task done and removed")
     _ = call("update_task", ["id": "T-1", "removed": false])
     check(((call("today", [:]) as? [String: Any])?["tasks"] as? [[String: Any]])?.last?["removed"] as? Bool == false, "MCP restores a removed task and leaves done alone")
-    check(call("update_task", ["id": "nope", "done": true]) == nil, "MCP refuses a task id that isn't in today")
+    check(call("update_task", ["id": "nope", "title": "x"]) == nil && (call("update_task", ["id": "KLE-9", "later": true]) as? [String: Any])?["later"] as? Bool == true,
+          "MCP edits only tasks, but can mark a ticket or PR")
+    let added = call("add_task", ["title": "Follow up with Jed\nonce it's sent", "why": "He asked", "url": "https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB"]) as? [String: Any]
+    check(added?["title"] as? String == "Follow up with Jed once it's sent" && added?["url"] as? String == "https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456"
+          && call("add_task", ["title": "No link", "url": "nope"]) == nil && call("add_task", ["title": "", "url": "https://x"]) == nil,
+          "MCP adds a task on one line with its thread link, and refuses one without a real link or title")
+    let addedID = added?["id"] as? String ?? ""
+    let renamed = call("update_task", ["id": addedID, "title": "Follow up with Jed on Friday", "done": true]) as? [String: Any]
+    let listed = ((call("today", [:]) as? [String: Any])?["tasks"] as? [[String: Any]])?.first { $0["id"] as? String == addedID }
+    check(renamed?["done"] as? Bool == true && listed?["title"] as? String == "Follow up with Jed on Friday" && listed?["source"] as? String == "agent" && listed?["why"] as? String == "He asked",
+          "MCP edits a task's title and marks it done, leaving the rest alone")
+    check((call("delete_task", ["id": addedID]) as? [String: Any])?["deleted"] as? Bool == true && call("delete_task", ["id": addedID]) == nil
+          && mcpDB.tasks().count == 2 && mcpDB.marks().done[addedID] == nil, "MCP deletes a task and its marks")
     let edited = call("update_meeting", ["id": "0", "summary": "Shipped.", "decisions": ["Line one\nline two"]]) as? [String: Any]
     let after = call("get_meeting", ["id": "0", "transcript": true]) as? [String: Any]
     check(edited?["summary"] as? String == "Shipped." && after?["decisions"] as? [String] == ["Line one line two"] && after?["title"] as? String == "Standup"

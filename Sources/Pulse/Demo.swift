@@ -140,13 +140,15 @@ extension Store {
             ])
         synthesizedAt = Calendar.current.date(bySettingHour: 7, minute: 5, second: 0, of: Date())
         lastSync = Date().addingTimeInterval(-90)
-        tasks = [
+        let demoTasks = [
             PulseTask(id: "demo-dana", title: "Reply to Dana about the pilot start date", why: "She needs a date for the customer kickoff", url: "message://%3Cdemo%40acme.com%3E", source: "mail"),
             PulseTask(id: "demo-priya", title: "Answer Priya's question about event names", why: "She's naming the onboarding analytics events today", url: "https://acme.slack.com/archives/C08ACME1234/p1761234567123456", source: "slack",
                       reply: "Let's keep the existing `onboarding_` prefix, so `onboarding_step_completed` and `onboarding_invite_sent`. I'll add them to the tracking plan."),
             PulseTask(id: "demo-omar", title: "Send Omar the pilot list before Friday", why: "You said you would in launch planning", url: "https://acme.slack.com/archives/C2/p1761234599000100", source: "meeting"),
         ]
-        doneIDs = ["demo-dana": Date().formatted(localDay)]
+        for task in demoTasks { try? db.saveTask(task) }
+        try? db.mark("demo-dana", done: Date().formatted(localDay))
+        reloadDay()
         let cal = Calendar(identifier: .iso8601)
         let monday = thisMonday
         doneThisWeek = [
