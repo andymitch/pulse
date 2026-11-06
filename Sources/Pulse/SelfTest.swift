@@ -354,7 +354,7 @@ func selfTest() throws {
                        ActionItem(id: "K-2", kind: .ticket, title: "", reason: "", url: url, state: state("started"), since: Date()),
                        ActionItem(id: "PR", kind: .review, title: "", reason: "", url: url, pr: url, since: Date()),
                        ActionItem(id: "N", kind: .notification, title: "", reason: "", url: url, since: Date())]
-        check(store.toDoCount == 2, "the menu bar counts only to-do tickets and open tasks")
+        check(store.toDoCount == 4, "the menu bar counts everything open except Linear tickets that are in progress or in review")
     }
     let mcpDir = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-mcp-\(UUID())")
     defer { try? FileManager.default.removeItem(at: mcpDir) }

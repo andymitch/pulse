@@ -21,7 +21,7 @@ struct ActionItem: Identifiable {
     let since: Date
 
     var closed: Bool { ["completed", "canceled", "duplicate"].contains(state?.type ?? "") }
-    var toDo: Bool { state.map { $0.type == "unstarted" } ?? (pr == nil && kind != .notification) }
+    var toDo: Bool { (state?.type ?? "unstarted") == "unstarted" }
     var summary: String { "\(kind) \(ticket ?? "") \(reason) — \(title)" }
 }
 
