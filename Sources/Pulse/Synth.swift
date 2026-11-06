@@ -14,50 +14,6 @@ struct Synthesis: Codable {
     let sources: [Source]
 }
 
-struct PulseTask: Codable, Equatable {
-    let id: String
-    var title, why, url: String
-    var source, reply: String?
-}
-
-struct TaskChanges: Decodable {
-    struct Add: Decodable { let title, why, url: String; let source, reply: String? }
-    struct Update: Decodable { let id: String; let title, why, url, reply: String? }
-    struct Close: Decodable { let id: String; let reason: String? }
-    let add: [Add]?
-    let update: [Update]?
-    let close: [Close]?
-}
-
-func applyTaskChanges(_ changes: TaskChanges, to tasks: [PulseTask], open: Set<String>, newID: () -> String = { UUID().uuidString }) -> (tasks: [PulseTask], closed: [String]) {
-    var tasks = tasks
-    let edit = { (i: Int, title: String?, why: String?, url: String?, reply: String?) in
-        if let title, !title.isEmpty { tasks[i].title = title }
-        if let why { tasks[i].why = why }
-        if let url = threadLink(url), !url.isEmpty { tasks[i].url = url }
-        if let reply { tasks[i].reply = reply.isEmpty ? nil : reply }
-    }
-    for u in changes.update ?? [] {
-        if let i = tasks.firstIndex(where: { $0.id == u.id }) { edit(i, u.title, u.why, u.url, u.reply) }
-    }
-    for a in changes.add ?? [] where !a.title.isEmpty {
-        let url = threadLink(a.url) ?? a.url
-        if let i = tasks.firstIndex(where: { open.contains($0.id) && $0.url == url }) {
-            edit(i, a.title, a.why, nil, a.reply)
-        } else {
-            tasks.append(PulseTask(id: newID(), title: a.title, why: a.why, url: url, source: a.source, reply: a.reply))
-        }
-    }
-    var closed: [String] = []
-    for c in changes.close ?? [] {
-        guard let i = tasks.firstIndex(where: { $0.id == c.id }) else { continue }
-        if let reason = c.reason, !reason.isEmpty { tasks[i].why = reason }
-        tasks[i].reply = nil
-        closed.append(c.id)
-    }
-    return (tasks, closed)
-}
-
 func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
     let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
     return ((try? FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)) ?? [])
@@ -111,6 +67,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     - A task is something \(me) has to do: an unanswered question or request to \(me), an open commitment \(me) made, or a meeting action item assigned to \(me) by name. Tickets and PRs in the open work list are already on \(me)'s list, so never add a task for one.
     - Before adding a task, check the open tasks. When what you found belongs to one of them (another message in the same thread, a follow-up question, the same commitment seen in an agent session or a meeting), update that task instead, and put any step that has to come first, such as checking something with someone, in its title or why. In an update, give only the fields that change and null for the rest.
     - Close a task when a source shows it's done or no longer needed: the question was answered, the commitment was met, or plans changed. reason is one short line saying what happened.
+    - Also close a task when a ticket or PR in the open work list now covers it, with a reason that names it, such as "Now tracked in KLE-123".
     - title starts with a verb. why is one short line. url is a link you actually saw that points at the thread, message, email or doc; for a Slack thread, the thread's first message.
     - reply: only for a Slack task that answers someone. If their question or request has a clear answer from what you know, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
 

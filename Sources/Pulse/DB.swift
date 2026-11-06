@@ -36,6 +36,9 @@ final class DB: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS fact_sources (
                 fact_id INTEGER NOT NULL REFERENCES facts(id), source_id INTEGER NOT NULL REFERENCES sources(id), PRIMARY KEY (fact_id, source_id));
             CREATE INDEX IF NOT EXISTS facts_subject ON facts (subject_id, superseded_by);
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, why TEXT NOT NULL DEFAULT '', url TEXT NOT NULL, source TEXT, reply TEXT);
+            CREATE TABLE IF NOT EXISTS task_marks (id TEXT PRIMARY KEY, done TEXT, later INTEGER NOT NULL DEFAULT 0, removed TEXT);
             CREATE TABLE IF NOT EXISTS pending_replaces (
                 fact_id INTEGER NOT NULL REFERENCES facts(id), replaces_id INTEGER NOT NULL REFERENCES facts(id), PRIMARY KEY (fact_id, replaces_id));
             """)

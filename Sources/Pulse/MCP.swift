@@ -48,15 +48,24 @@ private let mcpTools: [[String: Any]] = [
     tool("forget", "Mark a fact as wrong so Pulse stops using it. Only when I say it's wrong; a fact that's just out of date should be replaced with remember instead. Any facts it replaced become current again.", [
         "id": ["type": "integer", "description": "The fact id from search or subject"],
     ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": true, "idempotentHint": true]),
-    tool("today", "The briefing's team focus (the current priorities) with its sources, and my tasks from Slack, mail, meetings and agent sessions, with ids, links and whether each is done (doneOn is the day), put off until later or removed. Tasks stay until they're done; done ones are cleared each Monday. Open tickets and PRs aren't included, since Pulse lists them live from Linear and GitHub. stale is true when the briefing wasn't made today.", [:]),
+    tool("today", "The briefing's team focus (the current priorities) with its sources, and my tasks: the ones the briefing found in Slack, mail, meetings and agent sessions, and the ones agents added. Each has an id, a link and whether it's done (doneOn is the day), put off until later or removed. Tasks stay until they're done; done ones are cleared each Monday. Open tickets and PRs aren't included, since Pulse lists them live from Linear and GitHub. stale is true when the briefing wasn't made today.", [:]),
     tool("stats", "PRs merged and tickets closed per person per period, plus PR stats (median hours to merge, median lines added, PRs over 500 lines), as shown on Trends.", [
         "range": ["type": "string", "enum": TrendRange.allCases.map(\.rawValue), "description": "Period, default 5 weeks"],
         "person": ["type": "string", "description": "Only this person: a GitHub login for PRs, a Linear name for tickets"],
     ]),
-    tool("update_task", "Mark one of my tasks done or not done, move it to later or back up, or remove it or restore it. Uses the ids from today. Only the fields given change.", [
-        "id": ["type": "string", "description": "The task id from today"],
+    tool("add_task", "Put a task on my list, such as a follow-up I agreed to or something I asked you to remind me of. Not for tickets or PRs, which come from Linear and GitHub.", [
+        "title": ["type": "string", "description": "What to do, starting with a verb"],
+        "why": ["type": "string", "description": "One short line on why it matters or who's waiting"],
+        "url": ["type": "string", "description": "The thread, message, doc, ticket or PR it's about"],
+    ], required: ["title", "url"], hints: ["readOnlyHint": false, "destructiveHint": false]),
+    tool("update_task", "Change one of my tasks: its title, why or link, mark it done or not done, move it to later or back up, or remove it or restore it. Only the fields given change. A Linear ticket (its identifier, like KLE-123) or a PR (its URL) can be marked done, later or removed, but not edited.", [
+        "id": ["type": "string", "description": "The task id from today, a ticket identifier or a PR URL"],
+        "title": ["type": "string"], "why": ["type": "string"], "url": ["type": "string"],
         "done": ["type": "boolean"], "later": ["type": "boolean"], "removed": ["type": "boolean"],
     ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": false, "idempotentHint": true]),
+    tool("delete_task", "Delete a task that shouldn't be on my list at all. To finish a task, mark it done with update_task instead.", [
+        "id": ["type": "string", "description": "The task id from today"],
+    ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": true, "idempotentHint": true]),
     tool("update_meeting", "Change a meeting's title, summary, decisions or important points. Only the fields given change; the transcript is kept.", [
         "id": ["type": "string", "description": "The meeting id from list_meetings"],
         "title": ["type": "string"], "summary": ["type": "string"],
@@ -182,9 +191,8 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         let s = try? briefing(dir)
         let briefed = (try? dir.appendingPathComponent("synthesis.json").resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let db = try? DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true)
-        let tasks: [PulseTask] = db?.decode("tasks") ?? []
-        let done: [String: String] = db?.decode("task-done") ?? [:], removed: [String: String] = db?.decode("task-removed") ?? [:]
-        let later = Set(db?.ids("task-later") ?? [])
+        let tasks = db?.tasks() ?? [], marks = db?.marks() ?? TaskMarks()
+        let done = marks.done, later = marks.later, removed = marks.removed
         let focus: [[String: Any]] = (s?.focus ?? []).map { f in
             let sources: [[String: Any]] = f.sources.compactMap { id in s?.sources.first { $0.id == id } }.map { ["title": $0.title, "url": $0.url, "kind": $0.kind] }
             return ["headline": f.headline, "summary": f.summary, "sources": sources]
@@ -214,32 +222,50 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
             return ["period": range.label(b), "start": b, "prsMerged": merged, "ticketsClosed": tickets,
                     "medianHoursToMerge": s.medianHours, "medianLinesAdded": s.medianAdditions, "prsOver500Lines": s.over500] as [String: Any]
         }
-    case "update_task":
+    case "add_task", "update_task":
         let db = try DB(path: dir.appendingPathComponent("pulse.db").path)
-        let tasks: [PulseTask] = db.decode("tasks") ?? []
-        guard let id = args["id"] as? String, let task = tasks.first(where: { $0.id == id }) else {
-            throw SyncError(description: "Unknown task id. Use the ids from today.")
+        let text = { (key: String, limit: Int) throws -> String? in
+            guard let value = args[key] as? String else { return nil }
+            let flat = value.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            guard flat.count <= limit else { throw SyncError(description: "Keep \(key) under \(limit) characters.") }
+            return flat
+        }
+        let title = try text("title", 200), why = try text("why", 300), url = try text("url", 2000)
+        if let url, URL(string: url)?.scheme == nil { throw SyncError(description: "url must be a full link, such as https://…") }
+        if let title, title.isEmpty { throw SyncError(description: "Give the task a title.") }
+        let id: String
+        var task: PulseTask?
+        if name == "add_task" {
+            guard let title, let url else { throw SyncError(description: "Give the task a title and a url.") }
+            id = UUID().uuidString
+            task = PulseTask(id: id, title: title, why: why ?? "", url: threadLink(url) ?? url, source: "agent")
+        } else {
+            guard let given = args["id"] as? String, !given.isEmpty else { throw SyncError(description: "Give the task id from today.") }
+            id = given
+            task = db.tasks().first { $0.id == id }
+            if task == nil, title != nil || why != nil || url != nil {
+                throw SyncError(description: "Only tasks from today can be edited. Tickets and PRs can only be marked done, later or removed.")
+            }
+            if let title { task?.title = title }
+            if let why { task?.why = why }
+            if let url { task?.url = threadLink(url) ?? url }
         }
         let day = Date().formatted(localDay)
-        var out: [String: Any] = ["id": id, "title": task.title]
-        try db.transaction {
-            for key in ["done", "removed"] {
-                var days: [String: String] = db.decode("task-" + key) ?? [:]
-                if let on = args[key] as? Bool {
-                    days[id] = on ? days[id] ?? day : nil
-                    try db.set(days, "task-" + key)
-                }
-                out[key] = days[id] != nil
-            }
-            var later = Set(db.ids("task-later"))
-            if let on = args["later"] as? Bool {
-                if on { later.insert(id) } else { later.remove(id) }
-                try db.set(Array(later), "task-later")
-            }
-            out["later"] = later.contains(id)
-        }
+        let marks = db.marks()
+        let done = (args["done"] as? Bool).map { $0 ? marks.done[id] ?? day : nil }
+        let removed = (args["removed"] as? Bool).map { $0 ? marks.removed[id] ?? day : nil }
+        if let task { try db.saveTask(task) }
+        try db.mark(id, done: done, later: args["later"] as? Bool, removed: removed)
         changed(dir)
-        return out
+        let after = db.marks()
+        return (["id": id, "title": task?.title, "why": task?.why, "url": task?.url,
+                 "done": after.done[id] != nil, "later": after.later.contains(id), "removed": after.removed[id] != nil] as [String: Any?]).compactMapValues { $0 }
+    case "delete_task":
+        let db = try DB(path: dir.appendingPathComponent("pulse.db").path)
+        guard let id = args["id"] as? String, db.tasks().contains(where: { $0.id == id }) else { throw SyncError(description: "Unknown task id. Use the ids from today.") }
+        try db.deleteTasks([id])
+        changed(dir)
+        return ["id": id, "deleted": true]
     case "update_meeting":
         let (id, file, markdown) = try meetingFile(args, in: archive)
         let flat = { (s: String) in s.split(whereSeparator: \.isNewline).joined(separator: " ") }

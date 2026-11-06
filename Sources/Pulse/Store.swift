@@ -146,41 +146,36 @@ final class Store: ObservableObject {
 
     private func loadDay() {
         loadedDay = day
-        tasks = db.decode("tasks") ?? []
-        doneIDs = db.decode("task-done") ?? [:]
-        laterIDs = Set(db.ids("task-later"))
-        removedIDs = db.decode("task-removed") ?? [:]
+        loadTasks()
         doneThisWeek = db.decode(weekKey) ?? []
         let monday = thisMonday.formatted(localDay)
         let old = Set(tasks.map(\.id).filter { (doneIDs[$0] ?? removedIDs[$0] ?? monday) < monday })
-        if !old.isEmpty {
-            tasks.removeAll { old.contains($0.id) }
-            forget(old)
-        }
+        if !old.isEmpty { write { try db.deleteTasks(old) } }
         reloadFacts()
     }
 
-    private func forget(_ ids: Set<String>) {
-        doneIDs = doneIDs.filter { !ids.contains($0.key) }
-        removedIDs = removedIDs.filter { !ids.contains($0.key) }
-        laterIDs.subtract(ids)
-        saveTasks()
+    private func loadTasks() {
+        tasks = db.tasks()
+        let marks = db.marks()
+        doneIDs = marks.done
+        laterIDs = marks.later
+        removedIDs = marks.removed
     }
 
-    private func saveTasks() {
-        save(tasks, "tasks")
-        save(doneIDs, "task-done")
-        save(Array(laterIDs), "task-later")
-        save(removedIDs, "task-removed")
+    private func write(_ change: () throws -> Void) {
+        do { try change() } catch { lastError = "\(error)" }
+        loadTasks()
     }
 
     var openTasks: [PulseTask] { tasks.filter { doneIDs[$0.id] == nil && removedIDs[$0.id] == nil } }
 
     func applyTasks(_ changes: TaskChanges) {
+        loadTasks()
         let (updated, closed) = applyTaskChanges(changes, to: tasks, open: Set(openTasks.map(\.id)))
-        tasks = updated
-        for id in closed where doneIDs[id] == nil { doneIDs[id] = day }
-        saveTasks()
+        write {
+            for task in updated where !tasks.contains(task) { try db.saveTask(task) }
+            for id in closed where doneIDs[id] == nil { try db.mark(id, done: day) }
+        }
         recordDone()
     }
 
@@ -230,7 +225,7 @@ final class Store: ObservableObject {
         if loadedDay != day { loadDay() }
         let known = Set(today.map(\.id) + tasks.map(\.id))
         let gone = Set(doneIDs.keys).union(removedIDs.keys).union(laterIDs).subtracting(known)
-        if !gone.isEmpty { forget(gone) }
+        if !gone.isEmpty { write { try db.clearMarks(gone) } }
         let rows = checklist
         let done = Set(rows.filter { $0.done && ($0.item.state?.type ?? "completed") == "completed" }.map(\.id)), shown = Set(rows.map(\.id))
         var log = doneThisWeek.filter { done.contains($0.id) || !shown.contains($0.id) }
@@ -245,24 +240,18 @@ final class Store: ObservableObject {
     private func save(_ value: some Encodable, _ key: String) { try? db.set(value, key) }
 
     func toggleDone(_ id: String) {
-        doneIDs[id] = doneIDs[id] == nil ? day : nil
-        saveTasks()
+        let done: String? = doneIDs[id] == nil ? day : nil
+        write { try db.mark(id, done: done) }
         recordDone()
     }
 
-    func toggleLater(_ id: String) {
-        if laterIDs.remove(id) == nil { laterIDs.insert(id) }
-        saveTasks()
-    }
+    func toggleLater(_ id: String) { write { try db.mark(id, later: !laterIDs.contains(id)) } }
 
-    func remove(_ id: String) {
-        removedIDs[id] = day
-        saveTasks()
-    }
+    func remove(_ id: String) { write { try db.mark(id, removed: day) } }
 
     func restoreRemoved() {
-        removedIDs = [:]
-        saveTasks()
+        let none: String? = nil
+        write { for id in removedIDs.keys { try db.mark(id, removed: none) } }
     }
 
     var checklist: [TodoRow] {
