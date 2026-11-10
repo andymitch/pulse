@@ -569,6 +569,10 @@ private struct SplitButton<Title: View, Items: View>: View {
     }
 }
 
+@ViewBuilder private func icon(_ l: Launch) -> some View {
+    if let brand = l.brand { Image(nsImage: brand.image(size: 13)) } else { Image(systemName: l.symbol).font(.system(size: 12)).frame(width: 13, height: 13) }
+}
+
 private struct Triage: View {
     @ObservedObject var store: Store
     let id: String
@@ -579,9 +583,7 @@ private struct Triage: View {
             Section("Start session in \(terminalName)") {
                 ForEach(settings.enabledAgents, id: \.self) { agent in
                     Button { store.startSession(agent, task: task) } label: {
-                        Label { Text(agent.name) } icon: {
-                            if let brand = agent.brand { Image(nsImage: brand.image(size: 13)) } else { Image(systemName: "terminal") }
-                        }
+                        Label { Text(agent.name) } icon: { icon(.agent(agent.name)) }
                     }
                 }
             }
@@ -633,10 +635,6 @@ private struct TicketButton: View {
             Divider()
             triage
         }
-    }
-
-    @ViewBuilder private func icon(_ l: Launch) -> some View {
-        if let brand = l.brand { Image(nsImage: brand.image(size: 13)) } else { Image(systemName: l.symbol).font(.system(size: 12)).frame(width: 13, height: 13) }
     }
 
     private func isAgent(_ l: Launch) -> Bool {
