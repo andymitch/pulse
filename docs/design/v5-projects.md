@@ -35,7 +35,7 @@ A connection provides one or more **capabilities**:
 - **work items**: units of work with a state, an owner and dates, synced by Pulse,
 - **actions**: things Pulse can do with an item (open it, start it, move its status, draft a reply),
 - **meetings**: calls Pulse can recognise and record,
-- **people**: names, so facts and work items land on the same person.
+- **identities**: the accounts people have in that tool (name, login, email), so Pulse can tell who's who.
 
 Pulse owns every connection. It signs in to each source itself, per project, and reaches it one of two ways:
 
@@ -58,6 +58,29 @@ A generic "any MCP server" connection waits until after v5. With Pulse as the cl
 **GitHub as context.** Today GitHub only feeds the open-work list. A project with nothing but GitHub still needs a briefing, so the GitHub connection also exports what changed since the last run (issue and PR threads, comments, reviews) to a file for the briefing, the way Mail does.
 
 **GitHub issues as tickets.** This is how personal projects get tickets, and it's the first test of the abstraction: Done, Start, Trends and the open-work list must treat a GitHub issue exactly like a Linear ticket, with no special cases.
+
+### Pulse is the hub, connections never talk to each other
+
+Every connection talks only to Pulse, and each one stands on its own. Pulse never relies on one tool's integration with another, such as Linear's GitHub integration or Slack's Linear unfurls. If two tools are connected to each other, Pulse ignores that. It makes every link between things itself, from what each connection reports on its own, and keeps the links in the project's nexus:
+
+| Link | How Pulse makes it |
+|---|---|
+| ticket ↔ PR | the ticket's ID appears in the PR's branch or title (as `mergeTicketsAndPRs` does today) |
+| ticket ↔ repo | the PR it's linked to, or a local branch named for it, or your choice in Start in ▸ |
+| person ↔ accounts | one person in the project with an identity per connection (Linear name, GitHub login, Slack user, email), matched by email when the connections give one, otherwise confirmed by you once |
+| meeting ↔ calendar event | the Meet code in the window title matches the code in the event, both read by Pulse |
+| task or fact ↔ ticket, PR, thread | the briefing cites the sources, and Pulse records which items they are |
+
+The rules that follow:
+
+- A connection can be added or removed without breaking another one. Removing GitHub leaves Linear tickets working, just without their PRs.
+- Trends and Done count a person once, whichever tools their work came from.
+- A ticket closed in Linear is done because Linear says so, and a merged PR is merged because GitHub says so. Pulse never infers one tool's state from another's automation.
+
+The nexus gains two tables:
+
+- `people(id, name)` and `identities(person, connection, handle, email)`, replacing today's `users` and the separate GitHub-login and Linear-name worlds in Trends.
+- `links(from_item, to_item, kind, how)` for item-to-item links. `how` says which rule made the link, so you can see why two things are joined.
 
 ### Work items replace `issues` and `prs`
 
@@ -159,7 +182,7 @@ A meeting can still be moved to another project from its card.
 
 - Sync and the open-PR search use the GitHub connection's `owners` (`org:` or `user:`), with that connection's account token.
 - A ticket's repo is picked in this order. A team mapping wouldn't work, because Klear's one KLE team spans all its repos.
-  1. A PR already linked to the ticket names the repo.
+  1. A PR Pulse has linked to the ticket (by the ID in its branch or title) names the repo.
   2. A local branch with the ticket's branch name exists in one repo.
   3. Otherwise the first repo, with a **Start in ▸** menu to pick another. The choice is remembered per ticket.
 - Worktrees stay `<worktrees>/<ticket>/<repo>`, so a ticket across two repos gets one worktree per repo.
