@@ -96,14 +96,8 @@ final class Meetings: ObservableObject {
 
     private func detect(_ micUsers: [String]) async -> Meeting? {
         let event = await currentEvent()
-        var call: String?
-        if micUsers.contains(where: { $0.hasPrefix("com.tinyspeck.slackmacgap") }) {
-            call = "Slack huddle"
-        } else if event == nil, await meetOpen() {
-            call = "Google Meet"
-        }
-        guard let title = event?.title ?? call else { return nil }
-        return meeting(title, event)
+        guard let call = callName(micUsers: micUsers, event: event != nil, meetOpen: await meetOpen()) else { return nil }
+        return meeting(event?.title ?? call, event)
     }
 
     private func meetOpen() async -> Bool {
@@ -356,6 +350,15 @@ private func audioProperty<T>(_ object: AudioObjectID, _ selector: AudioObjectPr
     var size = UInt32(MemoryLayout<T>.size)
     _ = withUnsafeMutablePointer(to: &value) { AudioObjectGetPropertyData(object, &address, 0, nil, &size, $0) }
     return value
+}
+
+private let callApps = ["us.zoom.xos", "com.microsoft.teams", "com.apple.FaceTime", "com.cisco.webex", "com.google.Chrome", "com.apple.Safari",
+                        "company.thebrowser.", "org.mozilla.firefox", "com.microsoft.edgemac", "com.brave.Browser"]
+
+func callName(micUsers: [String], event: Bool, meetOpen: Bool) -> String? {
+    if micUsers.contains(where: { $0.hasPrefix("com.tinyspeck.slackmacgap") }) { return "Slack huddle" }
+    if meetOpen { return "Google Meet" }
+    return event && micUsers.contains { user in callApps.contains { user.hasPrefix($0) } } ? "Call" : nil
 }
 
 func micUsers() -> [String] {
