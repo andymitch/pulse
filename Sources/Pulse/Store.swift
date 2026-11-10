@@ -339,7 +339,7 @@ final class Store: ObservableObject {
     }
 
     func startSession(_ agent: Agent, task: PulseTask) {
-        do { try openAgentInTerminal(agent, path: NSHomeDirectory(), promptFile: writePrompt(taskPrompt(task), name: "task-\(task.id)")) } catch { lastError = "\(error)" }
+        do { try openAgentInTerminal(agent, path: settings.codeReady ? settings.repo : NSHomeDirectory(), promptFile: writePrompt(taskPrompt(task), name: "task-\(task.id)")) } catch { lastError = "\(error)" }
     }
 
     func refreshAll() async {
