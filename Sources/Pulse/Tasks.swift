@@ -97,3 +97,12 @@ extension DB {
         for id in ids { try query("DELETE FROM task_marks WHERE id = ?", [id]) }
     }
 }
+
+func taskPrompt(_ task: PulseTask) -> String {
+    var parts = ["Help me get this task done: \(task.title)"]
+    if !task.why.isEmpty { parts.append("Why: \(task.why)") }
+    parts.append("Link: \(task.url)\nStart by reading what the link points to.")
+    if let reply = task.reply, !reply.isEmpty { parts.append("Suggested reply:\n\(reply)") }
+    parts.append("It's on my Pulse task list with id \(task.id). Once it's done, mark it done with the Pulse MCP update_task tool.")
+    return parts.joined(separator: "\n\n")
+}
