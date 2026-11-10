@@ -232,6 +232,7 @@ final class Store: ObservableObject {
         let logged = Set(log.map(\.id))
         log += rows.filter { done.contains($0.id) && !logged.contains($0.id) }
             .map { DoneItem(id: $0.id, title: $0.item.title, url: $0.item.url, source: $0.item.reason, day: doneIDs[$0.id] ?? day) }
+        if let me { log += db.closedTickets(since: thisMonday, assignee: me).filter { !logged.contains($0.id) && !shown.contains($0.id) } }
         guard log != doneThisWeek else { return }
         doneThisWeek = log
         save(log, weekKey)
@@ -322,15 +323,23 @@ final class Store: ObservableObject {
                 if case .ide(let ide) = choice {
                     try openInIDE(ide, path: path, prompt: ctx.prompt)
                 } else if case .agent(let name) = choice, let agent = settings.agents.first(where: { $0.name == name }) {
-                    let file = dir.appendingPathComponent("prompts/\(ticket).md")
-                    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-                    try ctx.prompt.write(to: file, atomically: true, encoding: .utf8)
-                    try openAgentInTerminal(agent, path: path, promptFile: file)
+                    try openAgentInTerminal(agent, path: path, promptFile: writePrompt(ctx.prompt, name: ticket))
                 }
             }
         } catch {
             lastError = "\(error)"
         }
+    }
+
+    private func writePrompt(_ prompt: String, name: String) throws -> URL {
+        let file = dir.appendingPathComponent("prompts/\(name).md")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try prompt.write(to: file, atomically: true, encoding: .utf8)
+        return file
+    }
+
+    func startSession(_ agent: Agent, task: PulseTask) {
+        do { try openAgentInTerminal(agent, path: settings.codeReady ? settings.repo : NSHomeDirectory(), promptFile: writePrompt(taskPrompt(task), name: "task-\(task.id)")) } catch { lastError = "\(error)" }
     }
 
     func refreshAll() async {

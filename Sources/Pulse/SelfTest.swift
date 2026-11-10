@@ -314,6 +314,10 @@ func selfTest() throws {
     check(friendlyDay("2026-11-04", now: wed) == "Today" && friendlyDay("2026-11-03", now: wed) == "Yesterday" && friendlyDay("2026-11-01", now: wed) == "Sunday"
           && friendlyDay("2026-10-20", now: wed) == oct20,
           "dates read as today, yesterday, a weekday this week, or a short date")
+    let session = taskPrompt(PulseTask(id: "T-1", title: "Follow up with Jed", why: "He asked twice", url: "https://x/1", source: "slack", reply: "On it"))
+    check(session.hasPrefix("Help me get this task done: Follow up with Jed") && session.contains("Why: He asked twice") && session.contains("Link: https://x/1")
+          && session.contains("Suggested reply:\nOn it") && session.contains("id T-1") && session.contains("update_task"),
+          "a task session's prompt gives the agent the task, why, link and reply, and asks it to mark the task done in Pulse")
     try MainActor.assumeIsolated {
         let store = Store(db: try DB(path: ":memory:"), dir: FileManager.default.temporaryDirectory.appendingPathComponent("pulse-selftest-\(UUID())"))
         store.selected = ["jane-acme"]
@@ -337,6 +341,16 @@ func selfTest() throws {
                               DoneItem(id: "T4", title: "T4", url: URL(string: "https://x")!, source: "", day: "2000-01-03")]
         store.recordDone()
         check(store.earlierThisWeek.map(\.id) == ["old"], "earlier days show unless the item is back on the list")
+        store.doneThisWeek = []
+        let now = iso.string(from: Date()), lastWeek = iso.string(from: thisMonday.addingTimeInterval(-3600))
+        for (id, who, closed) in [("K-9", "Me", now), ("K-8", "Me", lastWeek), ("K-7", "Someone", now), ("T5", "Me", now)] {
+            try store.db.query("INSERT INTO issues VALUES (?, ?, ?, 'https://x', NULL, ?, ?, ?)", [id, id, id, who, closed, closed])
+        }
+        store.me = "Me"
+        store.recordDone()
+        check(store.doneThisWeek.map(\.id) == ["K-9"] && store.doneThisWeek[0].day == Date().formatted(localDay),
+              "a ticket of mine closed in Linear this week is logged as done, even though it's no longer in my open work")
+        store.me = nil
         store.doneThisWeek = []
         store.applyTasks(try JSONDecoder().decode(TaskChanges.self, from: Data(#"{"add": [{"title": "Reply to Dana", "why": "", "url": "message://%3Cm1%3E", "source": "mail"}, {"title": "Send the notice", "why": "", "url": "https://x/1", "source": "slack"}]}"#.utf8)))
         check(store.checklist.map(\.item.title) == ["T2", "T3", "T4", "T5", "T6", "T7", "T8", "Reply to Dana", "Send the notice", "T1"], "the briefing's tasks join the list after tickets and PRs, with later ones still last")

@@ -243,6 +243,15 @@ extension DB {
         ((try? query("SELECT merged_at FROM prs WHERE author = ? AND merged_at >= ? ORDER BY merged_at", [author, iso.string(from: since)])) ?? [])
             .compactMap { ($0[0] as? String).flatMap(iso.date(from:)) }
     }
+
+    func closedTickets(since: Date, assignee: String) -> [DoneItem] {
+        ((try? query("SELECT identifier, title, url, date(completed_at, 'localtime') FROM issues WHERE assignee = ? AND completed_at >= ? ORDER BY completed_at",
+                     [assignee, iso.string(from: since)])) ?? [])
+            .compactMap { r in
+                guard let id = r[0] as? String, let title = r[1] as? String, let url = (r[2] as? String).flatMap(URL.init), let day = r[3] as? String else { return nil }
+                return DoneItem(id: id, title: title, url: url, source: id, day: day)
+            }
+    }
 }
 
 func monthPace(_ merged: [Date], now: Date = Date(), calendar: Calendar = .current) -> (totals: [Int], days: Int) {

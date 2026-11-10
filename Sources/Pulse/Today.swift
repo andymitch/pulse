@@ -520,7 +520,7 @@ private struct Buttons: View {
     let item: ActionItem
 
     var body: some View {
-        let triage = Triage(store: store, id: item.id)
+        let triage = Triage(store: store, id: item.id, task: store.tasks.first { $0.id == item.id })
         HStack(spacing: 6) {
             if item.ticket != nil, item.branch != nil {
                 TicketButton(store: store, item: item, triage: triage)
@@ -569,11 +569,26 @@ private struct SplitButton<Title: View, Items: View>: View {
     }
 }
 
+@ViewBuilder private func icon(_ l: Launch) -> some View {
+    if let brand = l.brand { Image(nsImage: brand.image(size: 13)) } else { Image(systemName: l.symbol).font(.system(size: 12)).frame(width: 13, height: 13) }
+}
+
 private struct Triage: View {
     @ObservedObject var store: Store
     let id: String
+    var task: PulseTask?
 
     var body: some View {
+        if let task, !settings.enabledAgents.isEmpty {
+            Section("Start session in \(terminalName)") {
+                ForEach(settings.enabledAgents, id: \.self) { agent in
+                    Button { store.startSession(agent, task: task) } label: {
+                        Label { Text(agent.name) } icon: { icon(.agent(agent.name)) }
+                    }
+                }
+            }
+            Divider()
+        }
         Button(store.laterIDs.contains(id) ? "Move back up" : "Do later") { store.toggleLater(id) }
         Button("Remove") { store.remove(id) }
     }
@@ -620,10 +635,6 @@ private struct TicketButton: View {
             Divider()
             triage
         }
-    }
-
-    @ViewBuilder private func icon(_ l: Launch) -> some View {
-        if let brand = l.brand { Image(nsImage: brand.image(size: 13)) } else { Image(systemName: l.symbol).font(.system(size: 12)).frame(width: 13, height: 13) }
     }
 
     private func isAgent(_ l: Launch) -> Bool {
