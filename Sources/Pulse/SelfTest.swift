@@ -62,6 +62,12 @@ func selfTest() throws {
     check(Version("4.0.0-beta.4")! < Version("4-beta.5")!, "old X.Y.Z versions compare with tag-style ones")
     let migrated = Settings.load(Data(#"{"meetings": ["superwhisper", "otter"], "superwhisperFolder": "~/x", "githubOrg": "acme"}"#.utf8))
     check(migrated.recordMeetings && migrated.githubOrg == "acme", "Superwhisper setting becomes recording, other settings kept")
+    let whisper = "com.superduper.superwhisper"
+    check(callName(micUsers: [whisper], event: true, meetOpen: false) == nil && callName(micUsers: [whisper], event: false, meetOpen: false) == nil
+          && callName(micUsers: ["com.tinyspeck.slackmacgap.helper"], event: false, meetOpen: false) == "Slack huddle"
+          && callName(micUsers: ["com.google.Chrome"], event: false, meetOpen: true) == "Google Meet"
+          && callName(micUsers: ["us.zoom.xos"], event: true, meetOpen: false) == "Call" && callName(micUsers: ["us.zoom.xos"], event: false, meetOpen: false) == nil,
+          "only a call starts a recording: dictating before a meeting doesn't, a huddle or Meet window does, and a call app does when a meeting is on the calendar")
     check(!Settings.load(Data(#"{"meetings": ["otter"]}"#.utf8)).recordMeetings && Settings.load(Data("{}".utf8)).recordMeetings, "recording stays off if it was off, and is on by default")
     var off = Settings()
     off.hotkey = .off
