@@ -51,8 +51,8 @@ func localAnswer(_ question: String, facts: [[String: Any]], previous: Answer?) 
 
 func agentAnswer(_ question: String, me: String, known: [[String: Any]] = [], onEvent: @escaping @MainActor (AgentEvent) -> Void = { _ in }) async throws -> String {
     struct Out: Decodable { let answer: String }
-    let out = Settings.dir.appendingPathComponent("ask-answer.json")
-    let file = Settings.dir.appendingPathComponent("ask-prompt.md")
+    let out = project.dir.appendingPathComponent("ask-answer.json")
+    let file = project.dir.appendingPathComponent("ask-prompt.md")
     let prompt = """
         Answer \(me)'s question about their work: \(question)
 

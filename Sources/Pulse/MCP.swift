@@ -4,16 +4,18 @@ let pulseChanged = Notification.Name("com.andymitch.pulse.changed")
 let pulseRegenerate = Notification.Name("com.andymitch.pulse.regenerate")
 
 func runMCP() {
-    let dir = Settings.dir
+    _ = project
+    let fallback = launchProject()
     while let line = readLine() {
         let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
-        let response = request.map { mcpResponse($0, dir: dir) } ?? ["jsonrpc": "2.0", "id": NSNull(), "error": ["code": -32700, "message": "Expected one JSON-RPC request object per line"]]
+        let response = request.map { mcpResponse($0, root: Settings.dir, project: fallback) } ?? ["jsonrpc": "2.0", "id": NSNull(), "error": ["code": -32700, "message": "Expected one JSON-RPC request object per line"]]
         guard let response, let out = try? JSONSerialization.data(withJSONObject: response) else { continue }
         FileHandle.standardOutput.write(out + Data("\n".utf8))
     }
 }
 
 private let mcpTools: [[String: Any]] = [
+    tool("projects", "The projects Pulse keeps, each a separate workspace with its own facts, tasks, meetings and briefing. Every other tool works on one project: pass its id as project, or leave it out to use the project of the folder you're working in, or the default one.", [:]),
     tool("list_meetings", "Recent recorded meetings, newest first, with id, title, start, summary, and a recorded line that holds the length and attendees. Optionally filter by text or by how many days back.", [
         "query": ["type": "string", "description": "Only meetings whose title, summary, decisions or points contain this text"],
         "days": ["type": "integer", "description": "Only meetings from the last N days"],
@@ -79,7 +81,8 @@ private let mcpTools: [[String: Any]] = [
 ]
 
 private func tool(_ name: String, _ description: String, _ properties: [String: Any], required: [String] = [], hints: [String: Bool] = ["readOnlyHint": true]) -> [String: Any] {
-    ["name": name, "description": description, "inputSchema": ["type": "object", "properties": properties, "required": required],
+    let properties = name == "projects" ? properties : properties.merging(["project": ["type": "string", "description": "The project id from projects. Leave out to use the project of the folder you're working in, or the default one."]]) { a, _ in a }
+    return ["name": name, "description": description, "inputSchema": ["type": "object", "properties": properties, "required": required],
      "annotations": hints.merging(["openWorldHint": false]) { a, _ in a }]
 }
 
@@ -97,12 +100,14 @@ private func briefing(_ dir: URL) throws -> Synthesis {
     return s
 }
 
-private func changed(_ dir: URL) {
-    guard dir == Settings.dir else { return }
-    DistributedNotificationCenter.default().postNotificationName(pulseChanged, object: nil, userInfo: nil, deliverImmediately: true)
+private func post(_ name: Notification.Name, _ dir: URL) {
+    guard dir.deletingLastPathComponent().deletingLastPathComponent() == Settings.dir else { return }
+    DistributedNotificationCenter.default().postNotificationName(name, object: dir.lastPathComponent, userInfo: nil, deliverImmediately: true)
 }
 
-func mcpResponse(_ request: [String: Any], dir: URL) -> [String: Any]? {
+private func changed(_ dir: URL) { post(pulseChanged, dir) }
+
+func mcpResponse(_ request: [String: Any], root: URL, project fallback: Project?) -> [String: Any]? {
     guard let id = request["id"] else { return nil }
     let params = request["params"] as? [String: Any] ?? [:]
     var result: [String: Any]
@@ -117,14 +122,24 @@ func mcpResponse(_ request: [String: Any], dir: URL) -> [String: Any]? {
         result = ["tools": mcpTools]
     case "tools/call":
         let args = params["arguments"] as? [String: Any] ?? [:]
-        guard Settings.load(try? Data(contentsOf: dir.appendingPathComponent("settings.json"))).agentAccess else {
+        guard Settings.load(try? Data(contentsOf: root.appendingPathComponent("settings.json")), project: nil).agentAccess else {
             return ["jsonrpc": "2.0", "id": id, "result": ["content": [["type": "text", "text": "Agent access is off. Turn it on in Pulse → Settings → Agents."]], "isError": true]]
         }
         guard mcpTools.contains(where: { $0["name"] as? String == params["name"] as? String }) else {
             return ["jsonrpc": "2.0", "id": id, "error": ["code": -32602, "message": "Unknown tool \(params["name"] ?? "")"]]
         }
         do {
-            let value = try callTool(params["name"] as? String ?? "", args, dir: dir)
+            let projects = Project.all(in: root)
+            let value: Any
+            if params["name"] as? String == "projects" {
+                value = projects.map { ["id": $0.id, "name": $0.name, "current": $0 == fallback] as [String: Any] }
+            } else {
+                let asked = args["project"] as? String
+                guard let target = asked.map({ id in projects.first { $0.id == id } }) ?? fallback else {
+                    throw SyncError(description: "\(asked.map { "No project \($0)." } ?? "No project for this folder and no default set.") Pass project, one of: \(projects.map(\.id).joined(separator: ", ")).")
+                }
+                value = try callTool(params["name"] as? String ?? "", args, dir: target.dir)
+            }
             let json = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes])
             result = ["content": [["type": "text", "text": String(decoding: json, as: UTF8.self)]]]
         } catch {
@@ -286,7 +301,7 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         guard NSRunningApplication.runningApplications(withBundleIdentifier: "com.andymitch.pulse").contains(where: { $0.processIdentifier != getpid() && $0.activationPolicy == .accessory }) else {
             throw SyncError(description: "Pulse isn't running. Open it to regenerate the briefing.")
         }
-        DistributedNotificationCenter.default().postNotificationName(pulseRegenerate, object: nil, userInfo: nil, deliverImmediately: true)
+        post(pulseRegenerate, dir)
         return ["asked": true]
     default:
         throw SyncError(description: "Unknown tool \(name)")

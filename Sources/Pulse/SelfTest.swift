@@ -4,6 +4,7 @@ import AppKit
 import Foundation
 
 func selfTest() throws {
+    defer { try? FileManager.default.removeItem(at: Settings.dir) }
     let db = try DB(path: ":memory:")
     for (n, author, created, merged, adds) in [
         (1, "jane-acme", "2026-09-01T00:00:00Z", "2026-09-01T10:00:00Z", 100),
@@ -381,9 +382,35 @@ func selfTest() throws {
                        ActionItem(id: "N", kind: .notification, title: "", reason: "", url: url, since: Date())]
         check(store.toDoCount == 4, "the menu bar counts everything open except Linear tickets that are in progress or in review")
     }
-    let mcpDir = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-mcp-\(UUID())")
-    defer { try? FileManager.default.removeItem(at: mcpDir) }
+    let v4 = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-v4-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: v4) }
+    try FileManager.default.createDirectory(at: v4.appendingPathComponent("meetings"), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: v4.appendingPathComponent("Voice"), withIntermediateDirectories: true)
+    try Data(#"{"githubOrg": "acmecorp", "repoPath": "~/code/acme", "briefingHour": 6}"#.utf8).write(to: v4.appendingPathComponent("settings.json"))
+    try DB(path: v4.appendingPathComponent("pulse.db").path).setMeta("linear_workspace", "acme")
+    try Data("meeting".utf8).write(to: v4.appendingPathComponent("meetings/1.md"))
+    try Project.migrate(v4, legacyLinearKey: { Data("lin_key".utf8) })
+    let acme = Project(id: "acme", root: v4)
+    let global = Settings.load(try? Data(contentsOf: v4.appendingPathComponent("settings.json")), project: try? Data(contentsOf: acme.file))
+    let raw = String(decoding: (try? Data(contentsOf: v4.appendingPathComponent("settings.json"))) ?? Data(), as: UTF8.self)
+    let movedWorkspace = try DB(path: acme.db.path).meta("linear_workspace")
+    check(Project.all(in: v4) == [acme] && acme.name == "Acme" && movedWorkspace == "acme"
+          && FileManager.default.fileExists(atPath: acme.dir.appendingPathComponent("meetings/1.md").path)
+          && (try? String(contentsOf: acme.dir.appendingPathComponent("linear-key"), encoding: .utf8)) == "lin_key"
+          && FileManager.default.fileExists(atPath: v4.appendingPathComponent("Voice").path),
+          "a v4 folder becomes a project named after its Linear workspace, with its data, meetings and Linear key, and the voice models stay shared")
+    check(global.githubOrg == "acmecorp" && global.briefingHour == 6 && global.defaultProject == "acme" && !raw.contains("githubOrg"),
+          "source settings move into the project, and the rest stay global with the project as the default")
+    check((try? DB(path: v4.appendingPathComponent("pulse.db").path)) == nil, "an older Pulse can't open the moved database and start empty")
+    try Project.migrate(v4)
+    check(Project.all(in: v4) == [acme] && Project.resolve(in: v4)?.id == "acme" && Project.resolve(in: v4, asked: "nope") == nil
+          && Project.resolve(in: v4, folder: expand("~/code/acme/web")) == acme && Project.resolve(in: v4, asked: "acme", folder: "/elsewhere") == acme,
+          "migrating twice does nothing, and a project is found by name, by the folder an agent works in, or as the default")
+    let mcpRoot = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-mcp-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: mcpRoot) }
+    let mcpProject = Project(id: "test", root: mcpRoot), mcpDir = mcpProject.dir
     try FileManager.default.createDirectory(at: mcpDir.appendingPathComponent("meetings"), withIntermediateDirectories: true)
+    try Data(#"{"name": "Test"}"#.utf8).write(to: mcpProject.file)
     try meetingMarkdown(standup, notes: notes, transcript: "[0:01] Jane: One\n[0:02] Omar: Two\n[0:03] Jane: Three")
         .write(to: mcpDir.appendingPathComponent("meetings/0.md"), atomically: true, encoding: .utf8)
     try JSONEncoder().encode(Synthesis(focus: [], sources: [])).write(to: mcpDir.appendingPathComponent("synthesis.json"))
@@ -392,12 +419,12 @@ func selfTest() throws {
     try mcpDB.saveTask(PulseTask(id: "T-1", title: "Ship it", why: "", url: "https://x/2", source: "slack"))
     try mcpDB.mark(dana.id, done: Date().formatted(localDay))
     let call = { (name: String, args: [String: Any]) -> Any? in
-        let result = mcpResponse(["id": 1, "method": "tools/call", "params": ["name": name, "arguments": args]], dir: mcpDir)?["result"] as? [String: Any]
+        let result = mcpResponse(["id": 1, "method": "tools/call", "params": ["name": name, "arguments": args]], root: mcpRoot, project: mcpProject)?["result"] as? [String: Any]
         let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
         return try? JSONSerialization.jsonObject(with: Data(text.utf8))
     }
-    check(((mcpResponse(["id": 1, "method": "tools/list"], dir: mcpDir)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 14, "MCP lists its fourteen tools")
-    check((mcpResponse(["id": 1, "method": "nope"], dir: mcpDir)?["error"] as? [String: Any])?["code"] as? Int == -32601 && mcpResponse(["method": "notifications/initialized"], dir: mcpDir) == nil, "MCP rejects unknown methods and doesn't answer notifications")
+    check(((mcpResponse(["id": 1, "method": "tools/list"], root: mcpRoot, project: mcpProject)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 15, "MCP lists its fifteen tools")
+    check((mcpResponse(["id": 1, "method": "nope"], root: mcpRoot, project: mcpProject)?["error"] as? [String: Any])?["code"] as? Int == -32601 && mcpResponse(["method": "notifications/initialized"], root: mcpRoot, project: mcpProject) == nil, "MCP rejects unknown methods and doesn't answer notifications")
     check((call("list_meetings", ["query": "launch"]) as? [[String: Any]])?.first?["id"] as? String == "0", "MCP finds a meeting by text")
     let page = call("get_meeting", ["id": "0", "transcript": true, "offset": 1, "lines": 1]) as? [String: Any]
     check(page?["transcript"] as? [String] == ["[0:02] Omar: Two"] && page?["transcriptLines"] as? Int == 3 && page?["decisions"] as? [String] == notes.decisions, "MCP pages a meeting transcript")
@@ -436,7 +463,18 @@ func selfTest() throws {
     check((call("get_meeting", ["id": "0", "transcript": true]) as? [String: Any])?["transcriptLines"] as? Int == 3, "a heading in an edited summary can't cut the transcript")
     check(editMeeting("# Old\n\nRecorded.\n\n## Notes\n\nx\n\n## Transcript\n\nhi", title: "New", summary: nil, decisions: nil, points: nil) == nil
           && editMeeting("# Old\n\nRecorded.", title: "New", summary: nil, decisions: nil, points: nil) == nil, "a meeting Pulse didn't write isn't edited")
-    try Data(#"{"agentAccess": false}"#.utf8).write(to: mcpDir.appendingPathComponent("settings.json"))
+    let other = Project(id: "side", root: mcpRoot)
+    try FileManager.default.createDirectory(at: other.dir, withIntermediateDirectories: true)
+    try Data(#"{"name": "Side"}"#.utf8).write(to: other.file)
+    try DB(path: other.db.path).saveTask(PulseTask(id: "S-1", title: "Side task", why: "", url: "https://x/9", source: "agent"))
+    let listedProjects = call("projects", [:]) as? [[String: Any]]
+    let sideTasks = ((call("today", ["project": "side"]) as? [String: Any])?["tasks"] as? [[String: Any]])?.map { $0["id"] as? String }
+    let unrouted = mcpResponse(["id": 1, "method": "tools/call", "params": ["name": "today", "arguments": [:]]], root: mcpRoot, project: nil)?["result"] as? [String: Any]
+    check(listedProjects?.map { $0["id"] as? String } == ["side", "test"] && listedProjects?.last?["current"] as? Bool == true
+          && sideTasks == ["S-1"] && call("today", ["project": "nope"]) == nil && unrouted?["isError"] as? Bool == true
+          && ((unrouted?["content"] as? [[String: Any]])?.first?["text"] as? String)?.contains("side, test") == true,
+          "MCP lists projects, works on the one asked for, and with no project to use names the ones to pick from")
+    try Data(#"{"agentAccess": false}"#.utf8).write(to: mcpRoot.appendingPathComponent("settings.json"))
     check(call("list_meetings", [:]) == nil, "MCP refuses tool calls while agent access is off")
     print("self-test ok")
 }

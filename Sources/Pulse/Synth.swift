@@ -199,10 +199,10 @@ func draftSlackReply(_ text: String, to url: URL) async throws {
     guard let thread = slackThread(url) else { throw SyncError(description: "Not a Slack message link: \(url)") }
     guard text.count <= 1000 else { throw SyncError(description: "The suggested reply is too long to draft.") }
     let run = UUID().uuidString
-    let message = Settings.dir.appendingPathComponent("draft-\(run).json")
-    let out = Settings.dir.appendingPathComponent("draft-\(run)-result.json")
+    let message = project.dir.appendingPathComponent("draft-\(run).json")
+    let out = project.dir.appendingPathComponent("draft-\(run)-result.json")
     defer {
-        for file in [message, out, Settings.dir.appendingPathComponent("draft-\(run)-prompt.md")] { try? FileManager.default.removeItem(at: file) }
+        for file in [message, out, project.dir.appendingPathComponent("draft-\(run)-prompt.md")] { try? FileManager.default.removeItem(at: file) }
     }
     try JSONEncoder().encode(["channel": thread.channel, "thread_ts": thread.thread, "text": text]).write(to: message)
     let prompt = """
