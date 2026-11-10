@@ -148,7 +148,7 @@ func openCommandInTerminal(_ command: String, in path: String = NSHomeDirectory(
         try shell("open -na \(quoted(terminal.path)) --args --working-directory=\(quoted(path)) -e /bin/zsh -lc \(quoted(full))")
         return
     }
-    let script = Settings.dir.appendingPathComponent("prompts/\(scriptName).command")
+    let script = project.dir.appendingPathComponent("prompts/\(scriptName).command")
     try FileManager.default.createDirectory(at: script.deletingLastPathComponent(), withIntermediateDirectories: true)
     try "#!/bin/zsh -l\n\(full)\n".write(to: script, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)

@@ -87,12 +87,14 @@ Tools for the facts: `search` finds them by words, subject or date (`since` alon
 
 The other read tools are `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and the briefing's tasks) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `add_task`, `update_task` (title, why, link, done, later or removed; tickets and PRs can only be marked) and `delete_task` for your tasks, `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never changes settings, tokens or keys.
 
+Every tool works on one project. `projects` lists them. A tool uses the `project` it's given, else the one named with `Pulse --mcp --project <id>`, else the project whose repo or worktrees folder the agent is working in, else the default project.
+
 ## Data
 
-Pulse keeps everything in `~/Library/Application Support/Pulse/`:
+Pulse keeps everything in `~/Library/Application Support/Pulse/`. Global settings live in `settings.json` there, and each project gets its own folder under `projects/<id>/` (for now there is one, made from your existing data the first time Pulse 5 runs):
+- `project.json`: the project's name and its source settings (GitHub, repo, Slack, mail)
 - `pulse.db`: the SQLite cache behind Trends, the facts Pulse has learned, and your tasks
-- `settings.json`
-- `linear-key`: your Linear API key, readable only by your user. Older versions kept it in the Keychain; Pulse moves it here the first time it runs.
+- `linear-key`: your Linear API key, readable only by your user
 - `synthesis.json`: the latest briefing
 - `meetings/`: meeting summaries and transcripts, one Markdown file per meeting
 - `sessions/`: digests of finished pi and Claude Code sessions in your repo, one Markdown file per session

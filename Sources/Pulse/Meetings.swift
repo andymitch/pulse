@@ -42,8 +42,8 @@ final class Meetings: ObservableObject {
     private var askedCalendar = false
     private var me: () -> String? = { nil }
     private let calendar = EKEventStore()
-    private let recordings = Settings.dir.appendingPathComponent("recordings")
-    private let archive = Settings.dir.appendingPathComponent("meetings")
+    private let recordings = project.dir.appendingPathComponent("recordings")
+    private let archive = project.dir.appendingPathComponent("meetings")
 
     func watch(me: @escaping () -> String?) {
         guard !demoMode else { saved = demoMeetings; return }

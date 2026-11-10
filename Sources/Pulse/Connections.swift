@@ -51,7 +51,7 @@ enum BriefingAgent {
 }
 
 func runAgent(_ prompt: String, output: URL, name: String) async throws -> Data {
-    let file = Settings.dir.appendingPathComponent("\(name)-prompt.md")
+    let file = project.dir.appendingPathComponent("\(name)-prompt.md")
     try? FileManager.default.removeItem(at: output)
     try prompt.write(to: file, atomically: true, encoding: .utf8)
     let command = "cd \"$HOME\" && " + settings.briefingCommand.replacingOccurrences(of: "{prompt}", with: quoted(file.path))
@@ -64,7 +64,7 @@ func runAgent(_ prompt: String, output: URL, name: String) async throws -> Data 
     return data
 }
 
-private let channelsFile = Settings.dir.appendingPathComponent("slack-channels.json")
+private let channelsFile = project.dir.appendingPathComponent("slack-channels.json")
 
 func cachedSlackChannels() -> [SlackChannel] {
     (try? Data(contentsOf: channelsFile)).flatMap { try? JSONDecoder().decode([SlackChannel].self, from: $0) } ?? []

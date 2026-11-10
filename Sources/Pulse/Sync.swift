@@ -124,7 +124,7 @@ private let keychainQuery: [String: Any] = [
     kSecAttrAccount as String: "linear",
 ]
 
-private var keyFile: URL { Settings.dir.appendingPathComponent("linear-key") }
+private var keyFile: URL { project.dir.appendingPathComponent("linear-key") }
 
 func writePrivate(_ data: Data, to url: URL) throws {
     try? FileManager.default.removeItem(at: url)
@@ -135,13 +135,16 @@ func writePrivate(_ data: Data, to url: URL) throws {
 
 func linearKey() -> String? {
     guard !CommandLine.arguments.contains("--self-test") else { return nil }
-    if let data = try? Data(contentsOf: keyFile) { return String(data: data, encoding: .utf8) }
+    return (try? Data(contentsOf: keyFile)).flatMap { String(data: $0, encoding: .utf8) }
+}
+
+func legacyLinearKey() -> Data? {
     var query = keychainQuery
     query[kSecReturnData as String] = true
     var out: AnyObject?
     guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
-    if (try? writePrivate(data, to: keyFile)) != nil { SecItemDelete(keychainQuery as CFDictionary) }
-    return String(data: data, encoding: .utf8)
+    SecItemDelete(keychainQuery as CFDictionary)
+    return data
 }
 
 func removeLinearKey() {
@@ -152,7 +155,7 @@ func removeLinearKey() {
 func saveLinearKey(_ key: String) async throws {
     struct Viewer: Decodable { struct V: Decodable { let id: String }; let viewer: V }
     let _: Viewer = try await gql(linearURL, auth: key, "{ viewer { id } }")
-    try FileManager.default.createDirectory(at: Settings.dir, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: project.dir, withIntermediateDirectories: true)
     try writePrivate(Data(key.utf8), to: keyFile)
 }
 

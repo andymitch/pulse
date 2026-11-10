@@ -74,6 +74,7 @@ struct Settings: Codable, Equatable {
     var betaUpdates = false
     var agentAccess = true
     var hotkey = Hotkey.standard
+    var defaultProject = ""
 
     static let agentPresets = [
         Agent(name: "pi", command: "pi @{prompt}"),
@@ -86,15 +87,15 @@ struct Settings: Codable, Equatable {
     ]
 
     static let dir: URL = {
-        guard demoMode else { return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Pulse") }
-        let demo = FileManager.default.temporaryDirectory.appendingPathComponent("PulseDemo")
+        guard demoMode || CommandLine.arguments.contains("--self-test") else { return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Pulse") }
+        let demo = FileManager.default.temporaryDirectory.appendingPathComponent(demoMode ? "PulseDemo" : "PulseSelfTest-\(getpid())")
         try? FileManager.default.removeItem(at: demo)
         try? FileManager.default.createDirectory(at: demo, withIntermediateDirectories: true)
         return demo
     }()
     private static let file = dir.appendingPathComponent("settings.json")
 
-    static func load(_ data: Data? = try? Data(contentsOf: file)) -> Settings {
+    static func load(_ data: Data? = try? Data(contentsOf: file), project projectData: Data? = try? Data(contentsOf: project.file)) -> Settings {
         let defaults = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(Settings()))) as? [String: Any] ?? [:]
         var saved = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         if saved["recordMeetings"] == nil, let meetings = saved["meetings"] as? [String] {
@@ -108,15 +109,17 @@ struct Settings: Codable, Equatable {
             }
             if !channels.isEmpty { saved["slackChannels"] = channels }
         }
-        let merged = defaults.merging(saved) { _, new in new }
+        let own = (projectData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]).filter { Project.keys.contains($0.key) }
+        let merged = defaults.merging(saved) { _, new in new }.merging(own) { _, new in new }
         return (try? JSONSerialization.data(withJSONObject: merged)).flatMap { try? JSONDecoder().decode(Settings.self, from: $0) } ?? Settings()
     }
 
     func save() throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try FileManager.default.createDirectory(at: Settings.dir, withIntermediateDirectories: true)
-        try encoder.encode(self).write(to: Settings.file)
+        guard let all = try JSONSerialization.jsonObject(with: JSONEncoder().encode(self)) as? [String: Any] else { return }
+        try FileManager.default.createDirectory(at: project.dir, withIntermediateDirectories: true)
+        let own = (project.fields ?? [:]).merging(all.filter { Project.keys.contains($0.key) }) { _, new in new }
+        try JSONSerialization.data(withJSONObject: own, options: [.prettyPrinted, .sortedKeys]).write(to: project.file)
+        try JSONSerialization.data(withJSONObject: all.filter { !Project.keys.contains($0.key) }, options: [.prettyPrinted, .sortedKeys]).write(to: Settings.file)
     }
 
     var repo: String { expand(repoPath) }

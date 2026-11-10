@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var anchor: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let dir = Settings.dir
+        let dir = project.dir
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             store = Store(db: try DB(path: dir.appendingPathComponent("pulse.db").path), dir: dir)
@@ -64,13 +64,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         Meetings.shared.watch { [weak self] in self?.store.me }
         let center = DistributedNotificationCenter.default()
-        center.addObserver(forName: pulseChanged, object: nil, queue: .main) { [weak self] _ in
+        center.addObserver(forName: pulseChanged, object: project.id, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.store.reloadDay()
                 Meetings.shared.reload()
             }
         }
-        center.addObserver(forName: pulseRegenerate, object: nil, queue: .main) { [weak self] _ in
+        center.addObserver(forName: pulseRegenerate, object: project.id, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.store.synthesize() }
         }
 
