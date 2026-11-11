@@ -5,20 +5,43 @@ import Foundation
 
 func selfTest() throws {
     defer { try? FileManager.default.removeItem(at: Settings.dir) }
-    let db = try DB(path: ":memory:")
-    for (n, author, created, merged, adds) in [
-        (1, "jane-acme", "2026-09-01T00:00:00Z", "2026-09-01T10:00:00Z", 100),
-        (2, "acme-omar", "2026-09-02T00:00:00Z", "2026-09-02T20:00:00Z", 600),
-        (3, "jane-acme", "2026-09-30T00:00:00Z", "2026-10-01T04:00:00Z", 50),
-        (4, "jane-acme", "2025-01-01T00:00:00Z", "2025-01-02T00:00:00Z", 50),
-        (5, "someone", "2026-09-03T00:00:00Z", "2026-09-03T01:00:00Z", 10),
-    ] {
-        try db.query("INSERT INTO prs VALUES ('r', ?, ?, ?, ?, ?)", [n, author, created, merged, adds])
+    let dbFile = FileManager.default.temporaryDirectory.appendingPathComponent("pulse-v4db-\(UUID()).db").path
+    defer { try? FileManager.default.removeItem(atPath: dbFile) }
+    do {
+        let old = try DB(path: dbFile)
+        try old.exec("""
+            CREATE TABLE prs (repo TEXT NOT NULL, number INTEGER NOT NULL, author TEXT NOT NULL, created_at TEXT NOT NULL, merged_at TEXT NOT NULL, additions INTEGER NOT NULL, PRIMARY KEY (repo, number));
+            CREATE TABLE issues (id TEXT PRIMARY KEY, identifier TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, creator TEXT, assignee TEXT, created_at TEXT NOT NULL, completed_at TEXT);
+            CREATE TABLE users (name TEXT PRIMARY KEY, email TEXT NOT NULL);
+            """)
+        for (n, author, created, merged, adds) in [
+            (1, "jane-acme", "2026-09-01T00:00:00Z", "2026-09-01T10:00:00Z", 100),
+            (2, "acme-omar", "2026-09-02T00:00:00Z", "2026-09-02T20:00:00Z", 600),
+            (3, "jane-acme", "2026-09-30T00:00:00Z", "2026-10-01T04:00:00Z", 50),
+            (4, "jane-acme", "2025-01-01T00:00:00Z", "2025-01-02T00:00:00Z", 50),
+            (5, "someone", "2026-09-03T00:00:00Z", "2026-09-03T01:00:00Z", 10),
+        ] {
+            try old.query("INSERT INTO prs VALUES ('r', ?, ?, ?, ?, ?)", [n, author, created, merged, adds])
+        }
+        try old.query("INSERT INTO users VALUES ('Jane Doe', 'jane@x.com'), ('Omar Reyes', 'omar@x.com'), ('Sam Lee', 'slee@x.com')")
+        try old.query("INSERT INTO issues VALUES ('i1', 'i1', '', '', 'kai@x.com', NULL, '2026-09-05T00:00:00Z', '2026-10-02T00:00:00Z')")
+        try old.query("INSERT INTO issues VALUES ('i2', 'i2', '', '', NULL, 'Omar Reyes', '2026-09-06T00:00:00Z', NULL)")
     }
-    try db.query("INSERT INTO users VALUES ('Jane Doe', 'jane@x.com'), ('Omar Reyes', 'omar@x.com'), ('Sam Lee', 'slee@x.com')")
-    try db.query("INSERT INTO issues VALUES ('i1', 'i1', '', '', 'kai@x.com', NULL, '2026-09-05T00:00:00Z', '2026-10-02T00:00:00Z')")
-    try db.query("INSERT INTO issues VALUES ('i2', 'i2', '', '', NULL, 'Omar Reyes', '2026-09-06T00:00:00Z', NULL)")
-
+    let db = try DB(path: dbFile)
+    let moved = try db.query("SELECT count(*) FROM items").first?[0] as? Int
+    let left = try db.query("SELECT count(*) FROM sqlite_master WHERE name IN ('prs', 'issues', 'users')").first?[0] as? Int
+    check(moved == 7 && left == 0 && db.peopleNames() == ["Jane Doe", "Omar Reyes", "Sam Lee"], "v4's prs, issues and users move into items, people and identities")
+    try db.identify("github", handle: "omar-gh", name: "Omar R", email: "OMAR@x.com")
+    try db.identify("github", handle: "ghost-dev", name: "Ghost", email: nil)
+    try db.identify("github", handle: "sam-gh", name: "sam-gh", email: nil)
+    let omar = try db.query("SELECT count(DISTINCT person) FROM identities WHERE handle IN ('Omar Reyes', 'omar-gh')").first?[0] as? Int
+    check(omar == 1 && db.peopleNames() == ["Ghost", "Jane Doe", "Omar Reyes", "Sam Lee"], "a GitHub login with a Linear user's email is the same person; one without an email is someone new")
+    try db.query("INSERT INTO items (id, connection, kind, identifier, title, created_at) VALUES ('t1', 'linear', 'ticket', 'KLE-12', 'Fix', '2026-09-01'), ('t2', 'linear', 'ticket', 'KLE-3', 'Other', '2026-09-01')")
+    try db.query("INSERT INTO items (id, connection, kind, identifier, title, branch, created_at) VALUES ('p1', 'github', 'pr', 'r#10', 'Fix it', 'kle-12-fix-it', '2026-09-02'), ('p2', 'github', 'pr', 'r#11', 'Follow-up (KLE-3)', 'main-fix', '2026-09-02'), ('p3', 'github', 'pr', 'r#12', 'KLE-120 nope', 'x', '2026-09-02')")
+    try db.linkItems()
+    let links = try db.query("SELECT from_item, to_item, how FROM links ORDER BY to_item").map { $0.compactMap { $0 as? String }.joined(separator: " ") }
+    check(links == ["t1 p1 branch", "t2 p2 title"], "Pulse links a PR to the ticket named in its branch or title, and says which rule made the link")
+    try db.query("DELETE FROM items WHERE id IN ('t1', 't2', 'p1', 'p2', 'p3')")
     let t = try db.trends(since: "2026-01-01")
     func check(_ ok: Bool, _ what: String, line: Int = #line) {
         if !ok { FileHandle.standardError.write("FAIL line \(line): \(what)\n".data(using: .utf8)!); exit(1) }
@@ -172,7 +195,7 @@ func selfTest() throws {
           && sourceTitle("Standup", url: slackLink) == "Standup" && sourceTitle("https://x.slack.com/a", url: URL(fileURLWithPath: "/x/Pulse/sessions/pi-1.md")) == "pi session",
           "a source titled with a bare link gets a readable name")
     let real = try DB(path: ":memory:")
-    try real.query("INSERT INTO users VALUES ('Jane Doe', 'jane@x.com')")
+    try real.identify("linear", handle: "Jane Doe", name: "Jane Doe", email: "jane@x.com")
     try real.set(["Requests v1", "MCP v2"], "linear_projects")
     let linked = try realSubject(kind: "project", names: ["requests V1"], in: real), made = try realSubject(kind: "project", names: ["Pulse"], in: real)
     let stranger = try realSubject(kind: "person", names: ["Maya"], in: real), teammate = try realSubject(kind: "person", names: ["jane doe"], in: real)
@@ -360,7 +383,7 @@ func selfTest() throws {
         store.doneThisWeek = []
         let now = iso.string(from: Date()), lastWeek = iso.string(from: thisMonday.addingTimeInterval(-3600))
         for (id, who, closed) in [("K-9", "Me", now), ("K-8", "Me", lastWeek), ("K-7", "Someone", now), ("T5", "Me", now)] {
-            try store.db.query("INSERT INTO issues VALUES (?, ?, ?, 'https://x', NULL, ?, ?, ?)", [id, id, id, who, closed, closed])
+            try store.db.query("INSERT INTO items (id, connection, kind, identifier, title, url, assignee, created_at, closed_at) VALUES (?, 'linear', 'ticket', ?, ?, 'https://x', ?, ?, ?)", [id, id, id, who, closed, closed])
         }
         store.me = "Me"
         store.recordDone()

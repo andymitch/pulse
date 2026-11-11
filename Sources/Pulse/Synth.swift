@@ -136,7 +136,7 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], tasks open: [Pulse
         .filter { changedSince($0, newSince) }
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
                         facts: facts.path, factsOutput: factsOut.path, tasks: tasks.path, tasksOutput: tasksOut.path, since: since.map(iso.string(from:)), sessions: sessions,
-                        projects: db.ids("linear_projects"), people: try db.query("SELECT name FROM users").compactMap { ($0[0] as? String).flatMap { $0.contains("@") ? nil : $0 } })
+                        projects: db.ids("linear_projects"), people: db.peopleNames())
         .write(to: prompt, atomically: true, encoding: .utf8)
 
     let readTasks = { () -> TaskChanges? in
