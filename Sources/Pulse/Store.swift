@@ -30,7 +30,8 @@ final class Store: ObservableObject {
     @Published var workflow: [String: [WorkflowState]] = [:]
     @Published var doubts: [[String: Any]] = []
     @Published var factsVersion = 0
-    private var localBranches: Set<String> = []
+    private var localBranches: [String: String] = [:]
+    private var slugs: [String: String] = [:]
 
     let db: DB
     let dir: URL
@@ -116,14 +117,14 @@ final class Store: ObservableObject {
             do { (linear, workflow) = try await fetchLinearToday(key: key) } catch { errors.append("\(error)") }
         }
         today = mergeTicketsAndPRs(github + linear)
-        localBranches = localBranchNames()
+        (localBranches, slugs) = await Task.detached { (Pulse.localBranches(), repoSlugs()) }.value
         todayFetched = Date()
         fetchedOK = errors.isEmpty
         recordDone()
         return errors.isEmpty ? nil : errors.joined(separator: "\n")
     }
 
-    func localBranchesForDemo(_ branches: Set<String>) { localBranches = branches }
+    func localBranchesForDemo(_ branches: [String: String]) { localBranches = branches }
 
     func refreshTodayIfStale() {
         guard !demoMode else { return }
@@ -291,13 +292,23 @@ final class Store: ObservableObject {
         return statusSymbol(done ? "checkmark.circle.fill" : "circle", done ? NSColor(red: 0.37, green: 0.42, blue: 0.82, alpha: 1) : .labelColor)
     }
 
-    func hasLocalBranch(_ branch: String) -> Bool { localBranches.contains(branch) }
+    func repo(for item: ActionItem) -> String? {
+        pickRepo(pr: item.pr, branch: item.branch, ticket: item.ticket, repos: settings.repos, slugs: slugs, branches: localBranches, chosen: db.decode("ticket_repos") ?? [:])
+    }
+
+    func choose(repo: String, for ticket: String) {
+        var chosen: [String: String] = db.decode("ticket_repos") ?? [:]
+        chosen[ticket] = repo
+        save(chosen, "ticket_repos")
+        objectWillChange.send()
+    }
 
     var lastStart: Launch { db.meta("last_start").flatMap(Launch.init) ?? settings.enabledIDEs.first.map { .ide($0) } ?? .prompt }
     var lastOpen: Launch { db.meta("last_open").flatMap(Launch.init) ?? settings.enabledIDEs.first.map { .ide($0) } ?? .linear }
 
     func launch(_ choice: Launch, item: ActionItem) async {
         guard let ticket = item.ticket, let branch = item.branch else { return }
+        let repo = repo(for: item)
         try? db.setMeta(item.started ? "last_open" : "last_start", choice.rawValue)
         objectWillChange.send()
         do {
@@ -308,18 +319,19 @@ final class Store: ObservableObject {
                 if let pr = item.pr { open(pr) }
             case .prompt:
                 guard let key = linearKey() else { return }
-                let ctx = try await ticketContext(key: key, ticket: ticket, branch: branch)
+                let ctx = try await ticketContext(key: key, ticket: ticket, branch: branch, repo: repo)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(ctx.prompt, forType: .string)
             case .ide(let ide) where item.started:
-                let path = try await Task.detached { try worktree(for: branch, ticket: ticket) }.value
-                localBranches.insert(branch)
+                guard let repo else { return }
+                let path = try await Task.detached { try worktree(for: branch, ticket: ticket, repo: repo) }.value
+                localBranches[branch] = repo
                 try openInIDE(ide, path: path)
             case .ide, .agent:
-                guard let key = linearKey() else { return }
-                let ctx = try await ticketContext(key: key, ticket: ticket, branch: branch)
-                let path = try await Task.detached { try worktree(for: branch, ticket: ticket) }.value
-                localBranches.insert(branch)
+                guard let key = linearKey(), let repo else { return }
+                let ctx = try await ticketContext(key: key, ticket: ticket, branch: branch, repo: repo)
+                let path = try await Task.detached { try worktree(for: branch, ticket: ticket, repo: repo) }.value
+                localBranches[branch] = repo
                 if let state = ctx.startedStateID { try await moveIssue(key: key, issueID: ctx.issueID, stateID: state) }
                 if let i = today.firstIndex(where: { $0.id == item.id }) {
                     today[i].started = true
@@ -344,7 +356,9 @@ final class Store: ObservableObject {
     }
 
     func startSession(_ agent: Agent, task: PulseTask) {
-        do { try openAgentInTerminal(agent, path: settings.codeReady ? settings.repo : NSHomeDirectory(), promptFile: writePrompt(taskPrompt(task), name: "task-\(task.id)")) } catch { lastError = "\(error)" }
+        let slug = githubSlug(task.url)
+        let repo = settings.repos.first { slug != nil && slugs[$0] == slug } ?? settings.repos.first ?? NSHomeDirectory()
+        do { try openAgentInTerminal(agent, path: repo, promptFile: writePrompt(taskPrompt(task), name: "task-\(task.id)")) } catch { lastError = "\(error)" }
     }
 
     func refreshAll() async {

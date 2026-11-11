@@ -108,10 +108,9 @@ struct Settings: Codable, Equatable {
 
     var githubAccount: String { connections.github?.account ?? "" }
     var githubOrg: String { connections.github?.org ?? "" }
-    var repo: String { expand(connections.code?.repo ?? "") }
-    var repoName: String { URL(fileURLWithPath: repo).lastPathComponent }
+    var repos: [String] { (connections.code?.repos ?? []).filter { !$0.isEmpty }.map(expand) }
     var worktrees: String { expand(connections.code?.worktrees ?? "") }
-    var codeReady: Bool { !(connections.code?.repo ?? "").isEmpty }
+    var codeReady: Bool { !repos.isEmpty }
     var enabledAgents: [Agent] { agents.filter(\.enabled) }
     var enabledIDEs: [IDE] { ides.filter(\.installed) }
 }

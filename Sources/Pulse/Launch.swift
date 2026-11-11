@@ -83,36 +83,56 @@ func shell(_ command: String) throws -> String {
 
 func quoted(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
+func repoName(_ path: String) -> String { URL(fileURLWithPath: path).lastPathComponent }
+
+func githubSlug(_ url: String) -> String? {
+    guard let r = url.range(of: #"github\.com[:/]([^/\s]+/[^/\s]+?)(\.git)?(/|$)"#, options: .regularExpression) else { return nil }
+    return url[r].replacingOccurrences(of: #"^github\.com[:/]|(\.git)?/?$"#, with: "", options: .regularExpression).lowercased()
+}
+
+func repoSlugs() -> [String: String] {
+    Dictionary(uniqueKeysWithValues: settings.repos.compactMap { repo in
+        (try? shell("git -C \(quoted(repo)) remote get-url origin")).flatMap(githubSlug).map { (repo, $0) }
+    })
+}
+
 func worktrees() -> [String: String] {
-    guard settings.codeReady else { return [:] }
-    let out = (try? shell("git -C \(quoted(settings.repo)) worktree list --porcelain")) ?? ""
     var result: [String: String] = [:]
-    var path: String?
-    for line in out.split(separator: "\n") {
-        if line.hasPrefix("worktree ") { path = String(line.dropFirst(9)) }
-        if line.hasPrefix("branch refs/heads/"), let path { result[String(line.dropFirst(18))] = path }
+    for repo in settings.repos {
+        var path: String?
+        for line in ((try? shell("git -C \(quoted(repo)) worktree list --porcelain")) ?? "").split(separator: "\n") {
+            if line.hasPrefix("worktree ") { path = String(line.dropFirst(9)) }
+            if line.hasPrefix("branch refs/heads/"), let path { result[String(line.dropFirst(18))] = path }
+        }
     }
     return result
 }
 
-func localBranchNames() -> Set<String> {
-    guard settings.codeReady else { return [] }
-    let out = (try? shell("git -C \(quoted(settings.repo)) for-each-ref --format='%(refname:short)' refs/heads")) ?? ""
-    return Set(out.split(separator: "\n").map(String.init))
+func localBranches() -> [String: String] {
+    var result: [String: String] = [:]
+    for repo in settings.repos.reversed() {
+        for branch in ((try? shell("git -C \(quoted(repo)) for-each-ref --format='%(refname:short)' refs/heads")) ?? "").split(separator: "\n") { result[String(branch)] = repo }
+    }
+    return result
 }
 
-func worktree(for branch: String, ticket: String) throws -> String {
-    guard settings.codeReady else { throw SyncError(description: "Set the repository path in Pulse settings first.") }
+func pickRepo(pr: URL?, branch: String?, ticket: String?, repos: [String], slugs: [String: String], branches: [String: String], chosen: [String: String]) -> String? {
+    let prSlug = pr.flatMap { githubSlug($0.absoluteString) }
+    return repos.first { prSlug != nil && slugs[$0] == prSlug }
+        ?? branch.flatMap { branches[$0] }.flatMap { b in repos.first { $0 == b } }
+        ?? ticket.flatMap { chosen[$0] }.flatMap { c in repos.first { $0 == c } }
+        ?? repos.first
+}
+
+func worktree(for branch: String, ticket: String, repo: String) throws -> String {
     if let existing = worktrees()[branch] { return existing }
-    let path = "\(settings.worktrees)/\(ticket.lowercased())/\(settings.repoName)"
-    let repo = quoted(settings.repo)
-    let hasBranch = (try? shell("git -C \(repo) rev-parse --verify --quiet refs/heads/\(quoted(branch))")) != nil
-    if hasBranch {
-        try shell("git -C \(repo) worktree add \(quoted(path)) \(quoted(branch))")
+    let path = "\(settings.worktrees)/\(ticket.lowercased())/\(repoName(repo))"
+    let git = "git -C \(quoted(repo))"
+    if (try? shell("\(git) rev-parse --verify --quiet refs/heads/\(quoted(branch))")) != nil {
+        try shell("\(git) worktree add \(quoted(path)) \(quoted(branch))")
     } else {
-        let base = try shell("git -C \(repo) symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        try shell("git -C \(repo) fetch --quiet origin && git -C \(repo) worktree add -b \(quoted(branch)) \(quoted(path)) \(quoted(base))")
+        let base = try shell("\(git) symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main").trimmingCharacters(in: .whitespacesAndNewlines)
+        try shell("\(git) fetch --quiet origin && \(git) worktree add -b \(quoted(branch)) \(quoted(path)) \(quoted(base))")
     }
     return path
 }

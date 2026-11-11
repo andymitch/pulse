@@ -118,9 +118,17 @@ struct SettingsView: View {
 
             if let code = connection(\.code) {
                 Section {
-                    TextField("Repository", text: code.repo, prompt: Text("~/code/app"))
+                    ForEach(code.wrappedValue.repos.indices, id: \.self) { i in
+                        HStack {
+                            TextField("Repository", text: code.repos[i], prompt: Text("~/code/app"))
+                            Button { code.wrappedValue.repos.remove(at: i) } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless)
+                        }
+                    }
+                    Button("Add repository") { code.wrappedValue.repos.append("") }
                     TextField("Worktrees folder", text: code.worktrees)
-                } header: { connectionHeader("Code", nil, \.code, symbol: "chevron.left.forwardslash.chevron.right") }
+                } header: { connectionHeader("Code", nil, \.code, symbol: "chevron.left.forwardslash.chevron.right") } footer: {
+                    note("A ticket starts in the repo its PR or branch is in, else the one you pick under Start, else the first. Its worktrees go in <worktrees folder>/<ticket>/<repo>.")
+                }
             }
 
             if !missing.isEmpty {
@@ -230,7 +238,7 @@ struct SettingsView: View {
             c.linear == nil ? ("Linear", { draft.connections.linear = .init() }) : nil,
             c.slack == nil ? ("Slack", { draft.connections.slack = .init() }) : nil,
             c.mail == nil ? ("Mail", { draft.connections.mail = .init() }) : nil,
-            c.code == nil ? ("Code", { draft.connections.code = .init() }) : nil,
+            c.code == nil ? ("Code", { draft.connections.code = .init(repos: [""]) }) : nil,
         ].compactMap { $0 }
     }
 
@@ -296,7 +304,7 @@ struct SettingsView: View {
         if old.hotkey != new.hotkey { GlobalHotkey.register(new.hotkey) }
     }
 
-    private func syncInputs(_ s: Settings) -> [String] { [s.githubAccount, s.githubOrg, s.repo, "\(s.connections.linear != nil)"] }
+    private func syncInputs(_ s: Settings) -> [String] { [s.githubAccount, s.githubOrg, s.repos.joined(separator: ","), "\(s.connections.linear != nil)"] }
 
     private func syncIfChanged() {
         guard syncInputs(settings) != syncInputs(synced) else { return }

@@ -7,7 +7,7 @@ extension Settings {
         var s = Settings()
         s.connections.github = .init(account: "jane-acme", org: "acmecorp")
         s.connections.linear = .init()
-        s.connections.code = .init(repo: "~/code/acme")
+        s.connections.code = .init(repos: ["~/code/acme"])
         s.connections.slack = .init(channels: [SlackChannel(id: "C1", name: "engineering"), SlackChannel(id: "C2", name: "launch")])
         s.connections.mail = .init()
         s.ides = [.zed, .cursor]
@@ -122,7 +122,7 @@ extension Store {
                        issueID: "4", teamID: "T", state: states[1], priority: 4, since: ago(90)),
         ]
         workflow = ["T": states]
-        localBranchesForDemo(["acme-198-invite-teammates", "acme-205-webhook-retries"])
+        localBranchesForDemo(["acme-198-invite-teammates": "~/code/acme", "acme-205-webhook-retries": "~/code/acme"])
         synthesis = Synthesis(
             focus: [Synthesis.Focus(
                 headline: "Ship self-serve onboarding before the November launch",
