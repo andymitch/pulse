@@ -42,8 +42,8 @@ final class Meetings: ObservableObject {
     private var askedCalendar = false
     private var me: () -> String? = { nil }
     private let calendar = EKEventStore()
-    private let recordings = project.dir.appendingPathComponent("recordings")
-    private let archive = project.dir.appendingPathComponent("meetings")
+    private var recordings: URL { project.dir.appendingPathComponent("recordings") }
+    private var archive: URL { project.dir.appendingPathComponent("meetings") }
 
     func watch(me: @escaping () -> String?) {
         guard !demoMode else { saved = demoMeetings; return }
@@ -182,7 +182,9 @@ final class Meetings: ObservableObject {
     }
 
     private func pending() -> [URL] {
-        let folders = (try? FileManager.default.contentsOfDirectory(at: recordings, includingPropertiesForKeys: nil)) ?? []
+        let folders = Project.all(in: Settings.dir).flatMap { p in
+            (try? FileManager.default.contentsOfDirectory(at: p.dir.appendingPathComponent("recordings"), includingPropertiesForKeys: nil)) ?? []
+        }
         return folders.filter { $0.lastPathComponent != capture?.folder.lastPathComponent }.sorted { $0.path < $1.path }
     }
 
@@ -197,9 +199,10 @@ final class Meetings: ObservableObject {
             var notes: MeetingNotes?
             if spokenWords(transcript) >= 30 { notes = await summarize(meeting, transcript: file, folder: folder) }
             for (label, name) in notes?.speakers ?? [:] { transcript = transcript.replacingOccurrences(of: "] \(label):", with: "] \(name):") }
-            try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+            let meetings = folder.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("meetings")
+            try FileManager.default.createDirectory(at: meetings, withIntermediateDirectories: true)
             try meetingMarkdown(meeting, notes: notes, transcript: transcript)
-                .write(to: archive.appendingPathComponent(folder.lastPathComponent + ".md"), atomically: true, encoding: .utf8)
+                .write(to: meetings.appendingPathComponent(folder.lastPathComponent + ".md"), atomically: true, encoding: .utf8)
         }
         try FileManager.default.removeItem(at: folder)
     }

@@ -7,6 +7,7 @@ struct ContentView: View {
     @ObservedObject var store: Store
     @ObservedObject private var updater = Updater.shared
     @ObservedObject private var meetings = Meetings.shared
+    @ObservedObject private var workspace = Workspace.shared
 
     var body: some View {
         ZStack {
@@ -90,7 +91,7 @@ struct ContentView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-        if !settings.githubAccount.isEmpty { MonthPace(store: store) }
+        if !(store.connections.github?.account ?? "").isEmpty { MonthPace(store: store) }
     }
 
     private var prCounts: [Count] {
@@ -101,6 +102,20 @@ struct ContentView: View {
     private var header: some View {
         HStack {
             Text("Pulse").font(.title3.bold())
+            if workspace.projects.count > 1 {
+                Menu {
+                    ForEach(workspace.projects, id: \.id) { p in
+                        Button { workspace.select(p) } label: {
+                            if p == project { Label(p.name, systemImage: "checkmark") } else { Text(p.name) }
+                        }
+                    }
+                } label: {
+                    Text(project.name)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Switch project")
+            }
             Picker("", selection: $store.page) {
                 ForEach(PulseTab.allCases.filter { ($0 != .meetings || meetings.shown) && ($0 != .trends || !store.metrics.isEmpty) }, id: \.self) { tab in
                     Text(tab.rawValue).tag(tab)
@@ -115,7 +130,7 @@ struct ContentView: View {
                 ProgressView().controlSize(.small)
                 Text("Syncing…").foregroundStyle(.secondary)
             } else if let last = store.lastSync {
-                Text("Synced \(last, format: .relative(presentation: .named))").foregroundStyle(.secondary)
+                Text("Synced \(last, format: .relative(presentation: .named))").foregroundStyle(.secondary).lineLimit(1).fixedSize()
             }
             if updater.installing {
                 ProgressView().controlSize(.small)
@@ -211,7 +226,7 @@ struct MonthPace: View {
     @ObservedObject var store: Store
 
     var body: some View {
-        let (totals, days) = store.myMonth, target = max(settings.connections.github?.monthlyPRTarget ?? 40, 1)
+        let (totals, days) = store.myMonth, target = max(store.connections.github?.monthlyPRTarget ?? 40, 1)
         let done = totals.last ?? 0, expected = Int((Double(target) * Double(totals.count) / Double(days)).rounded())
         Panel(title: "My PRs this month", brand: .github, accessory: {
             Text("\(done) of \(target) · " + (done == expected ? "on pace" : done > expected ? "\(done - expected) ahead of pace" : "\(expected - done) behind pace"))

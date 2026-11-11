@@ -8,7 +8,10 @@ final class Store: ObservableObject {
     @Published var syncing = false
     @Published var lastSync: Date?
     @Published var lastError: String?
-    @Published var hasLinearKey = demoMode || linearKey() != nil
+    @Published var hasLinearKey = false
+    @Published var connections: Connections {
+        didSet { hasLinearKey = demoMode || key() != nil }
+    }
     @Published var selected: Set<String> = []
     @Published var metric = TrendMetric.prs {
         didSet { selected = []; load() }
@@ -41,9 +44,11 @@ final class Store: ObservableObject {
     var buckets: [String] { range.buckets() }
     func label(_ key: String) -> String { range.label(key) }
 
-    init(db: DB, dir: URL) {
+    init(db: DB, dir: URL, connections: Connections = settings.connections) {
         self.db = db
         self.dir = dir
+        self.connections = connections
+        hasLinearKey = demoMode || key() != nil
         lastSync = db.meta("last_sync").flatMap(iso.date(from:))
         lastError = db.meta("last_error").flatMap { $0.isEmpty ? nil : $0 }
         let file = dir.appendingPathComponent("synthesis.json")
@@ -63,7 +68,7 @@ final class Store: ObservableObject {
             let year = range == .year ? trends : try db.trends(since: TrendRange.year.buckets()[0], range: .year)
             colorOrder = ranked(year)
             me = db.meta("me")
-            myMonth = monthPace(db.merged(since: Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date(), author: settings.githubAccount))
+            myMonth = monthPace(db.merged(since: Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date(), author: connections.github?.account ?? ""))
         } catch {
             lastError = "\(error)"
         }
@@ -79,9 +84,13 @@ final class Store: ObservableObject {
         return totals.keys.sorted { (totals[$0]!, $1) > (totals[$1]!, $0) }
     }
 
-    var metrics: [TrendMetric] { (settings.connections.github != nil ? [.prs] : []) + (hasLinearKey || (settings.connections.github?.issues ?? .off) != .off ? [.closed] : []) }
+    var metrics: [TrendMetric] { (connections.github != nil ? [.prs] : []) + (hasLinearKey || (connections.github?.issues ?? .off) != .off ? [.closed] : []) }
 
-    var meInTrends: String? { metric == .prs ? (settings.githubAccount.isEmpty ? nil : settings.githubAccount) : me }
+    func key() -> String? { linearKey(in: dir, connections: connections) }
+
+    private func token() throws -> String { try ghToken(connections.github?.account ?? "") }
+
+    var meInTrends: String? { metric == .prs ? connections.github.flatMap { $0.account.isEmpty ? nil : $0.account } : me }
 
     func includes(_ person: String) -> Bool { selected.isEmpty || selected.contains(person) }
 
@@ -90,8 +99,8 @@ final class Store: ObservableObject {
         syncing = true
         var message = ""
         do {
-            if settings.connections.github != nil { try await syncGitHub(db, token: try ghToken()) }
-            if let key = linearKey() { try await syncLinear(db, key: key) }
+            if let github = connections.github { try await syncGitHub(db, token: try token(), github: github) }
+            if let key = key() { try await syncLinear(db, key: key) }
             try db.linkItems()
         } catch {
             message = "\(error)"
@@ -110,13 +119,14 @@ final class Store: ObservableObject {
         if loadedDay != day { loadDay() }
         var errors: [String] = []
         var github: [ActionItem] = [], linear: [ActionItem] = []
-        if settings.connections.github != nil {
-            do { github = try await fetchGitHubToday(token: try ghToken()) } catch { errors.append("\(error)") }
+        if let connection = connections.github {
+            do { github = try await fetchGitHubToday(token: try token(), github: connection) } catch { errors.append("\(error)") }
         }
-        if let key = linearKey() {
+        if let key = key() {
             do { (linear, workflow) = try await fetchLinearToday(key: key) } catch { errors.append("\(error)") }
         }
-        (localBranches, slugs) = await Task.detached { (Pulse.localBranches(), repoSlugs()) }.value
+        let repos = connections.repos
+        (localBranches, slugs) = await Task.detached { (Pulse.localBranches(repos), repoSlugs(repos)) }.value
         today = mergeTicketsAndPRs(github + linear).map { item in
             var item = item
             if item.issueID == nil, item.kind == .ticket, let branch = item.branch, localBranches[branch] != nil { item.started = true }
@@ -136,7 +146,7 @@ final class Store: ObservableObject {
     }
 
     func markRead(_ id: String) async {
-        guard let key = linearKey() else { return }
+        guard let key = key() else { return }
         do {
             try await markNotificationRead(key: key, id: id)
             today.removeAll { $0.notificationID == id }
@@ -242,7 +252,7 @@ final class Store: ObservableObject {
         let logged = Set(log.map(\.id))
         log += rows.filter { done.contains($0.id) && !logged.contains($0.id) }
             .map { DoneItem(id: $0.id, title: $0.item.title, url: $0.item.url, source: $0.item.reason, day: doneIDs[$0.id] ?? day) }
-        log += db.closedTickets(since: thisMonday, assignees: [me, settings.githubAccount].compactMap { $0 }.filter { !$0.isEmpty }).filter { !logged.contains($0.id) && !shown.contains($0.id) }
+        log += db.closedTickets(since: thisMonday, assignees: [me, connections.github?.account].compactMap { $0 }.filter { !$0.isEmpty }).filter { !logged.contains($0.id) && !shown.contains($0.id) }
         guard log != doneThisWeek else { return }
         doneThisWeek = log
         save(log, weekKey)
@@ -277,7 +287,7 @@ final class Store: ObservableObject {
     }
 
     func setState(_ state: WorkflowState, for item: ActionItem) async {
-        guard let key = linearKey(), let issue = item.issueID else { return }
+        guard let key = key(), let issue = item.issueID else { return }
         do {
             try await moveIssue(key: key, issueID: issue, stateID: state.id)
             if let i = today.firstIndex(where: { $0.id == item.id }) {
@@ -297,7 +307,7 @@ final class Store: ObservableObject {
     }
 
     func repo(for item: ActionItem) -> String? {
-        pickRepo(pr: item.pr ?? (item.issueID == nil ? item.url : nil), branch: item.branch, ticket: item.ticket, repos: settings.repos, slugs: slugs, branches: localBranches, chosen: db.decode("ticket_repos") ?? [:])
+        pickRepo(pr: item.pr ?? (item.issueID == nil ? item.url : nil), branch: item.branch, ticket: item.ticket, repos: connections.repos, slugs: slugs, branches: localBranches, chosen: db.decode("ticket_repos") ?? [:])
     }
 
     func choose(repo: String, for ticket: String) {
@@ -327,15 +337,17 @@ final class Store: ObservableObject {
                 NSPasteboard.general.setString(ctx.prompt, forType: .string)
             case .ide(let ide) where item.started:
                 guard let repo else { return }
-                let path = try await Task.detached { try worktree(for: branch, ticket: ticket, repo: repo) }.value
+                let code = connections
+                let path = try await Task.detached { try worktree(for: branch, ticket: ticket, repo: repo, in: code) }.value
                 localBranches[branch] = repo
                 try openInIDE(ide, path: path)
             case .ide, .agent:
                 guard let repo else { return }
                 let ctx = try await context(item, ticket: ticket, branch: branch, repo: repo)
-                let path = try await Task.detached { try worktree(for: branch, ticket: ticket, repo: repo) }.value
+                let code = connections
+                let path = try await Task.detached { try worktree(for: branch, ticket: ticket, repo: repo, in: code) }.value
                 localBranches[branch] = repo
-                if let state = ctx.startedStateID, let key = linearKey() { try await moveIssue(key: key, issueID: ctx.issueID, stateID: state) }
+                if let state = ctx.startedStateID, let key = key() { try await moveIssue(key: key, issueID: ctx.issueID, stateID: state) }
                 if let i = today.firstIndex(where: { $0.id == item.id }) {
                     today[i].started = true
                     today[i].state = workflow[item.teamID ?? ""]?.first { $0.id == ctx.startedStateID } ?? today[i].state
@@ -352,8 +364,8 @@ final class Store: ObservableObject {
     }
 
     private func context(_ item: ActionItem, ticket: String, branch: String, repo: String?) async throws -> TicketContext {
-        if item.issueID == nil { return try await githubIssueContext(token: try ghToken(), url: item.url, branch: branch, repo: repo) }
-        guard let key = linearKey() else { throw SyncError(description: "Add your Linear key in Settings first.") }
+        if item.issueID == nil { return try await githubIssueContext(token: try token(), url: item.url, branch: branch, repo: repo) }
+        guard let key = key() else { throw SyncError(description: "Add your Linear key in Settings first.") }
         return try await ticketContext(key: key, ticket: ticket, branch: branch, repo: repo)
     }
 
@@ -366,7 +378,7 @@ final class Store: ObservableObject {
 
     func startSession(_ agent: Agent, task: PulseTask) {
         let slug = githubSlug(task.url)
-        let repo = settings.repos.first { slug != nil && slugs[$0] == slug } ?? settings.repos.first ?? NSHomeDirectory()
+        let repo = connections.repos.first { slug != nil && slugs[$0] == slug } ?? connections.repos.first ?? NSHomeDirectory()
         do { try openAgentInTerminal(agent, path: repo, promptFile: writePrompt(taskPrompt(task), name: "task-\(task.id)")) } catch { lastError = "\(error)" }
     }
 
@@ -379,13 +391,15 @@ final class Store: ObservableObject {
         guard !synthesizing, !demoMode else { return }
         synthesizing = true
         synthesisError = nil
-        do {
-            synthesis = try await runSynthesis(dir: dir, db: db, candidates: today, tasks: openTasks, me: me ?? "me") { [weak self] in self?.applyTasks($0) }
-            synthesizedAt = Date()
-            reloadFacts()
-            recordDone()
-        } catch {
-            synthesisError = "\(error)"
+        await Workspace.shared.brief { [self] in
+            do {
+                synthesis = try await runSynthesis(dir: dir, db: db, connections: connections, candidates: today, tasks: openTasks, me: me ?? "me") { [weak self] in self?.applyTasks($0) }
+                synthesizedAt = Date()
+                reloadFacts()
+                recordDone()
+            } catch {
+                synthesisError = "\(error)"
+            }
         }
         synthesizing = false
     }
@@ -395,10 +409,14 @@ final class Store: ObservableObject {
         return stale && Calendar.current.component(.hour, from: Date()) >= settings.briefingHour
     }
 
+    private var hourly: Task<Void, Never>?
+
+    func stopHourlySync() { hourly?.cancel() }
+
     func startHourlySync() {
         guard !demoMode else { return }
-        Task {
-            while true {
+        hourly = Task { [weak self] in
+            while let self, !Task.isCancelled {
                 await refresh()
                 Updater.shared.checkIfDue()
                 if synthesisDue {

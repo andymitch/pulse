@@ -8,6 +8,9 @@ struct SettingsView: View {
     @State private var orgs: [String]?
     @State private var replacingKey = false
     @State private var synced = settings
+    @State private var newProject = ""
+    @State private var removing: Project?
+    @ObservedObject private var workspace = Workspace.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,10 +32,42 @@ struct SettingsView: View {
             if !Task.isCancelled { syncIfChanged() }
         }
         .onDisappear(perform: syncIfChanged)
+        .onChange(of: workspace.projects) { if !workspace.projects.contains(where: { $0.id == draft.defaultProject }) { draft.defaultProject = "" } }
     }
 
     private var form: some View {
         Form {
+            Section {
+                ForEach(workspace.projects, id: \.id) { p in
+                    HStack {
+                        if p == project { Image(systemName: "checkmark").foregroundStyle(.secondary).frame(width: 14) } else { Color.clear.frame(width: 14) }
+                        TextField("Name", text: Binding(get: { p.name }, set: { try? workspace.rename(p, to: $0) }))
+                        if p != project { Button("Open") { workspace.select(p) }.buttonStyle(.link) }
+                        if workspace.projects.count > 1 {
+                            Button { removing = p } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless).help("Remove \(p.name)")
+                        }
+                    }
+                }
+                HStack {
+                    TextField("New project", text: $newProject, prompt: Text("Name"))
+                    Button("Add") {
+                        do { try workspace.add(newProject) } catch { store.lastError = "\(error)" }
+                        newProject = ""
+                    }
+                    .disabled(newProject.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } header: { header("Projects", nil, symbol: "square.stack") } footer: {
+                note("Each project keeps its own connections, facts, tasks, meetings and briefing, and nothing crosses between them. The connections below belong to \(project.name).")
+            }
+            .confirmationDialog("Remove \(removing?.name ?? "")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+                Button("Move to Trash", role: .destructive) {
+                    if let removing { do { try workspace.remove(removing) } catch { store.lastError = "\(error)" } }
+                    removing = nil
+                }
+            } message: {
+                Text("Its folder, with its facts, tasks, meetings and keys, goes to the Trash.")
+            }
+
             if let github = connection(\.github) {
                 Section {
                     if let accounts, accounts.isEmpty {
@@ -204,6 +239,10 @@ struct SettingsView: View {
                     Text("Let Claude Code, pi and other MCP clients on this Mac read your meetings, briefing and stats, and update tasks and meetings. Changes show in Pulse at once.")
                 }
                 if draft.agentAccess {
+                    Picker("Default project", selection: $draft.defaultProject) {
+                        Text("None, always ask").tag("")
+                        ForEach(workspace.projects, id: \.id) { Text($0.name).tag($0.id) }
+                    }
                     CopyRow(title: "Claude Code", text: "claude mcp add pulse -- \(mcpCommand) --mcp")
                     CopyRow(title: "pi and other clients", text: #"{"pulse": {"command": "\#(mcpCommand)", "args": ["--mcp"]}}"#)
                 }
@@ -304,6 +343,7 @@ struct SettingsView: View {
         do {
             try new.save()
             settings = new
+            store.connections = new.connections
             store.objectWillChange.send()
         } catch {
             store.lastError = "\(error)"

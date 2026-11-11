@@ -9,16 +9,15 @@ private let log = Logger(subsystem: "com.andymitch.pulse", category: "popover")
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
-    private var store: Store!
+    private var store: Store { Workspace.shared.store! }
     private var badge: AnyCancellable?
+    private var switching: AnyCancellable?
     private var recordingIcon: AnyCancellable?
     private var anchor: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let dir = project.dir
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            store = Store(db: try DB(path: dir.appendingPathComponent("pulse.db").path), dir: dir)
+            try Workspace.shared.start()
         } catch {
             NSAlert(error: error).runModal()
             NSApp.terminate(nil)
@@ -45,11 +44,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        badge = store.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in
+        switching = Workspace.shared.$store.compactMap { $0 }.receive(on: RunLoop.main).sink { [weak self] store in
             guard let self else { return }
-            let n = self.store.toDoCount
-            self.statusItem.button?.title = n > 0 ? "\(n)" : ""
-            self.statusItem.button?.imagePosition = .imageLeading
+            self.badge = store.objectWillChange.prepend(()).receive(on: RunLoop.main).sink { [weak self] _ in
+                let n = store.toDoCount
+                self?.statusItem.button?.title = n > 0 ? "\(n)" : ""
+                self?.statusItem.button?.imagePosition = .imageLeading
+            }
+            self.popover.contentViewController = NSHostingController(rootView: ContentView(store: store))
         }
 
         recordingIcon = Meetings.shared.$recording.sink { [weak self] meeting in
@@ -64,22 +66,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         Meetings.shared.watch { [weak self] in self?.store.me }
         let center = DistributedNotificationCenter.default()
-        center.addObserver(forName: pulseChanged, object: project.id, queue: .main) { [weak self] _ in
+        center.addObserver(forName: pulseChanged, object: nil, queue: .main) { note in
             MainActor.assumeIsolated {
-                self?.store.reloadDay()
+                Workspace.shared.store(for: note.object as? String ?? "")?.reloadDay()
                 Meetings.shared.reload()
             }
         }
-        center.addObserver(forName: pulseRegenerate, object: project.id, queue: .main) { [weak self] _ in
-            Task { @MainActor in await self?.store.synthesize() }
+        center.addObserver(forName: pulseRegenerate, object: nil, queue: .main) { note in
+            let id = note.object as? String ?? ""
+            Task { @MainActor in await Workspace.shared.store(for: id)?.synthesize() }
         }
 
-        popover.contentViewController = NSHostingController(rootView: ContentView(store: store))
         popover.behavior = .transient
         popover.delegate = self
         GlobalHotkey.action = { [weak self] in self?.toggle() }
         GlobalHotkey.register(settings.hotkey)
-        store.startHourlySync()
     }
 
     @objc private func clicked(_ sender: NSStatusBarButton) {
