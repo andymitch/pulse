@@ -1,5 +1,31 @@
 import Foundation
 
+struct Connections: Codable, Equatable {
+    struct GitHub: Codable, Equatable { var account = "", org = "", monthlyPRTarget = 40 }
+    struct Linear: Codable, Equatable {}
+    struct Code: Codable, Equatable { var repo = "", worktrees = "~/worktrees" }
+    struct Slack: Codable, Equatable { var channels: [SlackChannel] = [] }
+    struct Mail: Codable, Equatable { var days = 3 }
+    var github: GitHub?
+    var linear: Linear?
+    var code: Code?
+    var slack: Slack?
+    var mail: Mail?
+
+    init() {}
+
+    init(flat f: [String: Any], linear hasKey: Bool) {
+        let text = { (key: String) in f[key] as? String ?? "" }
+        github = GitHub(account: text("githubAccount"), org: text("githubOrg"), monthlyPRTarget: f["monthlyPRTarget"] as? Int ?? 40)
+        linear = hasKey ? Linear() : nil
+        code = text("repoPath").isEmpty ? nil : Code(repo: text("repoPath"), worktrees: f["worktreeRoot"] as? String ?? "~/worktrees")
+        slack = f["slack"] as? Bool ?? true ? Slack(channels: (f["slackChannels"] as? [[String: String]] ?? []).compactMap { c in c["id"].flatMap { id in c["name"].map { SlackChannel(id: id, name: $0) } } }) : nil
+        mail = f["mail"] as? Bool ?? false ? Mail(days: f["mailDays"] as? Int ?? 3) : nil
+    }
+
+    static let flatKeys = ["githubOrg", "githubAccount", "monthlyPRTarget", "repoPath", "worktreeRoot", "slack", "slackChannels", "mail", "mailDays"]
+}
+
 struct Project: Equatable {
     let id: String
     let root: URL
@@ -10,7 +36,19 @@ struct Project: Equatable {
     var name: String { (fields?["name"] as? String) ?? id }
     var fields: [String: Any]? { (try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
 
-    static let keys = ["githubOrg", "githubAccount", "monthlyPRTarget", "repoPath", "worktreeRoot", "slack", "slackChannels", "mail", "mailDays"]
+    var connections: Connections {
+        guard let fields else { return Connections() }
+        if let saved = fields["connections"], let data = try? JSONSerialization.data(withJSONObject: saved),
+           let decoded = try? JSONDecoder().decode(Connections.self, from: data) { return decoded }
+        return Connections(flat: fields, linear: FileManager.default.fileExists(atPath: dir.appendingPathComponent("linear-key").path))
+    }
+
+    func save(_ connections: Connections) throws {
+        var fields = (self.fields ?? ["name": name]).filter { !Connections.flatKeys.contains($0.key) }
+        fields["connections"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(connections))
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: fields, options: [.prettyPrinted, .sortedKeys]).write(to: file)
+    }
     private static let globalFiles: Set<String> = ["settings.json", "Voice", "projects", ".DS_Store"]
 
     static func all(in root: URL) -> [Project] {
@@ -29,7 +67,7 @@ struct Project: Equatable {
         return (global?["defaultProject"] as? String).flatMap { id in projects.first { $0.id == id } }
     }
 
-    var folders: [String] { ["repoPath", "worktreeRoot"].compactMap { fields?[$0] as? String }.filter { !$0.isEmpty }.map(expand) }
+    var folders: [String] { [connections.code?.repo, connections.code?.worktrees].compactMap { $0 }.filter { !$0.isEmpty }.map(expand) }
 
     static func migrate(_ root: URL, legacyLinearKey: () -> Data? = { nil }) throws {
         let fm = FileManager.default
@@ -46,9 +84,9 @@ struct Project: Equatable {
         }
         let key = project.dir.appendingPathComponent("linear-key")
         if !fm.fileExists(atPath: key.path), let legacy = legacyLinearKey() { try writePrivate(legacy, to: key) }
-        var fields: [String: Any] = ["name": id == "default" ? "Default" : id.prefix(1).uppercased() + id.dropFirst()]
-        for k in keys { fields[k] = global.removeValue(forKey: k) }
-        try JSONSerialization.data(withJSONObject: fields, options: [.prettyPrinted, .sortedKeys]).write(to: project.file)
+        try JSONSerialization.data(withJSONObject: ["name": id == "default" ? "Default" : id.prefix(1).uppercased() + id.dropFirst()]).write(to: project.file)
+        try project.save(Connections(flat: global, linear: fm.fileExists(atPath: key.path)))
+        for k in Connections.flatKeys { global.removeValue(forKey: k) }
         global["defaultProject"] = id
         try JSONSerialization.data(withJSONObject: global, options: [.prettyPrinted, .sortedKeys]).write(to: settingsFile)
         guard fm.fileExists(atPath: project.db.path) else { return }

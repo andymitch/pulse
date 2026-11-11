@@ -78,6 +78,8 @@ final class Store: ObservableObject {
         return totals.keys.sorted { (totals[$0]!, $1) > (totals[$1]!, $0) }
     }
 
+    var metrics: [TrendMetric] { (settings.connections.github != nil ? [.prs] : []) + (hasLinearKey ? [.closed] : []) }
+
     var meInTrends: String? { metric == .prs ? (settings.githubAccount.isEmpty ? nil : settings.githubAccount) : me }
 
     func includes(_ person: String) -> Bool { selected.isEmpty || selected.contains(person) }
@@ -87,7 +89,7 @@ final class Store: ObservableObject {
         syncing = true
         var message = ""
         do {
-            try await syncGitHub(db, token: try ghToken())
+            if settings.connections.github != nil { try await syncGitHub(db, token: try ghToken()) }
             if let key = linearKey() { try await syncLinear(db, key: key) }
         } catch {
             message = "\(error)"
@@ -106,7 +108,9 @@ final class Store: ObservableObject {
         if loadedDay != day { loadDay() }
         var errors: [String] = []
         var github: [ActionItem] = [], linear: [ActionItem] = []
-        do { github = try await fetchGitHubToday(token: try ghToken()) } catch { errors.append("\(error)") }
+        if settings.connections.github != nil {
+            do { github = try await fetchGitHubToday(token: try ghToken()) } catch { errors.append("\(error)") }
+        }
         if let key = linearKey() {
             do { (linear, workflow) = try await fetchLinearToday(key: key) } catch { errors.append("\(error)") }
         }

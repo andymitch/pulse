@@ -61,8 +61,8 @@ func selfTest() throws {
     check(Version("v2-beta.1")! > Version("v1.3")!, "a beta of the next major beats the current stable")
     check(!(Version("1.0.0")! < Version("v1")!), "1.0.0 equals v1")
     check(Version("4.0.0-beta.4")! < Version("4-beta.5")!, "old X.Y.Z versions compare with tag-style ones")
-    let migrated = Settings.load(Data(#"{"meetings": ["superwhisper", "otter"], "superwhisperFolder": "~/x", "githubOrg": "acme"}"#.utf8))
-    check(migrated.recordMeetings && migrated.githubOrg == "acme", "Superwhisper setting becomes recording, other settings kept")
+    let migrated = Settings.load(Data(#"{"meetings": ["superwhisper", "otter"], "superwhisperFolder": "~/x", "briefingHour": 9}"#.utf8))
+    check(migrated.recordMeetings && migrated.briefingHour == 9, "Superwhisper setting becomes recording, other settings kept")
     let whisper = "com.superduper.superwhisper"
     check(callName(micUsers: [whisper], event: true, meetOpen: false) == nil && callName(micUsers: [whisper], event: false, meetOpen: false) == nil
           && callName(micUsers: ["com.tinyspeck.slackmacgap.helper"], event: false, meetOpen: false) == "Slack huddle"
@@ -301,8 +301,17 @@ func selfTest() throws {
     let refreshed = try String(contentsOfFile: again[0], encoding: .utf8)
     check(again.first.map { URL(fileURLWithPath: $0).lastPathComponent } == "pi-old.md" && refreshed.contains("invite page"),
           "a session picked up again gets a fresh digest")
+    let savedSettings = settings
+    settings.connections = Connections()
+    settings.connections.github = .init()
+    let githubOnly = synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasks: "t.json", tasksOutput: "u.json", since: nil)
+    check(!githubOnly.contains("Linear") && !githubOnly.contains("Slack") && githubOnly.contains("open work right now, from GitHub.") && githubOnly.contains("Gather:"),
+          "a project with only GitHub gets a briefing prompt that never mentions Linear or Slack")
+    settings.connections.linear = .init()
+    settings.connections.slack = .init()
     let prompt = { (since: String?) in synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasks: "t.json", tasksOutput: "u.json", since: since) }
     let later = prompt("2026-11-03T22:00:00Z"), first = prompt(nil)
+    settings = savedSettings
     check(later.contains("documents created since 2026-11-03T22:00:00Z") && later.contains("gather only what's new") && !later.contains("in the last 14 days")
           && first.contains("documents created in the last 14 days") && later.range(of: "u.json")!.lowerBound < later.range(of: "n.json")!.lowerBound && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
           "after a run the briefing reads only what's new, a first run reads 14 days, and tasks are written first, then memory, then the briefing")
@@ -391,7 +400,7 @@ func selfTest() throws {
     try Data("meeting".utf8).write(to: v4.appendingPathComponent("meetings/1.md"))
     try Project.migrate(v4, legacyLinearKey: { Data("lin_key".utf8) })
     let acme = Project(id: "acme", root: v4)
-    let global = Settings.load(try? Data(contentsOf: v4.appendingPathComponent("settings.json")), project: try? Data(contentsOf: acme.file))
+    let global = Settings.load(try? Data(contentsOf: v4.appendingPathComponent("settings.json")), connections: acme.connections)
     let raw = String(decoding: (try? Data(contentsOf: v4.appendingPathComponent("settings.json"))) ?? Data(), as: UTF8.self)
     let movedWorkspace = try DB(path: acme.db.path).meta("linear_workspace")
     check(Project.all(in: v4) == [acme] && acme.name == "Acme" && movedWorkspace == "acme"
@@ -402,6 +411,18 @@ func selfTest() throws {
     check(global.githubOrg == "acmecorp" && global.briefingHour == 6 && global.defaultProject == "acme" && !raw.contains("githubOrg"),
           "source settings move into the project, and the rest stay global with the project as the default")
     check((try? DB(path: v4.appendingPathComponent("pulse.db").path)) == nil, "an older Pulse can't open the moved database and start empty")
+    check(acme.connections.github?.org == "acmecorp" && acme.connections.code?.repo == "~/code/acme" && acme.connections.linear != nil
+          && acme.connections.slack != nil && acme.connections.mail == nil && acme.fields?["githubOrg"] == nil,
+          "the project's settings become connections: GitHub, Code, Linear for the saved key, Slack as it was on, and no Mail")
+    let beta1 = Project(id: "beta1", root: v4)
+    try FileManager.default.createDirectory(at: beta1.dir, withIntermediateDirectories: true)
+    try Data(#"{"name": "Beta", "githubAccount": "me", "githubOrg": "", "repoPath": "", "slack": false, "mail": true, "mailDays": 5}"#.utf8).write(to: beta1.file)
+    let beta1Connections = beta1.connections
+    try beta1.save(beta1Connections)
+    check(beta1Connections.github?.account == "me" && beta1Connections.code == nil && beta1Connections.linear == nil && beta1Connections.slack == nil && beta1Connections.mail?.days == 5
+          && beta1.connections == beta1Connections && beta1.name == "Beta" && beta1.fields?["mailDays"] == nil,
+          "a v5-beta.1 project's flat settings become connections, and saving drops the old keys and keeps the name")
+    try FileManager.default.removeItem(at: beta1.dir)
     try Project.migrate(v4)
     check(Project.all(in: v4) == [acme] && Project.resolve(in: v4)?.id == "acme" && Project.resolve(in: v4, asked: "nope") == nil
           && Project.resolve(in: v4, folder: expand("~/code/acme/web")) == acme && Project.resolve(in: v4, asked: "acme", folder: "/elsewhere") == acme,

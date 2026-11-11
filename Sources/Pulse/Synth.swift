@@ -24,32 +24,34 @@ func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
 
 func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem],
                      facts: String, factsOutput: String, tasks: String, tasksOutput: String, since: String?, sessions: [String] = [], projects: [String] = [], people: [String] = []) -> String {
-    let s = settings
-    var who = ["Linear \"\(me)\""]
-    if s.slack { who.append("the Slack user your Slack tools are logged in as") }
+    let s = settings, c = settings.connections
+    var who = c.linear != nil ? ["Linear \"\(me)\""] : []
+    if c.slack != nil { who.append("the Slack user your Slack tools are logged in as") }
     let window = since.map { "since \($0)" } ?? "in the last 14 days"
     var gather: [String] = []
-    gather.append("Linear: the active cycles and what is in them right now, project and initiative status updates posted \(window), and documents created \(window) (meeting minutes).")
-    if s.slack {
-        let channels = s.slackChannels.map { "#\($0.name) (\($0.id))" }.joined(separator: ", ")
+    if c.linear != nil { gather.append("Linear: the active cycles and what is in them right now, project and initiative status updates posted \(window), and documents created \(window) (meeting minutes).") }
+    if let slack = c.slack {
+        let channels = slack.channels.map { "#\($0.name) (\($0.id))" }.joined(separator: ", ")
         gather.append("Slack messages \(window) in " + (channels.isEmpty ? "the up to 12 busiest channels \(me) is a member of, skipping channels that are mostly bots or alerts." : "these channels: \(channels)."))
         gather.append("Slack messages that need \(me): mentions of them and DMs to them from the last 7 days, keeping only those not yet answered.")
     }
-    if let mail { gather.append("Email from the last \(s.mailDays) days, as JSON with a url for each message: \(mail). Keep only email that needs \(me) to reply or act; ignore newsletters and notifications.") }
+    if let mail { gather.append("Email from the last \(c.mail?.days ?? 3) days, as JSON with a url for each message: \(mail). Keep only email that needs \(me) to reply or act; ignore newsletters and notifications.") }
     if s.recordMeetings { gather.append("Meetings Pulse recorded \(window), each a file with its summary, decisions, important points and the transcript, newest first: \(transcripts.isEmpty ? "none" : transcripts.joined(separator: ", ")).") }
     if !sessions.isEmpty { gather.append("\(me)'s sessions with coding agents (pi, Claude Code) in the \(s.repoName) repo, newest first, each a file with the folder it ran in and the conversation without tool output: \(sessions.joined(separator: ", ")). Use them for what was decided, done and left open; skip the mechanics of the work, and anything personal that isn't about the work, such as a job search, a résumé or health.") }
-    gather.append("\(me)'s open work right now, from GitHub and Linear. Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
-    let kinds = ["github", "linear"] + (s.slack ? ["slack"] : []) + (mail != nil ? ["mail"] : []) + ["meeting", "doc"] + (sessions.isEmpty ? [] : ["session"])
+    gather.append("\(me)'s open work right now, from \([c.github != nil ? "GitHub" : nil, c.linear != nil ? "Linear" : nil].compactMap { $0 }.joined(separator: " and ")). Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
+    let on: [(String, Bool)] = [("github", c.github != nil), ("linear", c.linear != nil), ("slack", c.slack != nil), ("mail", mail != nil), ("meeting", true), ("doc", true), ("session", !sessions.isEmpty)]
+    let kinds = on.filter(\.1).map(\.0)
+    let tools = (c.linear != nil ? ["Linear"] : []) + (c.slack != nil ? ["Slack"] : [])
     let kindList = kinds.map { "\"\($0)\"" }.joined(separator: " | ")
 
     return """
-    You are updating Pulse, the context nexus for \(me)'s work, and writing \(me)'s morning briefing from it. Today is \(today). \(me) is \(who.joined(separator: ", ")).
+    You are updating Pulse, the context nexus for \(me)'s work, and writing \(me)'s morning briefing from it. Today is \(today).\(who.isEmpty ? "" : " \(me) is \(who.joined(separator: ", ")).")
 
     This is read-only. Never post, react, comment, create, or change anything anywhere.
 
     \(facts) holds what Pulse already knows, as JSON: short dated facts, each with an id, its subject, its status and its sources, learned on earlier runs and from other agents. Read it first. \(since.map { "Pulse last read your sources at \($0), and the facts cover what came before, so gather only what's new since then (unanswered messages and email excepted). Take new facts only from items after that time." } ?? "Pulse knows little so far, so gather the last 14 days and learn from everything you read.")
 
-    Gather, using your Linear and Slack tools (MCP servers; in pi, call them through codemode):
+    Gather\(tools.isEmpty ? "" : ", using your \(tools.joined(separator: " and ")) tools (MCP servers; in pi, call them through codemode)"):
     \(gather.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n"))
 
     \(tasks) holds \(me)'s open tasks, as JSON, each with an id. Pulse keeps them until they're done, and your job is to keep them current.
@@ -68,8 +70,8 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     - Before adding a task, check the open tasks. When what you found belongs to one of them (another message in the same thread, a follow-up question, the same commitment seen in an agent session or a meeting), update that task instead, and put any step that has to come first, such as checking something with someone, in its title or why. In an update, give only the fields that change and null for the rest.
     - Close a task when a source shows it's done or no longer needed: the question was answered, the commitment was met, or plans changed. reason is one short line saying what happened.
     - Also close a task when a ticket or PR in the open work list now covers it, with a reason that names it, such as "Now tracked in KLE-123".
-    - title starts with a verb. why is one short line. url is a link you actually saw that points at the thread, message, email or doc; for a Slack thread, the thread's first message.
-    - reply: only for a Slack task that answers someone. If their question or request has a clear answer from what you know, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said.
+    - title starts with a verb. why is one short line. url is a link you actually saw that points at the thread, message, email or doc\(c.slack != nil ? "; for a Slack thread, the thread's first message" : "").
+    - reply: \(c.slack != nil ? "only for a Slack task that answers someone. If their question or request has a clear answer from what you know, write the reply \(me) would send: one to three short sentences in \(me)'s voice, without restating the question. Otherwise null. Never guess or promise something \(me) hasn't said." : "always null.")
 
     Then update Pulse's memory from what you gathered. Write a JSON file to \(factsOutput) with exactly this shape, using empty lists when there is nothing:
     {
@@ -118,10 +120,10 @@ func runSynthesis(dir: URL, db: DB, candidates: [ActionItem], tasks open: [Pulse
     let day = Date().formatted(date: .complete, time: .omitted)
     var mail: String?
     var mailError: String?
-    if settings.mail, mailRunning {
+    if let days = settings.connections.mail?.days, mailRunning {
         let file = dir.appendingPathComponent("mail/inbox.json")
         do {
-            try await Task.detached { try exportMail(days: settings.mailDays, to: file) }.value
+            try await Task.detached { try exportMail(days: days, to: file) }.value
             mail = file.path
         } catch {
             mailError = "Mail export failed: \(error)"
