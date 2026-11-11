@@ -21,7 +21,7 @@ struct MeetingsView: View {
                         ProgressView().controlSize(.small)
                         Text("Transcribing…").font(.caption).foregroundStyle(.secondary)
                     }
-                    if settings.recordMeetings {
+                    if settings.connections.recordsMeetings {
                         Button("Start recording") { Task { await meetings.startManually() } }
                     }
                 }

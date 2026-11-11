@@ -1,3 +1,4 @@
+import EventKit
 import ServiceManagement
 import SwiftUI
 
@@ -9,6 +10,7 @@ struct SettingsView: View {
     @State private var replacingKey = false
     @State private var synced = settings
     @State private var newProject = ""
+    @State private var calendars: [String] = []
     @State private var removing: Project?
     @ObservedObject private var workspace = Workspace.shared
 
@@ -25,6 +27,7 @@ struct SettingsView: View {
             form.clipped().overlayScrollers()
         }
         .task { await loadGitHub() }
+        .task { calendars = calendarAccounts() }
         .onChange(of: draft.githubAccount) { Task { await loadGitHub() } }
         .onChange(of: draft) { old, new in save(old, new) }
         .task(id: syncInputs(draft)) {
@@ -148,7 +151,25 @@ struct SettingsView: View {
                 Section {
                     ConnectionRow(service: .slack)
                     ChannelPicker(selected: slack.channels)
+                    Picker("Workspace", selection: slack.workspace) {
+                        Text("Any").tag("")
+                        ForEach(slackWorkspaces(), id: \.domain) { Text($0.name).tag($0.domain) }
+                    }
+                    Toggle("Record huddles in this workspace", isOn: slack.meetings)
                 } header: { connectionHeader("Slack", .slack, \.slack) }
+            }
+
+            if let google = connection(\.google) {
+                Section {
+                    Picker("Calendar account", selection: google.account) {
+                        Text("Any").tag("")
+                        ForEach(calendars, id: \.self) { Text($0).tag($0) }
+                    }
+                    Toggle("Record Meet calls and calendar meetings", isOn: google.meetings)
+                    MeetingStatus()
+                } header: { connectionHeader("Google", nil, \.google, symbol: "calendar") } footer: {
+                    note("A call on an event from this account is recorded for \(project.name), transcribed on this Mac and summarized. A Meet call with no event asks which project it's for when more than one could take it. The first meeting downloads about 500 MB of speech models, and macOS asks for microphone, screen and system audio recording, and calendar access.")
+                }
             }
 
             if let mail = connection(\.mail) {
@@ -183,14 +204,6 @@ struct SettingsView: View {
                     note("Connections are what \(project.name) reads and acts on. Features show once a connection feeds them.")
                 }
             }
-
-            Section {
-                Toggle(isOn: $draft.recordMeetings) {
-                    Text("Record meetings")
-                    Text("Pulse records Google Meet calls, Slack huddles and calendar meetings once they use your mic, transcribes them on this Mac and saves a summary. The first meeting downloads about 500 MB of speech models. macOS asks for microphone, screen and system audio recording, and calendar access.")
-                }
-                MeetingStatus()
-            } header: { header("Meetings", nil, symbol: "waveform") }
 
             Section {
                 Picker("Agent", selection: $draft.briefingCommand) {
@@ -284,6 +297,7 @@ struct SettingsView: View {
             c.github == nil ? ("GitHub", { draft.connections.github = .init(account: ghAccounts().first ?? "") }) : nil,
             c.linear == nil ? ("Linear", { draft.connections.linear = .init() }) : nil,
             c.slack == nil ? ("Slack", { draft.connections.slack = .init() }) : nil,
+            c.google == nil ? ("Google", { draft.connections.google = .init() }) : nil,
             c.mail == nil ? ("Mail", { draft.connections.mail = .init() }) : nil,
             c.code == nil ? ("Code", { draft.connections.code = .init(repos: [""]) }) : nil,
         ].compactMap { $0 }
@@ -693,4 +707,8 @@ private struct CopyRow: View {
             }
         }
     }
+}
+
+private func calendarAccounts() -> [String] {
+    Array(Set(EKEventStore().calendars(for: .event).map(\.source.title))).sorted()
 }

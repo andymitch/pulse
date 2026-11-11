@@ -4,6 +4,7 @@ import EventKit
 import FluidAudio
 import IOKit.pwr_mgt
 import ScreenCaptureKit
+import UserNotifications
 
 struct Meeting: Codable {
     var title: String
@@ -27,7 +28,7 @@ final class Meetings: ObservableObject {
     @Published private(set) var noAudio = false
     @Published private(set) var saved: [SavedMeeting] = []
     @Published var error: String?
-    var shown: Bool { settings.recordMeetings || !saved.isEmpty }
+    var shown: Bool { settings.connections.recordsMeetings || !saved.isEmpty }
 
     func reload() {
         guard !demoMode else { return }
@@ -41,14 +42,16 @@ final class Meetings: ObservableObject {
     private var askedScreen = false
     private var askedCalendar = false
     private var me: () -> String? = { nil }
+    private var asking: Meeting?
+    private let asker = Asker()
     private let calendar = EKEventStore()
-    private var recordings: URL { project.dir.appendingPathComponent("recordings") }
     private var archive: URL { project.dir.appendingPathComponent("meetings") }
 
     func watch(me: @escaping () -> String?) {
         guard !demoMode else { saved = demoMeetings; return }
         saved = savedMeetings(in: archive)
         self.me = me
+        UNUserNotificationCenter.current().delegate = asker
         Task { await processPending() }
         Task {
             while true {
@@ -73,7 +76,10 @@ final class Meetings: ObservableObject {
 
     private func poll() async {
         let users = micUsers()
-        if users.isEmpty { dismissed = false }
+        if users.isEmpty {
+            dismissed = false
+            asking = nil
+        }
         if let capture {
             await capture.heal()
             noAudio = capture.silent
@@ -82,22 +88,59 @@ final class Meetings: ObservableObject {
             var live = manual || !users.isEmpty
             if !live { live = await meetOpen() }
             quietPolls = live ? 0 : quietPolls + 1
-            if quietPolls >= 6 || !settings.recordMeetings { await stop() }
-        } else if settings.recordMeetings, !dismissed, !users.isEmpty, let meeting = await detect(users) {
-            await start(meeting)
+            if quietPolls >= 6 { await stop() }
+        } else if !dismissed, asking == nil, !users.isEmpty {
+            let projects = Project.all(in: Settings.dir).map { ($0, $0.connections) }
+            guard projects.contains(where: { $0.1.recordsMeetings }), let (meeting, call) = await detect(users) else { return }
+            let ids = claimants(call, in: projects.map { ($0.0.id, $0.1) })
+            if ids.count == 1, let p = projects.first(where: { $0.0.id == ids[0] }) {
+                await start(meeting, in: p.0)
+            } else if ids.count > 1 {
+                ask(meeting, projects.map(\.0).filter { ids.contains($0.id) })
+            }
         }
     }
 
     func startManually() async {
         guard recording == nil else { return }
         let event = await currentEvent()
-        await start(meeting(event?.title ?? "Meeting", event), manual: true)
+        await start(meeting(event?.title ?? "Meeting", event), in: project, manual: true)
     }
 
-    private func detect(_ micUsers: [String]) async -> Meeting? {
+    private func detect(_ micUsers: [String]) async -> (Meeting, Call)? {
         let event = await currentEvent()
         guard let call = callName(micUsers: micUsers, event: event != nil, meetOpen: await meetOpen()) else { return nil }
-        return meeting(event?.title ?? call, event)
+        let kind: Call = call == "Slack huddle" ? .slack(workspace: await slackWorkspace()) : .calendar(account: event?.calendar.source.title)
+        return (meeting(event?.title ?? call, event), kind)
+    }
+
+    private func slackWorkspace() async -> String? {
+        let all = slackWorkspaces()
+        if all.count == 1 { return all.first?.domain }
+        let titles = (try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false))?.windows
+            .filter { $0.owningApplication?.bundleIdentifier.hasPrefix("com.tinyspeck.slackmacgap") == true }.compactMap(\.title) ?? []
+        return all.first { w in titles.contains { $0.contains(" - \(w.name) - ") || $0.hasSuffix(" - \(w.name)") } }?.domain
+    }
+
+    private func ask(_ meeting: Meeting, _ projects: [Project]) {
+        asking = meeting
+        let center = UNUserNotificationCenter.current()
+        let actions = projects.map { UNNotificationAction(identifier: $0.id, title: "Record for \($0.name)") } + [UNNotificationAction(identifier: "skip", title: "Don't record")]
+        center.setNotificationCategories([UNNotificationCategory(identifier: "meeting", actions: actions, intentIdentifiers: [])])
+        let content = UNMutableNotificationContent()
+        content.title = "Record \(meeting.title)?"
+        content.body = "Pulse can't tell which project this call is for."
+        content.categoryIdentifier = "meeting"
+        Task {
+            _ = try? await center.requestAuthorization(options: [.alert])
+            try? await center.add(UNNotificationRequest(identifier: "meeting", content: content, trigger: nil))
+        }
+    }
+
+    fileprivate func answer(_ action: String) async {
+        guard let meeting = asking else { return }
+        asking = nil
+        if let p = Project.named(action, in: Settings.dir) { await start(meeting, in: p) } else { dismissed = true }
     }
 
     private func meetOpen() async -> Bool {
@@ -135,11 +178,11 @@ final class Meetings: ObservableObject {
             .min { abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now)) }
     }
 
-    private func start(_ meeting: Meeting, manual: Bool = false) async {
+    private func start(_ meeting: Meeting, in target: Project, manual: Bool = false) async {
         guard !starting, recording == nil else { return }
         starting = true
         defer { starting = false }
-        let folder = recordings.appendingPathComponent(String(Int(meeting.start.timeIntervalSince1970)))
+        let folder = target.dir.appendingPathComponent("recordings").appendingPathComponent(String(Int(meeting.start.timeIntervalSince1970)))
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try JSONEncoder().encode(meeting).write(to: folder.appendingPathComponent("meeting.json"))
@@ -362,6 +405,35 @@ func callName(micUsers: [String], event: Bool, meetOpen: Bool) -> String? {
     if micUsers.contains(where: { $0.hasPrefix("com.tinyspeck.slackmacgap") }) { return "Slack huddle" }
     if meetOpen { return "Google Meet" }
     return event && micUsers.contains { user in callApps.contains { user.hasPrefix($0) } } ? "Call" : nil
+}
+
+enum Call: Equatable { case slack(workspace: String?), calendar(account: String?) }
+
+func claimants(_ call: Call, in projects: [(id: String, connections: Connections)]) -> [String] {
+    let pick = { (on: [(id: String, connections: Connections)], named: String?, key: (Connections) -> String) -> [String] in
+        guard let named else { return on.map(\.id) }
+        let exact = on.filter { key($0.connections).caseInsensitiveCompare(named) == .orderedSame }
+        return (exact.isEmpty ? on.filter { key($0.connections).isEmpty } : exact).map(\.id)
+    }
+    switch call {
+    case .slack(let workspace): return pick(projects.filter { $0.connections.slack?.meetings == true }, workspace) { $0.slack?.workspace ?? "" }
+    case .calendar(let account): return pick(projects.filter { $0.connections.google?.meetings == true }, account) { $0.google?.account ?? "" }
+    }
+}
+
+func slackWorkspaces(state: URL = slackState) -> [(domain: String, name: String)] {
+    let root = (try? JSONSerialization.jsonObject(with: Data(contentsOf: state))) as? [String: Any]
+    return ((root?["workspaces"] as? [String: [String: Any]]) ?? [:]).values
+        .compactMap { w in (w["domain"] as? String).map { ($0, w["name"] as? String ?? $0) } }.sorted { $0.domain < $1.domain }
+}
+
+private final class Asker: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let action = response.actionIdentifier
+        await Meetings.shared.answer(action)
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions { [.banner] }
 }
 
 func micUsers() -> [String] {
