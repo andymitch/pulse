@@ -167,8 +167,8 @@ func githubIssueItem(repo: String, number: Int, title: String, url: URL, since: 
                branch: "\(repo)-\(number)-\(branchSlug(title))", since: since)
 }
 
-func fetchGitHubToday(token: String) async throws -> [ActionItem] {
-    guard let github = settings.connections.github, !github.scope.isEmpty else { return [] }
+func fetchGitHubToday(token: String, github: Connections.GitHub) async throws -> [ActionItem] {
+    guard !github.scope.isEmpty else { return [] }
     var issues: [ActionItem] = []
     if github.issues != .off {
         let found: GitHubIssues = try await gql(githubURL, auth: "bearer \(token)", githubIssuesToday, ["q": "is:open is:issue archived:false \(github.scope)" + (github.issues == .mine ? " assignee:@me" : "")])
@@ -568,7 +568,7 @@ private struct Buttons: View {
     var body: some View {
         let triage = Triage(store: store, id: item.id, task: store.tasks.first { $0.id == item.id })
         HStack(spacing: 6) {
-            if item.ticket != nil, item.branch != nil, settings.codeReady {
+            if item.ticket != nil, item.branch != nil, !store.connections.repos.isEmpty {
                 TicketButton(store: store, item: item, triage: triage)
             } else if let pr = item.pr {
                 AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { open(pr) }
@@ -672,10 +672,10 @@ private struct TicketButton: View {
                 Divider()
                 menuItem(.prompt)
             } else {
-                if settings.repos.count > 1, let ticket = item.ticket {
+                if store.connections.repos.count > 1, let ticket = item.ticket {
                     let current = store.repo(for: item)
                     Menu("Repo: \(current.map(repoName) ?? "")") {
-                        ForEach(settings.repos, id: \.self) { repo in
+                        ForEach(store.connections.repos, id: \.self) { repo in
                             Button { store.choose(repo: repo, for: ticket) } label: {
                                 if repo == current { Label(repoName(repo), systemImage: "checkmark") } else { Text(repoName(repo)) }
                             }

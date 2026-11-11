@@ -60,7 +60,7 @@ A local build is versioned after the latest tag with a `-dev` suffix, such as `1
 
 ## Setup
 
-Click the gear in the popover. The top of Settings lists the project's **connections**: GitHub, Linear, Slack, Mail and Code. Each has a **Remove** link, and **Add a connection** brings back the ones it doesn't have. Pulse only shows what a connection feeds: Trends and open tickets and PRs need GitHub or Linear, **Start** needs Code, and the briefing only reads the sources that are connected.
+Click the gear in the popover. **Projects** comes first: each project is a separate workspace with its own connections, facts, tasks, meetings and briefing, and nothing crosses between them. Add one by name, rename or open it there, or remove it (its folder goes to the Trash). With two or more, a picker next to the title switches between them; Pulse reopens on the one you used last, and every project keeps syncing and gets its own briefing in the background. Below the projects, Settings lists the active project's **connections**: GitHub, Linear, Slack, Mail and Code. Each has a **Remove** link, and **Add a connection** brings back the ones it doesn't have. Pulse only shows what a connection feeds: Trends and open tickets and PRs need GitHub or Linear, **Start** needs Code, and the briefing only reads the sources that are connected.
 
 1. **GitHub**: pick your `gh` account and organization, and your monthly PR target. To read only some repos (or repos you own, with no organization), list them as `owner/repo`. **Issues as tickets** puts GitHub issues on your list like Linear tickets: the ones assigned to you, or every open issue for a repo that's all yours. Start opens a worktree on a branch named after the issue, a PR on that branch joins the issue, and closed issues count in Done and Trends.
 2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's kept on this Mac in a file only your user can read, and can be replaced or removed in Settings.
@@ -87,7 +87,7 @@ Tools for the facts: `search` finds them by words, subject or date (`since` alon
 
 The other read tools are `list_meetings` (search by text or days back), `get_meeting` (summary, decisions and points, plus the transcript a page at a time when asked), `today` (the focus and the briefing's tasks) and `stats` (the Trends numbers for 7 days, 5 weeks or 12 months). Write tools let an agent keep Pulse current: `add_task`, `update_task` (title, why, link, done, later or removed; tickets and PRs can only be marked) and `delete_task` for your tasks, `update_meeting` (title, summary, decisions, points), `delete_meeting` (to the Trash) and `regenerate_briefing` (asks the running app). The open app picks up changes at once. It never changes settings, tokens or keys.
 
-Every tool works on one project. `projects` lists them. A tool uses the `project` it's given, else the one named with `Pulse --mcp --project <id>`, else the project whose repo or worktrees folder the agent is working in, else the default project.
+Every tool works on one project. `projects` lists them. A tool uses the `project` it's given, else the one named with `Pulse --mcp --project <id>`, else the project whose repo or worktrees folder the agent is working in, else the default project. Set the default under **Settings → Agents**, or choose **None, always ask** so a call with nothing to go on fails and lists the projects.
 
 ## Data
 

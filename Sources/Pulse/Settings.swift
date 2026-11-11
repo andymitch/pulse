@@ -67,6 +67,7 @@ struct Settings: Codable, Equatable {
     var agentAccess = true
     var hotkey = Hotkey.standard
     var defaultProject = ""
+    var activeProject = ""
 
     static let agentPresets = [
         Agent(name: "pi", command: "pi @{prompt}"),
@@ -108,8 +109,8 @@ struct Settings: Codable, Equatable {
 
     var githubAccount: String { connections.github?.account ?? "" }
     var githubOrg: String { connections.github?.org ?? "" }
-    var repos: [String] { (connections.code?.repos ?? []).filter { !$0.isEmpty }.map(expand) }
-    var worktrees: String { expand(connections.code?.worktrees ?? "") }
+    var repos: [String] { connections.repos }
+    var worktrees: String { connections.worktrees }
     var codeReady: Bool { !repos.isEmpty }
     var enabledAgents: [Agent] { agents.filter(\.enabled) }
     var enabledIDEs: [IDE] { ides.filter(\.installed) }

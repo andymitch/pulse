@@ -116,10 +116,10 @@ func ghOrgs(account: String) -> [String] {
     return out.split(separator: "\n").map(String.init)
 }
 
-func ghToken() throws -> String {
+func ghToken(_ account: String) throws -> String {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-    p.arguments = ["-lc", settings.githubAccount.isEmpty ? "gh auth token" : "gh auth token -u \(quoted(settings.githubAccount))"]
+    p.arguments = ["-lc", account.isEmpty ? "gh auth token" : "gh auth token -u \(quoted(account))"]
     let out = Pipe(), err = Pipe()
     p.standardOutput = out
     p.standardError = err
@@ -139,7 +139,7 @@ private let keychainQuery: [String: Any] = [
     kSecAttrAccount as String: "linear",
 ]
 
-private var keyFile: URL { project.dir.appendingPathComponent("linear-key") }
+private func keyFile(_ dir: URL) -> URL { dir.appendingPathComponent("linear-key") }
 
 func writePrivate(_ data: Data, to url: URL) throws {
     try? FileManager.default.removeItem(at: url)
@@ -148,9 +148,9 @@ func writePrivate(_ data: Data, to url: URL) throws {
     }
 }
 
-func linearKey() -> String? {
-    guard !CommandLine.arguments.contains("--self-test"), settings.connections.linear != nil else { return nil }
-    return (try? Data(contentsOf: keyFile)).flatMap { String(data: $0, encoding: .utf8) }
+func linearKey(in dir: URL = project.dir, connections: Connections = settings.connections) -> String? {
+    guard !CommandLine.arguments.contains("--self-test"), connections.linear != nil else { return nil }
+    return (try? Data(contentsOf: keyFile(dir))).flatMap { String(data: $0, encoding: .utf8) }
 }
 
 func legacyLinearKey() -> Data? {
@@ -163,7 +163,7 @@ func legacyLinearKey() -> Data? {
 }
 
 func removeLinearKey() {
-    try? FileManager.default.removeItem(at: keyFile)
+    try? FileManager.default.removeItem(at: keyFile(project.dir))
     SecItemDelete(keychainQuery as CFDictionary)
 }
 
@@ -171,13 +171,13 @@ func saveLinearKey(_ key: String) async throws {
     struct Viewer: Decodable { struct V: Decodable { let id: String }; let viewer: V }
     let _: Viewer = try await gql(linearURL, auth: key, "{ viewer { id } }")
     try FileManager.default.createDirectory(at: project.dir, withIntermediateDirectories: true)
-    try writePrivate(Data(key.utf8), to: keyFile)
+    try writePrivate(Data(key.utf8), to: keyFile(project.dir))
 }
 
-func syncGitHub(_ db: DB, token: String) async throws {
+func syncGitHub(_ db: DB, token: String, github: Connections.GitHub) async throws {
     let auth = "bearer \(token)"
     let (since, start) = window(db, "github_since")
-    guard let github = settings.connections.github, !github.scope.isEmpty else { return }
+    guard !github.scope.isEmpty else { return }
     var repos = github.repos.compactMap { slug -> (owner: String, name: String)? in
         let parts = slug.split(separator: "/").map(String.init)
         return parts.count == 2 ? (parts[0], parts[1]) : nil

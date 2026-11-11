@@ -90,15 +90,15 @@ func githubSlug(_ url: String) -> String? {
     return url[r].replacingOccurrences(of: #"^github\.com[:/]|(\.git)?/?$"#, with: "", options: .regularExpression).lowercased()
 }
 
-func repoSlugs() -> [String: String] {
-    Dictionary(uniqueKeysWithValues: settings.repos.compactMap { repo in
+func repoSlugs(_ repos: [String]) -> [String: String] {
+    Dictionary(uniqueKeysWithValues: repos.compactMap { repo in
         (try? shell("git -C \(quoted(repo)) remote get-url origin")).flatMap(githubSlug).map { (repo, $0) }
     })
 }
 
-func worktrees() -> [String: String] {
+func worktrees(_ repos: [String]) -> [String: String] {
     var result: [String: String] = [:]
-    for repo in settings.repos {
+    for repo in repos {
         var path: String?
         for line in ((try? shell("git -C \(quoted(repo)) worktree list --porcelain")) ?? "").split(separator: "\n") {
             if line.hasPrefix("worktree ") { path = String(line.dropFirst(9)) }
@@ -108,9 +108,9 @@ func worktrees() -> [String: String] {
     return result
 }
 
-func localBranches() -> [String: String] {
+func localBranches(_ repos: [String]) -> [String: String] {
     var result: [String: String] = [:]
-    for repo in settings.repos.reversed() {
+    for repo in repos.reversed() {
         for branch in ((try? shell("git -C \(quoted(repo)) for-each-ref --format='%(refname:short)' refs/heads")) ?? "").split(separator: "\n") { result[String(branch)] = repo }
     }
     return result
@@ -124,9 +124,9 @@ func pickRepo(pr: URL?, branch: String?, ticket: String?, repos: [String], slugs
         ?? repos.first
 }
 
-func worktree(for branch: String, ticket: String, repo: String) throws -> String {
-    if let existing = worktrees()[branch] { return existing }
-    let path = "\(settings.worktrees)/\(ticket.lowercased())/\(repoName(repo))"
+func worktree(for branch: String, ticket: String, repo: String, in code: Connections) throws -> String {
+    if let existing = worktrees(code.repos)[branch] { return existing }
+    let path = "\(code.worktrees)/\(ticket.lowercased())/\(repoName(repo))"
     let git = "git -C \(quoted(repo))"
     if (try? shell("\(git) rev-parse --verify --quiet refs/heads/\(quoted(branch))")) != nil {
         try shell("\(git) worktree add \(quoted(path)) \(quoted(branch))")

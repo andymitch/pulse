@@ -474,6 +474,12 @@ func selfTest() throws {
           && beta1.connections == beta1Connections && beta1.name == "Beta" && beta1.fields?["mailDays"] == nil,
           "a v5-beta.1 project's flat settings become connections, and saving drops the old keys and keeps the name")
     try FileManager.default.removeItem(at: beta1.dir)
+    let side = try Project.create("Pulse app", in: v4), twin = try Project.create("Pulse  App!", in: v4)
+    try side.rename("  Pulse  ")
+    check(side.id == "pulse-app" && twin.id == "pulse-app-2" && side.name == "Pulse" && side.connections == Connections() && Project.all(in: v4).map(\.id) == ["acme", "pulse-app", "pulse-app-2"],
+          "a new project gets a unique id from its name and starts with no connections, and renaming keeps the id")
+    try FileManager.default.removeItem(at: side.dir)
+    try FileManager.default.removeItem(at: twin.dir)
     try Project.migrate(v4)
     check(Project.all(in: v4) == [acme] && Project.resolve(in: v4)?.id == "acme" && Project.resolve(in: v4, asked: "nope") == nil
           && Project.resolve(in: v4, folder: expand("~/code/acme/web")) == acme && Project.resolve(in: v4, asked: "acme", folder: "/elsewhere") == acme,
