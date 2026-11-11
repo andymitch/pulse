@@ -91,6 +91,7 @@ final class Store: ObservableObject {
         do {
             if settings.connections.github != nil { try await syncGitHub(db, token: try ghToken()) }
             if let key = linearKey() { try await syncLinear(db, key: key) }
+            try db.linkItems()
         } catch {
             message = "\(error)"
         }

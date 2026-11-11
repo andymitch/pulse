@@ -5,7 +5,7 @@ let githubURL = URL(string: "https://api.github.com/graphql")!
 let linearURL = URL(string: "https://api.linear.app/graphql")!
 
 private let reposQuery = "query($org: String!) { organization(login: $org) { repositories(first: 100, orderBy: {field: PUSHED_AT, direction: DESC}) { nodes { name pushedAt isArchived } } } }"
-private let prsQuery = "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { pullRequests(states: MERGED, first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { number createdAt mergedAt updatedAt additions author { __typename login } } } } }"
+private let prsQuery = "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { pullRequests(states: MERGED, first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { number title url headRefName createdAt mergedAt updatedAt additions author { __typename login ... on User { name email } } } } } }"
 private let issuesQuery = "query($after: String, $since: DateTimeOrDuration) { issues(first: 100, after: $after, includeArchived: true, orderBy: updatedAt, filter: {updatedAt: {gt: $since}}) { pageInfo { hasNextPage endCursor } nodes { id identifier title url createdAt completedAt creator { name } assignee { name } } } }"
 
 struct SyncError: Error, CustomStringConvertible {
@@ -45,8 +45,9 @@ private struct ReposData: Decodable {
 private struct PRsData: Decodable {
     struct Repo: Decodable { let pullRequests: Page<PR> }
     struct PR: Decodable {
-        struct Author: Decodable { let __typename: String; let login: String }
+        struct Author: Decodable { let __typename: String; let login: String; let name, email: String? }
         let number: Int
+        let title, url, headRefName: String
         let createdAt: String
         let mergedAt: String
         let updatedAt: String
@@ -173,8 +174,10 @@ func syncGitHub(_ db: DB, token: String) async throws {
             let fresh = prs.nodes.prefix { $0.updatedAt >= since }
             try db.transaction {
                 for pr in fresh where pr.author?.__typename != "Bot" {
-                    try db.query("INSERT OR REPLACE INTO prs VALUES (?, ?, ?, ?, ?, ?)",
-                                 [repo.name, pr.number, pr.author?.login ?? "ghost", pr.createdAt, pr.mergedAt, pr.additions])
+                    let login = pr.author?.login ?? "ghost"
+                    try db.query("INSERT OR REPLACE INTO items (id, connection, kind, identifier, title, url, container, branch, author, state, created_at, closed_at, size) VALUES (?, 'github', 'pr', ?, ?, ?, ?, ?, ?, 'merged', ?, ?, ?)",
+                                 ["github:\(repo.name)#\(pr.number)", "\(repo.name)#\(pr.number)", pr.title, pr.url, repo.name, pr.headRefName, login, pr.createdAt, pr.mergedAt, pr.additions])
+                    try db.identify("github", handle: login, name: pr.author?.name.flatMap { $0.isEmpty ? nil : $0 } ?? login, email: pr.author?.email)
                 }
             }
             guard fresh.count == prs.nodes.count, prs.pageInfo.hasNextPage else { break }
@@ -197,9 +200,8 @@ private struct UsersData: Decodable {
 func syncLinear(_ db: DB, key: String) async throws {
     let people: UsersData = try await gql(linearURL, auth: key, "{ viewer { name email } organization { urlKey } users(first: 250, includeDisabled: true) { nodes { name email } } projects(first: 250) { nodes { name } } }")
     try db.transaction {
-        try db.query("DELETE FROM users")
         for u in people.users.nodes where !u.email.hasSuffix(".linear.app") {
-            try db.query("INSERT OR REPLACE INTO users VALUES (?, ?)", [u.name, u.email])
+            try db.identify("linear", handle: u.name, name: u.name, email: u.email)
         }
         try db.setMeta("me", displayName(people.viewer.name))
         try db.setMeta("linear_workspace", people.organization.urlKey)
@@ -212,7 +214,7 @@ func syncLinear(_ db: DB, key: String) async throws {
         let page: IssuesData = try await gql(linearURL, auth: key, issuesQuery, ["after": after ?? NSNull(), "since": since])
         try db.transaction {
             for i in page.issues.nodes {
-                try db.query("INSERT OR REPLACE INTO issues VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                try db.query("INSERT OR REPLACE INTO items (id, connection, kind, identifier, title, url, author, assignee, created_at, closed_at) VALUES (?, 'linear', 'ticket', ?, ?, ?, ?, ?, ?, ?)",
                              [i.id, i.identifier, i.title, i.url, i.creator?.name, i.assignee?.name, i.createdAt, i.completedAt])
             }
         }

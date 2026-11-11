@@ -132,7 +132,7 @@ func applyFacts(_ changes: FactChanges, to db: DB, now: Date = Date(), origin: S
 func isTicketID(_ s: String) -> Bool { s.range(of: "^[A-Z][A-Z0-9]*-[0-9]+$", options: .regularExpression) != nil }
 
 private func known(_ db: DB) throws -> (projects: [String], people: [String]) {
-    (db.ids("linear_projects"), try db.query("SELECT name FROM users").compactMap { $0[0] as? String })
+    (db.ids("linear_projects"), db.peopleNames())
 }
 
 func realSubject(kind: String, names: [String], in db: DB) throws -> (kind: String, names: [String]) {

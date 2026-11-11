@@ -33,7 +33,7 @@ func seedDemo(_ db: DB) throws {
     let now = Date()
     try db.transaction {
         for (name, handle) in people {
-            try db.query("INSERT OR REPLACE INTO users VALUES (?, ?)", [name, "\(handle)@acme.com"])
+            try db.identify("linear", handle: name, name: name, email: "\(handle)@acme.com")
         }
         try db.setMeta("me", "Jane Doe")
         try db.setMeta("linear_workspace", "acme")
@@ -48,14 +48,14 @@ func seedDemo(_ db: DB) throws {
                 let n = Int(rate + Double((back * 7 + p * 13) % 10) / 10)
                 for k in 0..<n {
                     let created = cal.date(byAdding: .minute, value: -(90 + ((k * 7 + p * 11 + back * 13) % 47) * 37), to: day)!
-                    try db.query("INSERT INTO prs VALUES ('web', ?, ?, ?, ?, ?)",
-                                 [pr, "\(handle)-acme", iso.string(from: created), iso.string(from: day), 40 + (pr * 37) % 620])
+                    try db.query("INSERT INTO items (id, connection, kind, identifier, container, author, state, created_at, closed_at, size) VALUES (?, 'github', 'pr', ?, 'web', ?, 'merged', ?, ?, ?)",
+                                 ["github:web#\(pr)", "web#\(pr)", "\(handle)-acme", iso.string(from: created), iso.string(from: day), 40 + (pr * 37) % 620])
                     pr += 1
                 }
                 let opened = (back + p) % 3 == 0 ? 2 : (back + p) % 2
                 for _ in 0..<opened {
                     let done = issue % 5 != 0 && back > 1 ? iso.string(from: cal.date(byAdding: .day, value: min(back, 1 + issue % 6), to: day)!) : nil
-                    try db.query("INSERT INTO issues VALUES (?, ?, 'Demo', '', ?, ?, ?, ?)",
+                    try db.query("INSERT INTO items (id, connection, kind, identifier, title, author, assignee, created_at, closed_at) VALUES (?, 'linear', 'ticket', ?, 'Demo', ?, ?, ?, ?)",
                                  ["i\(issue)", "ACME-\(issue)", name, people[(p + issue) % people.count].0, iso.string(from: day), done])
                     issue += 1
                 }

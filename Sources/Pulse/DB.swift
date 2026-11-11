@@ -14,15 +14,17 @@ final class DB: @unchecked Sendable {
         sqlite3_busy_timeout(handle, 2000)
         guard !readOnly else { return }
         try exec("""
-            CREATE TABLE IF NOT EXISTS prs (
-                repo TEXT NOT NULL, number INTEGER NOT NULL, author TEXT NOT NULL,
-                created_at TEXT NOT NULL, merged_at TEXT NOT NULL, additions INTEGER NOT NULL,
-                PRIMARY KEY (repo, number));
-            CREATE TABLE IF NOT EXISTS issues (
-                id TEXT PRIMARY KEY, identifier TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
-                creator TEXT, assignee TEXT, created_at TEXT NOT NULL, completed_at TEXT);
+            CREATE TABLE IF NOT EXISTS items (
+                id TEXT PRIMARY KEY, connection TEXT NOT NULL, kind TEXT NOT NULL, identifier TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+                url TEXT NOT NULL DEFAULT '', container TEXT, branch TEXT, author TEXT, assignee TEXT, state TEXT,
+                created_at TEXT NOT NULL, closed_at TEXT, size INTEGER);
+            CREATE INDEX IF NOT EXISTS items_closed ON items (kind, closed_at);
+            CREATE TABLE IF NOT EXISTS people (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS identities (
+                connection TEXT NOT NULL, handle TEXT NOT NULL, person INTEGER NOT NULL REFERENCES people(id), email TEXT,
+                PRIMARY KEY (connection, handle));
+            CREATE TABLE IF NOT EXISTS links (from_item TEXT NOT NULL, to_item TEXT NOT NULL, kind TEXT NOT NULL, how TEXT NOT NULL, PRIMARY KEY (from_item, to_item, kind));
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS users (name TEXT PRIMARY KEY, email TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS subjects (
                 id INTEGER PRIMARY KEY, project TEXT NOT NULL DEFAULT 'default', kind TEXT NOT NULL, name TEXT NOT NULL,
                 aliases TEXT NOT NULL DEFAULT '[]');
@@ -42,6 +44,22 @@ final class DB: @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS pending_replaces (
                 fact_id INTEGER NOT NULL REFERENCES facts(id), replaces_id INTEGER NOT NULL REFERENCES facts(id), PRIMARY KEY (fact_id, replaces_id));
             """)
+        if try !query("SELECT 1 FROM sqlite_master WHERE name = 'prs'").isEmpty {
+            try transaction {
+                try exec("""
+                    INSERT OR IGNORE INTO items (id, connection, kind, identifier, container, author, state, created_at, closed_at, size)
+                        SELECT 'github:' || repo || '#' || number, 'github', 'pr', repo || '#' || number, repo, author, 'merged', created_at, merged_at, additions FROM prs;
+                    INSERT OR IGNORE INTO items (id, connection, kind, identifier, title, url, author, assignee, created_at, closed_at)
+                        SELECT id, 'linear', 'ticket', identifier, title, url, creator, assignee, created_at, completed_at FROM issues;
+                    DROP TABLE prs;
+                    DROP TABLE issues;
+                    """)
+                if try !query("SELECT 1 FROM sqlite_master WHERE name = 'users'").isEmpty {
+                    for r in try query("SELECT name, email FROM users") { try identify("linear", handle: r[0] as! String, name: r[0] as! String, email: r[1] as? String) }
+                    try exec("DROP TABLE users")
+                }
+            }
+        }
         if try query("SELECT 1 FROM pragma_table_info('facts') WHERE name = 'doubt'").isEmpty {
             try exec("ALTER TABLE facts ADD COLUMN doubt TEXT")
         }
@@ -223,16 +241,16 @@ enum TrendRange: String, CaseIterable {
 extension DB {
     func trends(since: String, range: TrendRange = .year) throws -> Trends {
         let prs = try query("""
-            SELECT \(range.sql("merged_at")), author,
-                   (julianday(merged_at) - julianday(created_at)) * 24, additions
-            FROM prs WHERE merged_at >= ? ORDER BY merged_at
+            SELECT \(range.sql("closed_at")), author,
+                   (julianday(closed_at) - julianday(created_at)) * 24, size
+            FROM items WHERE kind = 'pr' AND closed_at >= ? ORDER BY closed_at
             """, [since]).map { r in
             PRRow(bucket: r[0] as! String, person: r[1] as! String, hours: r[2] as? Double ?? 0, additions: r[3] as? Int ?? 0)
         }
 
         let completed = try query("""
-            SELECT \(range.sql("completed_at")), assignee, count(*)
-            FROM issues WHERE completed_at >= ? AND assignee IS NOT NULL GROUP BY 1, 2
+            SELECT \(range.sql("closed_at")), assignee, count(*)
+            FROM items WHERE kind = 'ticket' AND closed_at >= ? AND assignee IS NOT NULL GROUP BY 1, 2
             """, [since]).map {
             Count(bucket: $0[0] as! String, person: displayName($0[1] as! String), n: $0[2] as! Int)
         }
@@ -240,12 +258,41 @@ extension DB {
     }
 
     func merged(since: Date, author: String) -> [Date] {
-        ((try? query("SELECT merged_at FROM prs WHERE author = ? AND merged_at >= ? ORDER BY merged_at", [author, iso.string(from: since)])) ?? [])
+        ((try? query("SELECT closed_at FROM items WHERE kind = 'pr' AND author = ? AND closed_at >= ? ORDER BY closed_at", [author, iso.string(from: since)])) ?? [])
             .compactMap { ($0[0] as? String).flatMap(iso.date(from:)) }
     }
 
+    func identify(_ connection: String, handle: String, name: String, email: String?) throws {
+        let email = email.map { $0.lowercased() }.flatMap { $0.isEmpty ? nil : $0 }
+        if try !query("SELECT 1 FROM identities WHERE connection = ? AND handle = ?", [connection, handle]).isEmpty {
+            try query("UPDATE identities SET email = coalesce(?, email) WHERE connection = ? AND handle = ?", [email, connection, handle])
+            return
+        }
+        let person = try email.flatMap { try query("SELECT person FROM identities WHERE email = ? LIMIT 1", [$0]).first?[0] as? Int }
+            ?? query("INSERT INTO people (name) VALUES (?) RETURNING id", [name]).first?[0] as? Int
+        try query("INSERT INTO identities VALUES (?, ?, ?, ?)", [connection, handle, person, email])
+    }
+
+    func peopleNames() -> [String] {
+        ((try? query("SELECT DISTINCT name FROM people WHERE name NOT IN (SELECT handle FROM identities WHERE connection = 'github') ORDER BY name")) ?? []).compactMap { ($0[0] as? String).flatMap { $0.contains("@") ? nil : $0 } }
+    }
+
+    func linkItems() throws {
+        let tickets = Dictionary(try query("SELECT lower(identifier), id FROM items WHERE kind = 'ticket'").map { ($0[0] as! String, $0[1] as! String) }) { a, _ in a }
+        guard !tickets.isEmpty else { return }
+        let ids = try NSRegularExpression(pattern: "[a-z][a-z0-9]*-[0-9]+")
+        for r in try query("SELECT id, lower(coalesce(branch, '')), lower(title) FROM items WHERE kind = 'pr' AND NOT EXISTS (SELECT 1 FROM links WHERE to_item = items.id)") {
+            for (how, text) in [("branch", r[1] as! String), ("title", r[2] as! String)] {
+                for m in ids.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    guard let ticket = tickets[(text as NSString).substring(with: m.range)] else { continue }
+                    try query("INSERT OR IGNORE INTO links VALUES (?, ?, 'pr', ?)", [ticket, r[0], how])
+                }
+            }
+        }
+    }
+
     func closedTickets(since: Date, assignee: String) -> [DoneItem] {
-        ((try? query("SELECT identifier, title, url, date(completed_at, 'localtime') FROM issues WHERE assignee = ? AND completed_at >= ? ORDER BY completed_at",
+        ((try? query("SELECT identifier, title, url, date(closed_at, 'localtime') FROM items WHERE kind = 'ticket' AND assignee = ? AND closed_at >= ? ORDER BY closed_at",
                      [assignee, iso.string(from: since)])) ?? [])
             .compactMap { r in
                 guard let id = r[0] as? String, let title = r[1] as? String, let url = (r[2] as? String).flatMap(URL.init), let day = r[3] as? String else { return nil }
