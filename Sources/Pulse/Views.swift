@@ -61,12 +61,13 @@ struct ContentView: View {
     @ViewBuilder private var trends: some View {
         SectionHeader(title: "Trends") {
             Picker("", selection: $store.metric) {
-                ForEach(TrendMetric.allCases.filter { $0 == .prs || store.hasLinearKey }, id: \.self) { m in
+                ForEach(store.metrics, id: \.self) { m in
                     Label { Text(m.rawValue) } icon: { Image(nsImage: m.brand.padded(size: 13, trailing: 5)) }.tag(m)
                 }
             }
             .labelsHidden()
             .fixedSize()
+            .onAppear { if let first = store.metrics.first, !store.metrics.contains(store.metric) { store.metric = first } }
             Picker("", selection: $store.range) {
                 ForEach(TrendRange.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
@@ -101,7 +102,7 @@ struct ContentView: View {
         HStack {
             Text("Pulse").font(.title3.bold())
             Picker("", selection: $store.page) {
-                ForEach(PulseTab.allCases.filter { $0 != .meetings || meetings.shown }, id: \.self) { tab in
+                ForEach(PulseTab.allCases.filter { ($0 != .meetings || meetings.shown) && ($0 != .trends || !store.metrics.isEmpty) }, id: \.self) { tab in
                     Text(tab.rawValue).tag(tab)
                 }
             }
@@ -210,7 +211,7 @@ struct MonthPace: View {
     @ObservedObject var store: Store
 
     var body: some View {
-        let (totals, days) = store.myMonth, target = max(settings.monthlyPRTarget, 1)
+        let (totals, days) = store.myMonth, target = max(settings.connections.github?.monthlyPRTarget ?? 40, 1)
         let done = totals.last ?? 0, expected = Int((Double(target) * Double(totals.count) / Double(days)).rounded())
         Panel(title: "My PRs this month", brand: .github, accessory: {
             Text("\(done) of \(target) · " + (done == expected ? "on pace" : done > expected ? "\(done - expected) ahead of pace" : "\(expected - done) behind pace"))

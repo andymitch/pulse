@@ -33,87 +33,104 @@ struct SettingsView: View {
 
     private var form: some View {
         Form {
-            Section {
-                if let accounts, accounts.isEmpty {
-                    Text("Sign in to GitHub with the GitHub CLI to see PRs and reviews.")
-                    HStack {
-                        Button("Sign in to GitHub") { try? openCommandInTerminal("gh auth login --web") }
-                        Link("Get the GitHub CLI", destination: URL(string: "https://cli.github.com")!)
-                    }
-                } else {
-                    if let accounts {
-                        Picker("Account", selection: $draft.githubAccount) {
-                            ForEach(accounts, id: \.self) { Text($0).tag($0) }
+            if let github = connection(\.github) {
+                Section {
+                    if let accounts, accounts.isEmpty {
+                        Text("Sign in to GitHub with the GitHub CLI to see PRs and reviews.")
+                        HStack {
+                            Button("Sign in to GitHub") { try? openCommandInTerminal("gh auth login --web") }
+                            Link("Get the GitHub CLI", destination: URL(string: "https://cli.github.com")!)
                         }
                     } else {
-                        loading("Account", draft.githubAccount)
+                        if let accounts {
+                            Picker("Account", selection: github.account) {
+                                ForEach(accounts, id: \.self) { Text($0).tag($0) }
+                            }
+                        } else {
+                            loading("Account", github.wrappedValue.account)
+                        }
+                        if let orgs {
+                            Picker("Organization", selection: github.org) {
+                                Text("None").tag("")
+                                ForEach(orgs, id: \.self) { Text($0).tag($0) }
+                            }
+                        } else {
+                            loading("Organization", github.wrappedValue.org)
+                        }
+                        LabeledContent("Monthly PR target") {
+                            HStack(spacing: 8) {
+                                Button { github.monthlyPRTarget.wrappedValue = max(github.wrappedValue.monthlyPRTarget - 1, 1) } label: { Image(systemName: "minus").frame(width: 12, height: 12) }
+                                    .disabled(github.wrappedValue.monthlyPRTarget <= 1)
+                                    .accessibilityLabel("Decrease")
+                                Text("\(github.wrappedValue.monthlyPRTarget)").monospacedDigit().frame(minWidth: 28)
+                                Button { github.monthlyPRTarget.wrappedValue = min(github.wrappedValue.monthlyPRTarget + 1, 200) } label: { Image(systemName: "plus").frame(width: 12, height: 12) }
+                                    .disabled(github.wrappedValue.monthlyPRTarget >= 200)
+                                    .accessibilityLabel("Increase")
+                            }
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Monthly PR target")
+                        .accessibilityValue("\(github.wrappedValue.monthlyPRTarget)")
+                        .accessibilityAdjustableAction { direction in
+                            switch direction {
+                            case .increment: github.monthlyPRTarget.wrappedValue = min(github.wrappedValue.monthlyPRTarget + 1, 200)
+                            case .decrement: github.monthlyPRTarget.wrappedValue = max(github.wrappedValue.monthlyPRTarget - 1, 1)
+                            @unknown default: break
+                            }
+                        }
                     }
-                    if let orgs {
-                        Picker("Organization", selection: $draft.githubOrg) {
-                            Text("None").tag("")
-                            ForEach(orgs, id: \.self) { Text($0).tag($0) }
+                } header: { connectionHeader("GitHub", .github, \.github) }
+            }
+
+            if draft.connections.linear != nil {
+                Section {
+                    if store.hasLinearKey && !replacingKey {
+                        LabeledContent("API key", value: "Saved on this Mac")
+                        HStack {
+                            Button("Replace") { replacingKey = true }
+                            Spacer()
+                            Link("Manage keys in Linear", destination: URL(string: "https://linear.app/settings/account/security")!)
                         }
                     } else {
-                        loading("Organization", draft.githubOrg)
+                        LinearKeyForm(store: store)
+                        Link("Create a personal API key in Linear", destination: URL(string: "https://linear.app/settings/account/security")!)
+                            .font(.caption)
                     }
-                    LabeledContent("Monthly PR target") {
-                        HStack(spacing: 8) {
-                            Button { draft.monthlyPRTarget = max(draft.monthlyPRTarget - 1, 1) } label: { Image(systemName: "minus").frame(width: 12, height: 12) }
-                                .disabled(draft.monthlyPRTarget <= 1)
-                                .accessibilityLabel("Decrease")
-                            Text("\(draft.monthlyPRTarget)").monospacedDigit().frame(minWidth: 28)
-                            Button { draft.monthlyPRTarget = min(draft.monthlyPRTarget + 1, 200) } label: { Image(systemName: "plus").frame(width: 12, height: 12) }
-                                .disabled(draft.monthlyPRTarget >= 200)
-                                .accessibilityLabel("Increase")
-                        }
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Monthly PR target")
-                    .accessibilityValue("\(draft.monthlyPRTarget)")
-                    .accessibilityAdjustableAction { direction in
-                        switch direction {
-                        case .increment: draft.monthlyPRTarget = min(draft.monthlyPRTarget + 1, 200)
-                        case .decrement: draft.monthlyPRTarget = max(draft.monthlyPRTarget - 1, 1)
-                        @unknown default: break
-                        }
-                    }
-                }
-            } header: { header("GitHub", .github) }
+                    ConnectionRow(service: .linear)
+                } header: { connectionHeader("Linear", .linear, \.linear) }
+                .onChange(of: store.hasLinearKey) { replacingKey = false }
+            }
 
-            Section {
-                if store.hasLinearKey && !replacingKey {
-                    LabeledContent("API key", value: "Saved on this Mac")
-                    HStack {
-                        Button("Replace") { replacingKey = true }
-                        Button("Remove", role: .destructive) {
-                            removeLinearKey()
-                            store.hasLinearKey = false
-                        }
-                        Spacer()
-                        Link("Manage keys in Linear", destination: URL(string: "https://linear.app/settings/account/security")!)
-                    }
-                } else {
-                    LinearKeyForm(store: store)
-                    Link("Create a personal API key in Linear", destination: URL(string: "https://linear.app/settings/account/security")!)
-                        .font(.caption)
-                }
-                ConnectionRow(service: .linear)
-            } header: { header("Linear", .linear) }
-            .onChange(of: store.hasLinearKey) { replacingKey = false }
-
-            Section {
-                Toggle("Read Slack in the briefing", isOn: $draft.slack)
-                if draft.slack {
+            if let slack = connection(\.slack) {
+                Section {
                     ConnectionRow(service: .slack)
-                    ChannelPicker(selected: $draft.slackChannels)
-                }
-            } header: { header("Slack", .slack) }
+                    ChannelPicker(selected: slack.channels)
+                } header: { connectionHeader("Slack", .slack, \.slack) }
+            }
 
-            Section {
-                Toggle("Read Mail inbox in the briefing", isOn: $draft.mail)
-                if draft.mail { Stepper("Last \(draft.mailDays) days", value: $draft.mailDays, in: 1...14) }
-            } header: { header("Mail", nil, symbol: "envelope") } footer: {
-                note("Uses the accounts in Mail.app, and only while Mail is open, so Pulse never launches it. macOS asks once for permission to read Mail.")
+            if let mail = connection(\.mail) {
+                Section {
+                    Stepper("Read the last \(mail.wrappedValue.days) days", value: mail.days, in: 1...14)
+                } header: { connectionHeader("Mail", nil, \.mail, symbol: "envelope") } footer: {
+                    note("Uses the accounts in Mail.app, and only while Mail is open, so Pulse never launches it. macOS asks once for permission to read Mail.")
+                }
+            }
+
+            if let code = connection(\.code) {
+                Section {
+                    TextField("Repository", text: code.repo, prompt: Text("~/code/app"))
+                    TextField("Worktrees folder", text: code.worktrees)
+                } header: { connectionHeader("Code", nil, \.code, symbol: "chevron.left.forwardslash.chevron.right") }
+            }
+
+            if !missing.isEmpty {
+                Section {
+                    Menu("Add a connection") {
+                        ForEach(missing, id: \.name) { item in Button(item.name, action: item.add) }
+                    }
+                } footer: {
+                    note("Connections are what \(project.name) reads and acts on. Features show once a connection feeds them.")
+                }
             }
 
             Section {
@@ -136,15 +153,13 @@ struct SettingsView: View {
             }
 
             Section {
-                TextField("Repository", text: $draft.repoPath, prompt: Text("~/code/app"))
-                TextField("Worktrees folder", text: $draft.worktreeRoot)
                 ForEach(IDE.allCases, id: \.self) { ide in
                     Toggle(isOn: member(ide, of: $draft.ides)) {
                         Label { Text(ide.installed ? ide.name : "\(ide.name) (not installed)") } icon: { Image(nsImage: ide.brand.image(size: 14)) }
                     }
                     .disabled(!ide.installed)
                 }
-            } header: { header("Code", nil, symbol: "chevron.left.forwardslash.chevron.right") } footer: {
+            } header: { header("IDEs", nil, symbol: "macwindow") } footer: {
                 note("IDEs open the worktree and pass the prompt to their own agent panel, using the agent you last used there.")
             }
 
@@ -203,6 +218,38 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
+    private func connection<T>(_ path: WritableKeyPath<Connections, T?>) -> Binding<T>? {
+        guard let value = draft.connections[keyPath: path] else { return nil }
+        return Binding(get: { draft.connections[keyPath: path] ?? value }, set: { draft.connections[keyPath: path] = $0 })
+    }
+
+    private var missing: [(name: String, add: () -> Void)] {
+        let c = draft.connections
+        return [
+            c.github == nil ? ("GitHub", { draft.connections.github = .init(account: ghAccounts().first ?? "") }) : nil,
+            c.linear == nil ? ("Linear", { draft.connections.linear = .init() }) : nil,
+            c.slack == nil ? ("Slack", { draft.connections.slack = .init() }) : nil,
+            c.mail == nil ? ("Mail", { draft.connections.mail = .init() }) : nil,
+            c.code == nil ? ("Code", { draft.connections.code = .init() }) : nil,
+        ].compactMap { $0 }
+    }
+
+    private func connectionHeader<T>(_ title: String, _ brand: Brand?, _ path: WritableKeyPath<Connections, T?>, symbol: String = "") -> some View {
+        HStack {
+            header(title, brand, symbol: symbol)
+            Spacer()
+            Button("Remove", role: .destructive) {
+                if path == \Connections.linear {
+                    removeLinearKey()
+                    store.hasLinearKey = false
+                }
+                draft.connections[keyPath: path] = nil
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+        }
+    }
+
     private func header(_ title: String, _ brand: Brand?, symbol: String = "") -> some View {
         HStack(spacing: 6) {
             if let brand { Image(nsImage: brand.image(size: 13)) } else { Image(systemName: symbol).font(.system(size: 12)).frame(width: 13, height: 13) }
@@ -221,7 +268,7 @@ struct SettingsView: View {
         orgs = nil
         let found = await Task.detached { ghAccounts() }.value
         accounts = found
-        if !found.contains(account), let first = found.first { draft.githubAccount = first; return }
+        if !found.contains(account), let first = found.first, draft.connections.github != nil { draft.connections.github?.account = first; return }
         var loaded = await Task.detached { ghOrgs(account: account) }.value
         if !draft.githubOrg.isEmpty && !loaded.contains(draft.githubOrg) { loaded.insert(draft.githubOrg, at: 0) }
         orgs = loaded
@@ -249,7 +296,7 @@ struct SettingsView: View {
         if old.hotkey != new.hotkey { GlobalHotkey.register(new.hotkey) }
     }
 
-    private func syncInputs(_ s: Settings) -> [String] { [s.githubAccount, s.githubOrg, s.repoPath] }
+    private func syncInputs(_ s: Settings) -> [String] { [s.githubAccount, s.githubOrg, s.repo, "\(s.connections.linear != nil)"] }
 
     private func syncIfChanged() {
         guard syncInputs(settings) != syncInputs(synced) else { return }

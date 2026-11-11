@@ -522,7 +522,7 @@ private struct Buttons: View {
     var body: some View {
         let triage = Triage(store: store, id: item.id, task: store.tasks.first { $0.id == item.id })
         HStack(spacing: 6) {
-            if item.ticket != nil, item.branch != nil {
+            if item.ticket != nil, item.branch != nil, settings.codeReady {
                 TicketButton(store: store, item: item, triage: triage)
             } else if let pr = item.pr {
                 AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { open(pr) }

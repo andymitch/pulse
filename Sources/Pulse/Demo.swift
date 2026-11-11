@@ -5,11 +5,11 @@ let demoMode = CommandLine.arguments.contains("--demo")
 extension Settings {
     static var demo: Settings {
         var s = Settings()
-        s.githubOrg = "acmecorp"
-        s.githubAccount = "jane-acme"
-        s.repoPath = "~/code/acme"
-        s.slackChannels = [SlackChannel(id: "C1", name: "engineering"), SlackChannel(id: "C2", name: "launch")]
-        s.mail = true
+        s.connections.github = .init(account: "jane-acme", org: "acmecorp")
+        s.connections.linear = .init()
+        s.connections.code = .init(repo: "~/code/acme")
+        s.connections.slack = .init(channels: [SlackChannel(id: "C1", name: "engineering"), SlackChannel(id: "C2", name: "launch")])
+        s.connections.mail = .init()
         s.ides = [.zed, .cursor]
         s.voiceAsked = true
         return s

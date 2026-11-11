@@ -122,7 +122,7 @@ func mcpResponse(_ request: [String: Any], root: URL, project fallback: Project?
         result = ["tools": mcpTools]
     case "tools/call":
         let args = params["arguments"] as? [String: Any] ?? [:]
-        guard Settings.load(try? Data(contentsOf: root.appendingPathComponent("settings.json")), project: nil).agentAccess else {
+        guard Settings.load(try? Data(contentsOf: root.appendingPathComponent("settings.json")), connections: nil).agentAccess else {
             return ["jsonrpc": "2.0", "id": id, "result": ["content": [["type": "text", "text": "Agent access is off. Turn it on in Pulse → Settings → Agents."]], "isError": true]]
         }
         guard mcpTools.contains(where: { $0["name"] as? String == params["name"] as? String }) else {

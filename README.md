@@ -60,15 +60,15 @@ A local build is versioned after the latest tag with a `-dev` suffix, such as `1
 
 ## Setup
 
-Click the gear in the popover.
+Click the gear in the popover. The top of Settings lists the project's **connections**: GitHub, Linear, Slack, Mail and Code. Each has a **Remove** link, and **Add a connection** brings back the ones it doesn't have. Pulse only shows what a connection feeds: Trends and open tickets and PRs need GitHub or Linear, **Start** needs Code, and the briefing only reads the sources that are connected.
 
 1. **GitHub**: pick your `gh` account and organization, and your monthly PR target.
 2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's kept on this Mac in a file only your user can read, and can be replaced or removed in Settings.
-3. **Slack**: leave it on. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
-4. **Mail**: turn it on, and macOS asks once for permission to read Mail. Pulse reads your inbox only while Mail is open and never launches it.
+3. **Slack**: keep the connection. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
+4. **Mail**: add the connection, and macOS asks once for permission to read Mail. Pulse reads your inbox only while Mail is open and never launches it.
 5. **Shortcut**: press **⌃⌥⌘P** from any app to open and close Pulse, even when the menu bar icon is hidden behind the notch. Change or turn it off under Startup.
 6. **Meetings**: recording is on by default. Recording starts when another app uses your mic during a Google Meet call, a Slack huddle or a calendar event with attendees, and stops a short while after the mic is released. The menu bar icon turns into a red record button while it records. Press **Stop** in the Meetings header (or right-click the icon and choose **Stop Recording**) to end or skip a meeting, and **Start recording** to record one Pulse didn't detect. The first time, macOS asks for microphone, screen and system audio recording, and calendar access, and Pulse downloads about 500 MB of speech models. The briefing agent writes each summary from the transcript. Let people know you're recording.
-7. **Code**: set the repository and the folder for new worktrees, then choose your IDEs and terminal agents. In an agent command, `{prompt}` is replaced with the path of a file holding the ticket prompt.
+7. **Code**: set the repository and the folder for new worktrees. Below the connections, choose your IDEs and terminal agents. In an agent command, `{prompt}` is replaced with the path of a file holding the ticket prompt.
 8. **Briefing**: choose the agent command and the hour it runs. **Refresh** also syncs GitHub and Linear and then runs it, and the tasks update before the focus is written.
 9. **Startup**: turn on **Open Pulse at login** so it is running after a restart.
 
@@ -92,7 +92,7 @@ Every tool works on one project. `projects` lists them. A tool uses the `project
 ## Data
 
 Pulse keeps everything in `~/Library/Application Support/Pulse/`. Global settings live in `settings.json` there, and each project gets its own folder under `projects/<id>/` (for now there is one, made from your existing data the first time Pulse 5 runs):
-- `project.json`: the project's name and its source settings (GitHub, repo, Slack, mail)
+- `project.json`: the project's name and its connections (GitHub, Linear, Slack, Mail, Code) with their settings
 - `pulse.db`: the SQLite cache behind Trends, the facts Pulse has learned, and your tasks
 - `linear-key`: your Linear API key, readable only by your user
 - `synthesis.json`: the latest briefing

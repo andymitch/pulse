@@ -134,7 +134,7 @@ func writePrivate(_ data: Data, to url: URL) throws {
 }
 
 func linearKey() -> String? {
-    guard !CommandLine.arguments.contains("--self-test") else { return nil }
+    guard !CommandLine.arguments.contains("--self-test"), settings.connections.linear != nil else { return nil }
     return (try? Data(contentsOf: keyFile)).flatMap { String(data: $0, encoding: .utf8) }
 }
 
