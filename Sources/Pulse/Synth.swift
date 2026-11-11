@@ -39,7 +39,8 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     if s.recordMeetings { gather.append("Meetings Pulse recorded \(window), each a file with its summary, decisions, important points and the transcript, newest first: \(transcripts.isEmpty ? "none" : transcripts.joined(separator: ", ")).") }
     if !sessions.isEmpty { gather.append("\(me)'s sessions with coding agents (pi, Claude Code) in the \(s.repoName) repo, newest first, each a file with the folder it ran in and the conversation without tool output: \(sessions.joined(separator: ", ")). Use them for what was decided, done and left open; skip the mechanics of the work, and anything personal that isn't about the work, such as a job search, a résumé or health.") }
     gather.append("\(me)'s open work right now, from \([c.github != nil ? "GitHub" : nil, c.linear != nil ? "Linear" : nil].compactMap { $0 }.joined(separator: " and ")). Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
-    let kinds = (c.github != nil ? ["github"] : []) + (c.linear != nil ? ["linear"] : []) + (c.slack != nil ? ["slack"] : []) + (mail != nil ? ["mail"] : []) + ["meeting", "doc"] + (sessions.isEmpty ? [] : ["session"])
+    let on: [(String, Bool)] = [("github", c.github != nil), ("linear", c.linear != nil), ("slack", c.slack != nil), ("mail", mail != nil), ("meeting", true), ("doc", true), ("session", !sessions.isEmpty)]
+    let kinds = on.filter(\.1).map(\.0)
     let tools = (c.linear != nil ? ["Linear"] : []) + (c.slack != nil ? ["Slack"] : [])
     let kindList = kinds.map { "\"\($0)\"" }.joined(separator: " | ")
 
