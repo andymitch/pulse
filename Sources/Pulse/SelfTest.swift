@@ -443,6 +443,21 @@ func selfTest() throws {
           "a v5-beta.2 Code connection's one repo becomes its list of repos")
     check(githubSlug("git@github.com:KlearBusiness/core-infrastructure.git") == "klearbusiness/core-infrastructure" && githubSlug("https://github.com/klearbusiness/klear.git") == "klearbusiness/klear" && githubSlug("https://github.com/acme/web") == "acme/web"
           && githubSlug("https://github.com/acme/web/pull/12") == "acme/web" && githubSlug("https://gitlab.com/acme/web") == nil, "a GitHub remote or link names its repo")
+    let oldGitHub = try JSONDecoder().decode(Connections.GitHub.self, from: Data(#"{"account": "me", "org": "acme", "monthlyPRTarget": 30}"#.utf8))
+    check(oldGitHub.org == "acme" && oldGitHub.monthlyPRTarget == 30 && oldGitHub.repos.isEmpty && oldGitHub.issues == .off && oldGitHub.scope == "org:acme"
+          && Connections.GitHub(account: "me", org: "acme", repos: ["me/pulse", "me/vellum"]).scope == "repo:me/pulse repo:me/vellum" && Connections.GitHub().scope == "",
+          "a v5-beta.2 GitHub connection keeps its org, and named repos replace the org in what Pulse reads")
+    let issue = githubIssueItem(repo: "pulse", number: 139, title: "Start a session: for a task!", url: URL(string: "https://github.com/me/pulse/issues/139")!, since: Date())
+    let issuePR = ActionItem(id: "https://github.com/me/pulse/pull/140", kind: .followUp, title: "Sessions", reason: "Waiting on review", url: URL(string: "https://github.com/me/pulse/pull/140")!,
+                             started: true, branch: issue.branch, pr: URL(string: "https://github.com/me/pulse/pull/140")!, since: Date())
+    let joined = mergeTicketsAndPRs([issue, issuePR])
+    check(issue.id == "pulse#139" && issue.ticket == "pulse-139" && issue.branch == "pulse-139-start-a-session-for-a-task" && issue.issueID == nil
+          && joined.count == 1 && joined[0].started && joined[0].pr != nil, "a GitHub issue is a ticket with its own branch, and the PR on that branch joins it")
+    try db.query("INSERT INTO items (id, connection, kind, identifier, title, url, assignee, created_at, closed_at) VALUES ('gi', 'github', 'ticket', 'pulse#7', 'Done issue', 'https://x', 'me-gh', ?, ?), ('gl', 'linear', 'ticket', 'KLE-7', 'Done ticket', 'https://y', 'Me', ?, ?)",
+                 [iso.string(from: Date()), iso.string(from: Date()), iso.string(from: Date()), iso.string(from: Date())])
+    check(db.closedTickets(since: thisMonday, assignees: ["Me", "me-gh"]).map(\.id) == ["pulse#7", "KLE-7"] && db.closedTickets(since: thisMonday, assignees: ["me-gh"]).map(\.id) == ["pulse#7"],
+          "Done counts tickets closed this week from Linear and GitHub, by my name in each")
+    try db.query("DELETE FROM items WHERE id IN ('gi', 'gl')")
     let repos = ["/r/klear", "/r/infra"], slugs = ["/r/klear": "k/klear", "/r/infra": "k/infra"]
     let pick = { (pr: String?, branch: String?, chosen: [String: String]) in
         pickRepo(pr: pr.flatMap(URL.init), branch: branch, ticket: "KLE-1", repos: repos, slugs: slugs, branches: ["kle-1-x": "/r/infra"], chosen: chosen)

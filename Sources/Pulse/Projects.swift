@@ -1,7 +1,20 @@
 import Foundation
 
 struct Connections: Codable, Equatable {
-    struct GitHub: Codable, Equatable { var account = "", org = "", monthlyPRTarget = 40 }
+    struct GitHub: Codable, Equatable {
+        enum Issues: String, Codable, CaseIterable { case off, mine, all }
+        var account = "", org = "", monthlyPRTarget = 40, repos: [String] = [], issues = Issues.off
+        init(account: String = "", org: String = "", monthlyPRTarget: Int = 40, repos: [String] = [], issues: Issues = .off) {
+            (self.account, self.org, self.monthlyPRTarget, self.repos, self.issues) = (account, org, monthlyPRTarget, repos, issues)
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(account: try c.decodeIfPresent(String.self, forKey: .account) ?? "", org: try c.decodeIfPresent(String.self, forKey: .org) ?? "",
+                      monthlyPRTarget: try c.decodeIfPresent(Int.self, forKey: .monthlyPRTarget) ?? 40, repos: try c.decodeIfPresent([String].self, forKey: .repos) ?? [],
+                      issues: try c.decodeIfPresent(Issues.self, forKey: .issues) ?? .off)
+        }
+        var scope: String { repos.isEmpty ? (org.isEmpty ? "" : "org:\(org)") : repos.map { "repo:\($0)" }.joined(separator: " ") }
+    }
     struct Linear: Codable, Equatable {}
     struct Code: Codable, Equatable {
         var repos: [String] = [], worktrees = "~/worktrees"

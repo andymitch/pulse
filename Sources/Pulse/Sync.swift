@@ -6,6 +6,7 @@ let linearURL = URL(string: "https://api.linear.app/graphql")!
 
 private let reposQuery = "query($org: String!) { organization(login: $org) { repositories(first: 100, orderBy: {field: PUSHED_AT, direction: DESC}) { nodes { name pushedAt isArchived } } } }"
 private let prsQuery = "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { pullRequests(states: MERGED, first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { number title url headRefName createdAt mergedAt updatedAt additions author { __typename login ... on User { name email } } } } } }"
+private let closedIssuesQuery = "query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) { issues(states: CLOSED, first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) { pageInfo { hasNextPage endCursor } nodes { number title url createdAt closedAt updatedAt stateReason author { login } assignees(first: 1) { nodes { login } } } } } }"
 private let issuesQuery = "query($after: String, $since: DateTimeOrDuration) { issues(first: 100, after: $after, includeArchived: true, orderBy: updatedAt, filter: {updatedAt: {gt: $since}}) { pageInfo { hasNextPage endCursor } nodes { id identifier title url createdAt completedAt creator { name } assignee { name } } } }"
 
 struct SyncError: Error, CustomStringConvertible {
@@ -54,6 +55,19 @@ private struct PRsData: Decodable {
         let additions: Int
         let author: Author?
     }
+    let repository: Repo
+}
+
+private struct ClosedIssuesData: Decodable {
+    struct Login: Decodable { let login: String }
+    struct Issue: Decodable {
+        let number: Int
+        let title, url, createdAt, updatedAt: String
+        let closedAt, stateReason: String?
+        let author: Login?
+        let assignees: Nodes<Login>
+    }
+    struct Repo: Decodable { let issues: Page<Issue> }
     let repository: Repo
 }
 
@@ -163,13 +177,19 @@ func saveLinearKey(_ key: String) async throws {
 func syncGitHub(_ db: DB, token: String) async throws {
     let auth = "bearer \(token)"
     let (since, start) = window(db, "github_since")
-    guard !settings.githubOrg.isEmpty else { return }
-    let org = settings.githubOrg
-    let repos: ReposData = try await gql(githubURL, auth: auth, reposQuery, ["org": org])
-    for repo in repos.organization.repositories.nodes where !repo.isArchived && (repo.pushedAt ?? "") >= since {
+    guard let github = settings.connections.github, !github.scope.isEmpty else { return }
+    var repos = github.repos.compactMap { slug -> (owner: String, name: String)? in
+        let parts = slug.split(separator: "/").map(String.init)
+        return parts.count == 2 ? (parts[0], parts[1]) : nil
+    }
+    if github.repos.isEmpty {
+        let found: ReposData = try await gql(githubURL, auth: auth, reposQuery, ["org": github.org])
+        repos = found.organization.repositories.nodes.filter { !$0.isArchived && ($0.pushedAt ?? "") >= since }.map { (github.org, $0.name) }
+    }
+    for repo in repos {
         var after: String?
         while true {
-            let page: PRsData = try await gql(githubURL, auth: auth, prsQuery, ["owner": org, "name": repo.name, "after": after ?? NSNull()])
+            let page: PRsData = try await gql(githubURL, auth: auth, prsQuery, ["owner": repo.owner, "name": repo.name, "after": after ?? NSNull()])
             let prs = page.repository.pullRequests
             let fresh = prs.nodes.prefix { $0.updatedAt >= since }
             try db.transaction {
@@ -182,6 +202,21 @@ func syncGitHub(_ db: DB, token: String) async throws {
             }
             guard fresh.count == prs.nodes.count, prs.pageInfo.hasNextPage else { break }
             after = prs.pageInfo.endCursor
+        }
+        after = nil
+        while github.issues != .off {
+            let page: ClosedIssuesData = try await gql(githubURL, auth: auth, closedIssuesQuery, ["owner": repo.owner, "name": repo.name, "after": after ?? NSNull()])
+            let issues = page.repository.issues
+            let fresh = issues.nodes.prefix { $0.updatedAt >= since }
+            try db.transaction {
+                for i in fresh {
+                    try db.query("INSERT OR REPLACE INTO items (id, connection, kind, identifier, title, url, container, author, assignee, state, created_at, closed_at) VALUES (?, 'github', 'ticket', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                 ["github:issue:\(repo.name)#\(i.number)", "\(repo.name)#\(i.number)", i.title, i.url, repo.name, i.author?.login, i.assignees.nodes.first?.login ?? (github.issues == .all ? github.account : nil),
+                                  i.stateReason?.lowercased(), i.createdAt, i.stateReason == "COMPLETED" ? i.closedAt : nil])
+                }
+            }
+            guard fresh.count == issues.nodes.count, issues.pageInfo.hasNextPage else { break }
+            after = issues.pageInfo.endCursor
         }
     }
     try db.setMeta("github_since", start)

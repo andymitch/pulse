@@ -57,6 +57,14 @@ struct SettingsView: View {
                         } else {
                             loading("Organization", github.wrappedValue.org)
                         }
+                        TextField("Only these repos", text: Binding(get: { github.wrappedValue.repos.joined(separator: ", ") }, set: {
+                            github.wrappedValue.repos = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                        }), prompt: Text("owner/repo, owner/repo"))
+                        Picker("Issues as tickets", selection: github.issues) {
+                            Text("None").tag(Connections.GitHub.Issues.off)
+                            Text("Assigned to me").tag(Connections.GitHub.Issues.mine)
+                            Text("All open issues").tag(Connections.GitHub.Issues.all)
+                        }
                         LabeledContent("Monthly PR target") {
                             HStack(spacing: 8) {
                                 Button { github.monthlyPRTarget.wrappedValue = max(github.wrappedValue.monthlyPRTarget - 1, 1) } label: { Image(systemName: "minus").frame(width: 12, height: 12) }
@@ -304,10 +312,15 @@ struct SettingsView: View {
         if old.hotkey != new.hotkey { GlobalHotkey.register(new.hotkey) }
     }
 
-    private func syncInputs(_ s: Settings) -> [String] { [s.githubAccount, s.githubOrg, s.repos.joined(separator: ","), "\(s.connections.linear != nil)"] }
+    private func syncInputs(_ s: Settings) -> [String] {
+        [s.githubAccount, s.connections.github?.scope ?? "", s.connections.github?.issues.rawValue ?? "", s.repos.joined(separator: ","), "\(s.connections.linear != nil)"]
+    }
 
     private func syncIfChanged() {
         guard syncInputs(settings) != syncInputs(synced) else { return }
+        if settings.connections.github?.scope != synced.connections.github?.scope || settings.connections.github?.issues != synced.connections.github?.issues {
+            try? store.db.query("DELETE FROM meta WHERE key = 'github_since'")
+        }
         synced = settings
         store.load()
         Task { await store.refresh() }
