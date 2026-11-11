@@ -55,7 +55,6 @@ enum IDE: String, Codable, CaseIterable {
 
 struct Settings: Codable, Equatable {
     var connections = Connections()
-    var recordMeetings = true
     var ides: [IDE] = [.zed]
     var agents: [Agent] = Settings.agentPresets
     var briefingCommand = Settings.briefingPresets[0].command
@@ -91,9 +90,6 @@ struct Settings: Codable, Equatable {
     static func load(_ data: Data? = try? Data(contentsOf: file), connections: Connections? = project.connections) -> Settings {
         let defaults = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(Settings()))) as? [String: Any] ?? [:]
         var saved = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-        if saved["recordMeetings"] == nil, let meetings = saved["meetings"] as? [String] {
-            saved["recordMeetings"] = meetings.contains("record") || meetings.contains("superwhisper")
-        }
         let merged = defaults.merging(saved) { _, new in new }
         var loaded = (try? JSONSerialization.data(withJSONObject: merged)).flatMap { try? JSONDecoder().decode(Settings.self, from: $0) } ?? Settings()
         loaded.connections = connections ?? Connections()

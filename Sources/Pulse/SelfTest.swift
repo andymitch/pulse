@@ -84,15 +84,25 @@ func selfTest() throws {
     check(Version("v2-beta.1")! > Version("v1.3")!, "a beta of the next major beats the current stable")
     check(!(Version("1.0.0")! < Version("v1")!), "1.0.0 equals v1")
     check(Version("4.0.0-beta.4")! < Version("4-beta.5")!, "old X.Y.Z versions compare with tag-style ones")
-    let migrated = Settings.load(Data(#"{"meetings": ["superwhisper", "otter"], "superwhisperFolder": "~/x", "briefingHour": 9}"#.utf8))
-    check(migrated.recordMeetings && migrated.briefingHour == 9, "Superwhisper setting becomes recording, other settings kept")
+    check(Settings.load(Data(#"{"superwhisperFolder": "~/x", "briefingHour": 9}"#.utf8), connections: nil).briefingHour == 9, "old settings Pulse no longer has are ignored, the rest kept")
     let whisper = "com.superduper.superwhisper"
     check(callName(micUsers: [whisper], event: true, meetOpen: false) == nil && callName(micUsers: [whisper], event: false, meetOpen: false) == nil
           && callName(micUsers: ["com.tinyspeck.slackmacgap.helper"], event: false, meetOpen: false) == "Slack huddle"
           && callName(micUsers: ["com.google.Chrome"], event: false, meetOpen: true) == "Google Meet"
           && callName(micUsers: ["us.zoom.xos"], event: true, meetOpen: false) == "Call" && callName(micUsers: ["us.zoom.xos"], event: false, meetOpen: false) == nil,
           "only a call starts a recording: dictating before a meeting doesn't, a huddle or Meet window does, and a call app does when a meeting is on the calendar")
-    check(!Settings.load(Data(#"{"meetings": ["otter"]}"#.utf8)).recordMeetings && Settings.load(Data("{}".utf8)).recordMeetings, "recording stays off if it was off, and is on by default")
+    var work = Connections(), home = Connections(), quiet = Connections()
+    work.slack = .init(workspace: "klear", meetings: true)
+    work.google = .init(account: "me@klear.com")
+    home.google = .init()
+    quiet.slack = .init(workspace: "other")
+    let rooms = [("work", work), ("home", home), ("quiet", quiet)]
+    check(claimants(.slack(workspace: "klear"), in: rooms) == ["work"] && claimants(.slack(workspace: nil), in: rooms) == ["work"] && claimants(.slack(workspace: "other"), in: rooms).isEmpty
+          && claimants(.calendar(account: "ME@klear.com"), in: rooms) == ["work"] && claimants(.calendar(account: "me@gmail.com"), in: rooms) == ["home"]
+          && claimants(.calendar(account: nil), in: rooms) == ["work", "home"],
+          "a huddle goes to the project recording that workspace, a calendar call to the project with that account or any account, and an unknown Meet could be either")
+    let oldSlack = try JSONDecoder().decode(Connections.Slack.self, from: Data(#"{"channels": [{"id": "C1", "name": "eng"}]}"#.utf8))
+    check(oldSlack.channels.count == 1 && oldSlack.workspace == "" && !oldSlack.meetings, "a v5-beta.3 Slack connection keeps its channels and doesn't record huddles until asked")
     var off = Settings()
     off.hotkey = .off
     check(Settings.load(try JSONEncoder().encode(off)).hotkey == .off && Settings.load(Data("{}".utf8)).hotkey == .standard, "a turned-off shortcut stays off")
@@ -184,6 +194,7 @@ func selfTest() throws {
     let state = FileManager.default.temporaryDirectory.appendingPathComponent("slack-state-\(UUID()).json")
     defer { try? FileManager.default.removeItem(at: state) }
     try Data(#"{"workspaces": {"T02ABC": {"domain": "acme", "name": "Acme"}}}"#.utf8).write(to: state)
+    check(slackWorkspaces(state: state).map(\.domain) == ["acme"] && slackWorkspaces(state: state).first?.name == "Acme", "Pulse reads the signed-in Slack workspaces")
     let deep = slackDeepLink(URL(string: "https://acme.slack.com/archives/C08QBJ75EUB/p1793817031868429?thread_ts=1793810000.000100&cid=C08QBJ75EUB")!, state: state)
     check(deep?.absoluteString == "slack://channel?team=T02ABC&id=C08QBJ75EUB&message=1793817031.868429&thread_ts=1793810000.000100"
           && slackDeepLink(URL(string: "https://other.slack.com/archives/C1/p1793817031868429")!, state: state) == nil,

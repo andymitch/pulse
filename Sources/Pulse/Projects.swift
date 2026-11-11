@@ -31,13 +31,25 @@ struct Connections: Codable, Equatable {
             try c.encode(worktrees, forKey: .worktrees)
         }
     }
-    struct Slack: Codable, Equatable { var channels: [SlackChannel] = [] }
+    struct Slack: Codable, Equatable {
+        var channels: [SlackChannel] = [], workspace = "", meetings = false
+        init(channels: [SlackChannel] = [], workspace: String = "", meetings: Bool = false) { (self.channels, self.workspace, self.meetings) = (channels, workspace, meetings) }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(channels: try c.decodeIfPresent([SlackChannel].self, forKey: .channels) ?? [], workspace: try c.decodeIfPresent(String.self, forKey: .workspace) ?? "",
+                      meetings: try c.decodeIfPresent(Bool.self, forKey: .meetings) ?? false)
+        }
+    }
+    struct Google: Codable, Equatable { var account = "", meetings = true }
     struct Mail: Codable, Equatable { var days = 3 }
     var github: GitHub?
     var linear: Linear?
     var code: Code?
     var slack: Slack?
+    var google: Google?
     var mail: Mail?
+
+    var recordsMeetings: Bool { slack?.meetings == true || google?.meetings == true }
 
     var repos: [String] { (code?.repos ?? []).filter { !$0.isEmpty }.map(expand) }
     var worktrees: String { expand(code?.worktrees ?? "") }
@@ -165,6 +177,15 @@ final class Workspace: ObservableObject {
     func start() throws {
         projects = Project.all(in: Settings.dir)
         if projects.isEmpty { projects = [project] }
+        let raw = (try? Data(contentsOf: Settings.dir.appendingPathComponent("settings.json"))).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        if raw?["recordMeetings"] as? Bool == true, !projects.contains(where: { $0.connections.recordsMeetings }) {
+            var c = project.connections
+            c.slack?.meetings = true
+            c.google = c.google ?? Connections.Google()
+            try project.save(c)
+            settings.connections = c
+        }
+        if raw?["recordMeetings"] != nil { try settings.save() }
         for p in projects { _ = try open(p) }
         select(project)
     }
