@@ -291,9 +291,9 @@ extension DB {
         }
     }
 
-    func closedTickets(since: Date, assignee: String) -> [DoneItem] {
-        ((try? query("SELECT identifier, title, url, date(closed_at, 'localtime') FROM items WHERE kind = 'ticket' AND assignee = ? AND closed_at >= ? ORDER BY closed_at",
-                     [assignee, iso.string(from: since)])) ?? [])
+    func closedTickets(since: Date, assignees: [String]) -> [DoneItem] {
+        ((try? query("SELECT identifier, title, url, date(closed_at, 'localtime') FROM items WHERE kind = 'ticket' AND assignee IN (SELECT value FROM json_each(?)) AND closed_at >= ? ORDER BY closed_at",
+                     [String(decoding: (try? JSONEncoder().encode(assignees)) ?? Data("[]".utf8), as: UTF8.self), iso.string(from: since)])) ?? [])
             .compactMap { r in
                 guard let id = r[0] as? String, let title = r[1] as? String, let url = (r[2] as? String).flatMap(URL.init), let day = r[3] as? String else { return nil }
                 return DoneItem(id: id, title: title, url: url, source: id, day: day)

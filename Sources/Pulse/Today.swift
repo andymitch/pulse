@@ -151,8 +151,33 @@ func prReasons(ci: String?, mergeState: String?, decision: String?, unanswered: 
     return (failing, reasons)
 }
 
+private let githubIssuesToday = "query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on Issue { number title url createdAt repository { name } } } } }"
+
+private struct GitHubIssues: Decodable {
+    struct Issue: Decodable { struct Repo: Decodable { let name: String }; let number: Int?; let title, url, createdAt: String?; let repository: Repo? }
+    let search: Nodes<Issue>
+}
+
+func branchSlug(_ title: String) -> String {
+    String(title.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }).split(separator: "-").prefix(6).joined(separator: "-")
+}
+
+func githubIssueItem(repo: String, number: Int, title: String, url: URL, since: Date) -> ActionItem {
+    ActionItem(id: "\(repo)#\(number)", kind: .ticket, title: title, reason: "\(repo)#\(number)", url: url, ticket: "\(repo)-\(number)",
+               branch: "\(repo)-\(number)-\(branchSlug(title))", since: since)
+}
+
 func fetchGitHubToday(token: String) async throws -> [ActionItem] {
-    let scope = "is:open is:pr archived:false org:\(settings.githubOrg)"
+    guard let github = settings.connections.github, !github.scope.isEmpty else { return [] }
+    var issues: [ActionItem] = []
+    if github.issues != .off {
+        let found: GitHubIssues = try await gql(githubURL, auth: "bearer \(token)", githubIssuesToday, ["q": "is:open is:issue archived:false \(github.scope)" + (github.issues == .mine ? " assignee:@me" : "")])
+        issues = found.search.nodes.compactMap { i in
+            guard let repo = i.repository?.name, let n = i.number, let url = i.url.flatMap(URL.init) else { return nil }
+            return githubIssueItem(repo: repo, number: n, title: i.title ?? "", url: url, since: date(i.createdAt))
+        }
+    }
+    let scope = "is:open is:pr archived:false \(github.scope)"
     let d: GitHubToday = try await gql(githubURL, auth: "bearer \(token)", githubToday,
                                        ["review": "\(scope) review-requested:@me", "mine": "\(scope) author:@me"])
     var items: [ActionItem] = []
@@ -171,7 +196,7 @@ func fetchGitHubToday(token: String) async throws -> [ActionItem] {
                                 reason: (reasons.isEmpty ? ["Waiting on review"] : reasons).joined(separator: " · ") + " · \(pr.repository?.name ?? "")#\(pr.number ?? 0)",
                                 url: url, started: true, branch: pr.headRefName, pr: url, since: date(pr.createdAt)))
     }
-    return items
+    return items + issues
 }
 
 func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflow: [String: [WorkflowState]]) {
@@ -260,6 +285,27 @@ func ticketContext(key: String, ticket: String, branch: String, repo: String?) a
     let states = i.team.states.nodes
     let started = states.first { $0.name == "In Progress" } ?? states.min { $0.position < $1.position }
     return TicketContext(prompt: parts.joined(separator: "\n\n"), issueID: i.id, startedStateID: started?.id)
+}
+
+func githubIssueContext(token: String, url: URL, branch: String, repo: String?) async throws -> TicketContext {
+    let parts = url.pathComponents
+    guard parts.count >= 5, let n = Int(parts[4]) else { throw SyncError(description: "Not a GitHub issue link: \(url)") }
+    struct D: Decodable {
+        struct Comment: Decodable { struct A: Decodable { let login: String }; let body, createdAt: String; let author: A? }
+        struct Issue: Decodable { let title, url: String; let body: String?; let comments: Nodes<Comment> }
+        struct Repo: Decodable { let issue: Issue }
+        let repository: Repo
+    }
+    let d: D = try await gql(githubURL, auth: "bearer \(token)", """
+        query($owner: String!, $name: String!, $n: Int!) { repository(owner: $owner, name: $name) { issue(number: $n) { title url body comments(last: 10) { nodes { body createdAt author { login } } } } } }
+        """, ["owner": parts[1], "name": parts[2], "n": n])
+    let i = d.repository.issue
+    var text = ["Implement \(parts[2])#\(n): \(i.title)\n\(i.url)"]
+    if let body = i.body, !body.isEmpty { text.append("## Description\n\(body)") }
+    let comments = i.comments.nodes.map { "- \($0.createdAt.prefix(10)), \($0.author?.login ?? "Someone"): \($0.body)" }
+    if !comments.isEmpty { text.append("## Comments, oldest first\nLater comments override the description and earlier comments.\n" + comments.joined(separator: "\n")) }
+    text.append("Work on branch \(branch) in its own worktree of the \(repo.map(repoName) ?? parts[2]) repo.")
+    return TicketContext(prompt: text.joined(separator: "\n\n"), issueID: "", startedStateID: nil)
 }
 
 func moveIssue(key: String, issueID: String, stateID: String) async throws {
@@ -655,7 +701,11 @@ private struct TicketButton: View {
 
     private func menuItem(_ l: Launch) -> some View {
         Button { Task { await store.launch(l, item: item) } } label: {
-            Label { Text(l == .linear && !item.started ? "Open in Linear" : l.name) } icon: { icon(l) }
+            if l == .linear && item.issueID == nil {
+                Label { Text("Open in GitHub") } icon: { Image(nsImage: Brand.github.image(size: 13)) }
+            } else {
+                Label { Text(l == .linear && !item.started ? "Open in Linear" : l.name) } icon: { icon(l) }
+            }
         }
     }
 }

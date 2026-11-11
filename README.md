@@ -62,7 +62,7 @@ A local build is versioned after the latest tag with a `-dev` suffix, such as `1
 
 Click the gear in the popover. The top of Settings lists the project's **connections**: GitHub, Linear, Slack, Mail and Code. Each has a **Remove** link, and **Add a connection** brings back the ones it doesn't have. Pulse only shows what a connection feeds: Trends and open tickets and PRs need GitHub or Linear, **Start** needs Code, and the briefing only reads the sources that are connected.
 
-1. **GitHub**: pick your `gh` account and organization, and your monthly PR target.
+1. **GitHub**: pick your `gh` account and organization, and your monthly PR target. To read only some repos (or repos you own, with no organization), list them as `owner/repo`. **Issues as tickets** puts GitHub issues on your list like Linear tickets: the ones assigned to you, or every open issue for a repo that's all yours. Start opens a worktree on a branch named after the issue, a PR on that branch joins the issue, and closed issues count in Done and Trends.
 2. **Linear**: paste a personal API key (Linear, then Settings, Security & access). It's kept on this Mac in a file only your user can read, and can be replaced or removed in Settings.
 3. **Slack**: keep the connection. The briefing agent reads Slack through its own Slack MCP server, finds you from that login, and picks your busiest channels. You can name channels yourself if you prefer.
 4. **Mail**: add the connection, and macOS asks once for permission to read Mail. Pulse reads your inbox only while Mail is open and never launches it.

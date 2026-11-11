@@ -79,7 +79,7 @@ final class Store: ObservableObject {
         return totals.keys.sorted { (totals[$0]!, $1) > (totals[$1]!, $0) }
     }
 
-    var metrics: [TrendMetric] { (settings.connections.github != nil ? [.prs] : []) + (hasLinearKey ? [.closed] : []) }
+    var metrics: [TrendMetric] { (settings.connections.github != nil ? [.prs] : []) + (hasLinearKey || (settings.connections.github?.issues ?? .off) != .off ? [.closed] : []) }
 
     var meInTrends: String? { metric == .prs ? (settings.githubAccount.isEmpty ? nil : settings.githubAccount) : me }
 
@@ -116,8 +116,12 @@ final class Store: ObservableObject {
         if let key = linearKey() {
             do { (linear, workflow) = try await fetchLinearToday(key: key) } catch { errors.append("\(error)") }
         }
-        today = mergeTicketsAndPRs(github + linear)
         (localBranches, slugs) = await Task.detached { (Pulse.localBranches(), repoSlugs()) }.value
+        today = mergeTicketsAndPRs(github + linear).map { item in
+            var item = item
+            if item.issueID == nil, item.kind == .ticket, let branch = item.branch, localBranches[branch] != nil { item.started = true }
+            return item
+        }
         todayFetched = Date()
         fetchedOK = errors.isEmpty
         recordDone()
@@ -238,7 +242,7 @@ final class Store: ObservableObject {
         let logged = Set(log.map(\.id))
         log += rows.filter { done.contains($0.id) && !logged.contains($0.id) }
             .map { DoneItem(id: $0.id, title: $0.item.title, url: $0.item.url, source: $0.item.reason, day: doneIDs[$0.id] ?? day) }
-        if let me { log += db.closedTickets(since: thisMonday, assignee: me).filter { !logged.contains($0.id) && !shown.contains($0.id) } }
+        log += db.closedTickets(since: thisMonday, assignees: [me, settings.githubAccount].compactMap { $0 }.filter { !$0.isEmpty }).filter { !logged.contains($0.id) && !shown.contains($0.id) }
         guard log != doneThisWeek else { return }
         doneThisWeek = log
         save(log, weekKey)
@@ -293,7 +297,7 @@ final class Store: ObservableObject {
     }
 
     func repo(for item: ActionItem) -> String? {
-        pickRepo(pr: item.pr, branch: item.branch, ticket: item.ticket, repos: settings.repos, slugs: slugs, branches: localBranches, chosen: db.decode("ticket_repos") ?? [:])
+        pickRepo(pr: item.pr ?? (item.issueID == nil ? item.url : nil), branch: item.branch, ticket: item.ticket, repos: settings.repos, slugs: slugs, branches: localBranches, chosen: db.decode("ticket_repos") ?? [:])
     }
 
     func choose(repo: String, for ticket: String) {
@@ -314,12 +318,11 @@ final class Store: ObservableObject {
         do {
             switch choice {
             case .linear:
-                open(item.url, in: .linear)
+                open(item.url, in: item.url.host == "linear.app" ? .linear : nil)
             case .pr:
                 if let pr = item.pr { open(pr) }
             case .prompt:
-                guard let key = linearKey() else { return }
-                let ctx = try await ticketContext(key: key, ticket: ticket, branch: branch, repo: repo)
+                let ctx = try await context(item, ticket: ticket, branch: branch, repo: repo)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(ctx.prompt, forType: .string)
             case .ide(let ide) where item.started:
@@ -328,11 +331,11 @@ final class Store: ObservableObject {
                 localBranches[branch] = repo
                 try openInIDE(ide, path: path)
             case .ide, .agent:
-                guard let key = linearKey(), let repo else { return }
-                let ctx = try await ticketContext(key: key, ticket: ticket, branch: branch, repo: repo)
+                guard let repo else { return }
+                let ctx = try await context(item, ticket: ticket, branch: branch, repo: repo)
                 let path = try await Task.detached { try worktree(for: branch, ticket: ticket, repo: repo) }.value
                 localBranches[branch] = repo
-                if let state = ctx.startedStateID { try await moveIssue(key: key, issueID: ctx.issueID, stateID: state) }
+                if let state = ctx.startedStateID, let key = linearKey() { try await moveIssue(key: key, issueID: ctx.issueID, stateID: state) }
                 if let i = today.firstIndex(where: { $0.id == item.id }) {
                     today[i].started = true
                     today[i].state = workflow[item.teamID ?? ""]?.first { $0.id == ctx.startedStateID } ?? today[i].state
@@ -346,6 +349,12 @@ final class Store: ObservableObject {
         } catch {
             lastError = "\(error)"
         }
+    }
+
+    private func context(_ item: ActionItem, ticket: String, branch: String, repo: String?) async throws -> TicketContext {
+        if item.issueID == nil { return try await githubIssueContext(token: try ghToken(), url: item.url, branch: branch, repo: repo) }
+        guard let key = linearKey() else { throw SyncError(description: "Add your Linear key in Settings first.") }
+        return try await ticketContext(key: key, ticket: ticket, branch: branch, repo: repo)
     }
 
     private func writePrompt(_ prompt: String, name: String) throws -> URL {
