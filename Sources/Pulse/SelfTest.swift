@@ -434,9 +434,22 @@ func selfTest() throws {
     check(global.githubOrg == "acmecorp" && global.briefingHour == 6 && global.defaultProject == "acme" && !raw.contains("githubOrg"),
           "source settings move into the project, and the rest stay global with the project as the default")
     check((try? DB(path: v4.appendingPathComponent("pulse.db").path)) == nil, "an older Pulse can't open the moved database and start empty")
-    check(acme.connections.github?.org == "acmecorp" && acme.connections.code?.repo == "~/code/acme" && acme.connections.linear != nil
+    check(acme.connections.github?.org == "acmecorp" && acme.connections.code?.repos == ["~/code/acme"] && acme.connections.linear != nil
           && acme.connections.slack != nil && acme.connections.mail == nil && acme.fields?["githubOrg"] == nil,
           "the project's settings become connections: GitHub, Code, Linear for the saved key, Slack as it was on, and no Mail")
+    let beta2Code = try JSONDecoder().decode(Connections.Code.self, from: Data(#"{"repo": "~/dev/klear", "worktrees": "~/w"}"#.utf8))
+    let beta2Encoded = String(decoding: try JSONEncoder().encode(beta2Code), as: UTF8.self)
+    check(beta2Code.repos == ["~/dev/klear"] && beta2Code.worktrees == "~/w" && beta2Encoded.contains("\"repos\"") && !beta2Encoded.contains("\"repo\""),
+          "a v5-beta.2 Code connection's one repo becomes its list of repos")
+    check(githubSlug("git@github.com:KlearBusiness/core-infrastructure.git") == "klearbusiness/core-infrastructure" && githubSlug("https://github.com/klearbusiness/klear.git") == "klearbusiness/klear" && githubSlug("https://github.com/acme/web") == "acme/web"
+          && githubSlug("https://github.com/acme/web/pull/12") == "acme/web" && githubSlug("https://gitlab.com/acme/web") == nil, "a GitHub remote or link names its repo")
+    let repos = ["/r/klear", "/r/infra"], slugs = ["/r/klear": "k/klear", "/r/infra": "k/infra"]
+    let pick = { (pr: String?, branch: String?, chosen: [String: String]) in
+        pickRepo(pr: pr.flatMap(URL.init), branch: branch, ticket: "KLE-1", repos: repos, slugs: slugs, branches: ["kle-1-x": "/r/infra"], chosen: chosen)
+    }
+    check(pick("https://github.com/k/infra/pull/3", nil, ["KLE-1": "/r/klear"]) == "/r/infra" && pick(nil, "kle-1-x", ["KLE-1": "/r/klear"]) == "/r/infra"
+          && pick(nil, "other", ["KLE-1": "/r/infra"]) == "/r/infra" && pick(nil, nil, [:]) == "/r/klear" && pick(nil, nil, ["KLE-1": "/gone"]) == "/r/klear",
+          "a ticket starts in its PR's repo, else the repo with its branch, else the one picked for it, else the first")
     let beta1 = Project(id: "beta1", root: v4)
     try FileManager.default.createDirectory(at: beta1.dir, withIntermediateDirectories: true)
     try Data(#"{"name": "Beta", "githubAccount": "me", "githubOrg": "", "repoPath": "", "slack": false, "mail": true, "mailDays": 5}"#.utf8).write(to: beta1.file)

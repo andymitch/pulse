@@ -3,7 +3,21 @@ import Foundation
 struct Connections: Codable, Equatable {
     struct GitHub: Codable, Equatable { var account = "", org = "", monthlyPRTarget = 40 }
     struct Linear: Codable, Equatable {}
-    struct Code: Codable, Equatable { var repo = "", worktrees = "~/worktrees" }
+    struct Code: Codable, Equatable {
+        var repos: [String] = [], worktrees = "~/worktrees"
+        init(repos: [String] = [], worktrees: String = "~/worktrees") { self.repos = repos; self.worktrees = worktrees }
+        private enum Keys: String, CodingKey { case repos, repo, worktrees }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            repos = try c.decodeIfPresent([String].self, forKey: .repos) ?? [c.decodeIfPresent(String.self, forKey: .repo)].compactMap { $0 }.filter { !$0.isEmpty }
+            worktrees = try c.decodeIfPresent(String.self, forKey: .worktrees) ?? "~/worktrees"
+        }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: Keys.self)
+            try c.encode(repos, forKey: .repos)
+            try c.encode(worktrees, forKey: .worktrees)
+        }
+    }
     struct Slack: Codable, Equatable { var channels: [SlackChannel] = [] }
     struct Mail: Codable, Equatable { var days = 3 }
     var github: GitHub?
@@ -18,7 +32,7 @@ struct Connections: Codable, Equatable {
         let text = { (key: String) in f[key] as? String ?? "" }
         github = GitHub(account: text("githubAccount"), org: text("githubOrg"), monthlyPRTarget: f["monthlyPRTarget"] as? Int ?? 40)
         linear = hasKey ? Linear() : nil
-        code = text("repoPath").isEmpty ? nil : Code(repo: text("repoPath"), worktrees: f["worktreeRoot"] as? String ?? "~/worktrees")
+        code = text("repoPath").isEmpty ? nil : Code(repos: [text("repoPath")], worktrees: f["worktreeRoot"] as? String ?? "~/worktrees")
         slack = f["slack"] as? Bool ?? true ? Slack(channels: (f["slackChannels"] as? [[String: String]] ?? []).compactMap { c in c["id"].flatMap { id in c["name"].map { SlackChannel(id: id, name: $0) } } }) : nil
         mail = f["mail"] as? Bool ?? false ? Mail(days: f["mailDays"] as? Int ?? 3) : nil
     }
@@ -67,7 +81,7 @@ struct Project: Equatable {
         return (global?["defaultProject"] as? String).flatMap { id in projects.first { $0.id == id } }
     }
 
-    var folders: [String] { [connections.code?.repo, connections.code?.worktrees].compactMap { $0 }.filter { !$0.isEmpty }.map(expand) }
+    var folders: [String] { ((connections.code?.repos ?? []) + [connections.code?.worktrees ?? ""]).filter { !$0.isEmpty }.map(expand) }
 
     static func migrate(_ root: URL, legacyLinearKey: () -> Data? = { nil }) throws {
         let fm = FileManager.default

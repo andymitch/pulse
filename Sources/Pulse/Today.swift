@@ -230,7 +230,7 @@ struct TicketContext {
     let startedStateID: String?
 }
 
-func ticketContext(key: String, ticket: String, branch: String) async throws -> TicketContext {
+func ticketContext(key: String, ticket: String, branch: String, repo: String?) async throws -> TicketContext {
     struct D: Decodable {
         struct Issue: Decodable {
             struct Parent: Decodable { let identifier, title: String }
@@ -256,7 +256,7 @@ func ticketContext(key: String, ticket: String, branch: String) async throws -> 
     if let desc = i.description, !desc.isEmpty { parts.append("## Description\n\(desc)") }
     let comments = i.comments.nodes.sorted { $0.createdAt < $1.createdAt }.map { "- \($0.createdAt.prefix(10)), \($0.user?.name ?? "Someone"): \($0.body)" }
     if !comments.isEmpty { parts.append("## Comments, oldest first\nLater comments override the description and earlier comments.\n" + comments.joined(separator: "\n")) }
-    parts.append("Work on branch \(branch) in its own worktree of the \(settings.repoName) repo.")
+    parts.append("Work on branch \(branch) in its own worktree of the \(repo.map(repoName) ?? "project's") repo.")
     let states = i.team.states.nodes
     let started = states.first { $0.name == "In Progress" } ?? states.min { $0.position < $1.position }
     return TicketContext(prompt: parts.joined(separator: "\n\n"), issueID: i.id, startedStateID: started?.id)
@@ -626,6 +626,17 @@ private struct TicketButton: View {
                 Divider()
                 menuItem(.prompt)
             } else {
+                if settings.repos.count > 1, let ticket = item.ticket {
+                    let current = store.repo(for: item)
+                    Menu("Repo: \(current.map(repoName) ?? "")") {
+                        ForEach(settings.repos, id: \.self) { repo in
+                            Button { store.choose(repo: repo, for: ticket) } label: {
+                                if repo == current { Label(repoName(repo), systemImage: "checkmark") } else { Text(repoName(repo)) }
+                            }
+                        }
+                    }
+                    Divider()
+                }
                 menuItem(.prompt)
                 if !ides.isEmpty { Section("Start in") { ForEach(ides, id: \.self) { menuItem($0) } } }
                 if !agents.isEmpty { Section("Start in \(terminalName)") { ForEach(agents, id: \.self) { menuItem($0) } } }

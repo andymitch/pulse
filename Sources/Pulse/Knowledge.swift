@@ -66,7 +66,7 @@ struct KnowledgeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                TextField(settings.codeReady ? "Ask about \(settings.repoName)…" : "Ask about your work…", text: $question)
+                TextField("Ask about \(project.name)…", text: $question)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(ask)
                     .disabled(asking)
