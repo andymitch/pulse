@@ -99,9 +99,13 @@ struct ContentView: View {
             .map { Count(bucket: $0.key[0], person: $0.key[1], n: $0.value.count) }
     }
 
+    private var refreshHelp: String {
+        let state = store.syncing ? "Syncing…" : store.synthesizing ? "Writing the briefing…" : store.lastSync.map { "Synced \($0.formatted(.relative(presentation: .named)))" } ?? "Not synced yet"
+        return "\(state). Refresh syncs \(project.name)'s connections, then updates the tasks and the briefing."
+    }
+
     private var header: some View {
         HStack {
-            Text("Pulse").font(.title3.bold())
             if workspace.projects.count > 1 {
                 Menu {
                     ForEach(workspace.projects, id: \.id) { p in
@@ -110,11 +114,18 @@ struct ContentView: View {
                         }
                     }
                 } label: {
-                    Text(project.name)
+                    HStack(spacing: 4) {
+                        Text(project.name).font(.title3.bold())
+                        Image(systemName: "chevron.down").font(.caption.bold()).foregroundStyle(.secondary)
+                    }
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .help("Switch project")
+            } else {
+                Text("Pulse").font(.title3.bold())
             }
             Picker("", selection: $store.page) {
                 ForEach(PulseTab.allCases.filter { ($0 != .meetings || meetings.shown) && ($0 != .trends || !store.metrics.isEmpty) }, id: \.self) { tab in
@@ -126,28 +137,25 @@ struct ContentView: View {
             .fixedSize()
             .padding(.leading, 8)
             Spacer()
-            if store.syncing {
-                ProgressView().controlSize(.small)
-                Text("Syncing…").foregroundStyle(.secondary)
-            } else if let last = store.lastSync {
-                Text("Synced \(last, format: .relative(presentation: .named))").foregroundStyle(.secondary).lineLimit(1).fixedSize()
-            }
-            if updater.installing {
-                ProgressView().controlSize(.small)
-                Text("Updating…").foregroundStyle(.secondary)
-            } else if let release = updater.available {
-                Button { Task { await updater.install() } } label: { Label("Update to \(release.tag_name)", systemImage: "arrow.down.circle") }
-                    .buttonStyle(.borderedProminent)
-                    .help(updater.error ?? "Install the update and relaunch Pulse")
-            }
-            Button("Refresh") { Task { await store.refreshAll() } }
-            .disabled(store.syncing || store.synthesizing)
-            .help("Sync GitHub and Linear, then update the tasks and the briefing")
-            Button { store.showingSettings = true } label: {
-                Image(systemName: "gear").font(.system(size: 17)).foregroundStyle(.secondary)
+            Button { Task { await store.refreshAll() } } label: {
+                if store.syncing || store.synthesizing {
+                    ProgressView().controlSize(.small).frame(width: 18, height: 18)
+                } else {
+                    Image(systemName: "arrow.clockwise").font(.system(size: 15)).foregroundStyle(.secondary).frame(width: 18, height: 18)
+                }
             }
             .buttonStyle(.plain)
-            .help("Settings")
+            .disabled(store.syncing || store.synthesizing)
+            .help(refreshHelp)
+            .accessibilityLabel("Refresh")
+            Button { store.showingSettings = true } label: {
+                Image(systemName: "gear").font(.system(size: 17)).foregroundStyle(.secondary)
+                    .overlay(alignment: .topTrailing) {
+                        if updater.available != nil { Circle().fill(.blue).frame(width: 7, height: 7).offset(x: 2, y: -1) }
+                    }
+            }
+            .buttonStyle(.plain)
+            .help(updater.available.map { "Settings · \($0.tag_name) is ready to install" } ?? "Settings")
         }
         .padding(.horizontal, 16)
     }
