@@ -13,6 +13,9 @@ struct ActionItem: Identifiable {
     var started = false
     var branch: String?
     var pr: URL?
+    var base: String?
+    var draft = false
+    var stack: [ActionItem] = []
     var notificationID: String?
     var issueID: String?
     var teamID: String?
@@ -29,7 +32,7 @@ private let githubToday = """
 query($review: String!, $mine: String!) {
   viewer { login }
   review: search(query: $review, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url createdAt isDraft author { login } repository { name } } } }
-  mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url createdAt isDraft headRefName mergeStateStatus reviewDecision repository { name }
+  mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url createdAt isDraft headRefName baseRefName mergeStateStatus reviewDecision repository { name }
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     reviewThreads(first: 100) { nodes { isResolved comments(last: 1) { nodes { author { login } } } } } } } }
 }
@@ -55,7 +58,7 @@ private struct GitHubToday: Decodable {
         struct Commit: Decodable { struct C: Decodable { struct R: Decodable { let state: String }; let statusCheckRollup: R? }; let commit: C }
         struct Thread: Decodable { struct Comment: Decodable { let author: Login? }; let isResolved: Bool; let comments: Nodes<Comment> }
         let number: Int?
-        let title, url, createdAt, headRefName, mergeStateStatus, reviewDecision: String?
+        let title, url, createdAt, headRefName, baseRefName, mergeStateStatus, reviewDecision: String?
         let isDraft: Bool?
         let repository: Repo?
         let commits: Nodes<Commit>?
@@ -193,8 +196,8 @@ func fetchGitHubToday(token: String, github: Connections.GitHub) async throws ->
         let replies = (pr.reviewThreads?.nodes ?? []).filter { !$0.isResolved && $0.comments.nodes.last?.author?.login != d.viewer.login }.count
         let (failing, reasons) = prReasons(ci: ci, mergeState: pr.mergeStateStatus, decision: pr.reviewDecision, unanswered: replies)
         items.append(ActionItem(id: url.absoluteString, kind: failing ? .failing : reasons.isEmpty ? .followUp : .pr, title: pr.title ?? "",
-                                reason: (reasons.isEmpty ? ["Waiting on review"] : reasons).joined(separator: " · ") + " · \(pr.repository?.name ?? "")#\(pr.number ?? 0)",
-                                url: url, started: true, branch: pr.headRefName, pr: url, since: date(pr.createdAt)))
+                                reason: (reasons.isEmpty ? [pr.isDraft == true ? "Draft" : "Waiting on review"] : reasons).joined(separator: " · ") + " · \(pr.repository?.name ?? "")#\(pr.number ?? 0)",
+                                url: url, started: true, branch: pr.headRefName, pr: url, base: pr.baseRefName, draft: pr.isDraft == true, since: date(pr.createdAt)))
     }
     return items + issues
 }
@@ -224,8 +227,30 @@ func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflo
     return (tickets + notes, workflow)
 }
 
+func stacked(_ prs: [ActionItem]) -> [ActionItem] {
+    let byHead = Dictionary(prs.compactMap { p in p.branch.map { ($0, p) } }) { a, _ in a }
+    let chain = { (p: ActionItem) -> [ActionItem] in
+        var path = [p]
+        while let base = path.last?.base, let below = byHead[base], !path.contains(where: { $0.id == below.id }) { path.append(below) }
+        return path
+    }
+    return Dictionary(grouping: prs) { chain($0).last!.id }.values.map { group in
+        let ordered = group.sorted { chain($0).count < chain($1).count }
+        guard ordered.count > 1 else { return ordered[0] }
+        var root = ordered[0]
+        let urgent = ordered.min { $0.kind.rawValue < $1.kind.rawValue }!
+        let drafts = ordered.filter(\.draft).count
+        root.stack = ordered
+        root.kind = urgent.kind
+        root.draft = drafts == ordered.count
+        root.reason = (["Stack of \(ordered.count) PRs"] + (drafts > 0 ? ["\(drafts == ordered.count ? "all" : "\(drafts)") draft\(drafts == 1 ? "" : "s")"] : [])
+                       + (urgent.kind.rawValue < ActionItem.Kind.followUp.rawValue ? [urgent.reason] : [])).joined(separator: " · ")
+        return root
+    }
+}
+
 func mergeTicketsAndPRs(_ items: [ActionItem]) -> [ActionItem] {
-    let prs = items.filter { $0.pr != nil && $0.kind != .review }
+    let prs = stacked(items.filter { $0.pr != nil && $0.kind != .review })
     var used = Set<String>()
     var merged = items.compactMap { item -> ActionItem? in
         guard item.kind == .ticket, let ticket = item.ticket?.lowercased() else { return item.pr != nil && item.kind != .review ? nil : item }
@@ -237,6 +262,7 @@ func mergeTicketsAndPRs(_ items: [ActionItem]) -> [ActionItem] {
             item.started = true
             item.kind = pr.kind == .followUp ? .ticket : pr.kind
             item.reason += " · " + pr.reason
+            item.stack = pr.stack
         }
         return item
     }
@@ -482,9 +508,37 @@ private struct TodoRowView: View {
                 Text([later ? "Later" : nil, row.why, item.reason].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
+                if !item.stack.isEmpty, !row.done { StackList(prs: item.stack) }
             }
             Spacer()
             if !row.done { Buttons(store: store, item: item) }
+        }
+    }
+}
+
+private struct StackList: View {
+    let prs: [ActionItem]
+    @State private var open = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $open) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(prs.enumerated()), id: \.element.id) { i, pr in
+                    Button { Pulse.open(pr.url) } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(i + 1). \(pr.title)").lineLimit(1)
+                            Text(pr.reason).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open the PR")
+                }
+            }
+            .padding(.top, 2)
+        } label: {
+            Text(open ? "Hide the \(prs.count) PRs" : "Show the \(prs.count) PRs, bottom first").font(.caption).foregroundStyle(.secondary)
         }
     }
 }
