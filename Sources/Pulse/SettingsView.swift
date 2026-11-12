@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var calendars: [String] = []
     @State private var removing: Project?
     @ObservedObject private var workspace = Workspace.shared
+    @ObservedObject private var updater = Updater.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +41,16 @@ struct SettingsView: View {
 
     private var form: some View {
         Form {
+            if let release = updater.available {
+                Section {
+                    HStack {
+                        Text("Pulse \(release.tag_name) is ready")
+                        Spacer()
+                        if updater.installing { ProgressView().controlSize(.small) } else { Button("Update and relaunch") { Task { await updater.install() } } }
+                    }
+                    if let error = updater.error { Text(error).font(.caption).foregroundStyle(.red) }
+                } header: { header("Update", nil, symbol: "arrow.down.circle") }
+            }
             Section {
                 ForEach(workspace.projects, id: \.id) { p in
                     HStack {
