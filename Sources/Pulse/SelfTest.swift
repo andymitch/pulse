@@ -69,6 +69,20 @@ func selfTest() throws {
     check(merged.map(\.id) == ["KLE-1", "rev", "pr9", "KLE-2"], "ticket absorbs its PR and takes its urgency")
     check(merged[0].kind == .failing && merged[0].pr == u && merged[0].reason.hasSuffix("CI failing"), "merged ticket carries PR state")
     check(!merged[3].started && merged[3].pr == nil, "todo ticket stays startable")
+    let pr = { (n: Int, branch: String, base: String, kind: ActionItem.Kind, reason: String, draft: Bool) in
+        ActionItem(id: "p\(n)", kind: kind, title: "PR \(n)", reason: reason, url: u, started: true, branch: branch, pr: u, base: base, draft: draft, since: Date())
+    }
+    let stack = mergeTicketsAndPRs([
+        pr(3, "kle-1359-z", "kle-1358-y", .failing, "CI failing · klear#3", false),
+        ActionItem(id: "KLE-1300", kind: .ticket, title: "Entity services", reason: "KLE-1300", url: u, ticket: "KLE-1300", branch: "kle-1300-x", since: Date()),
+        pr(1, "kle-1300-x", "main", .followUp, "Draft · klear#1", true),
+        pr(9, "other", "main", .followUp, "Waiting on review · klear#9", false),
+        pr(2, "kle-1358-y", "kle-1300-x", .followUp, "Draft · klear#2", true),
+    ])
+    let stackTicket = stack.first { $0.id == "KLE-1300" }
+    check(stack.count == 2 && stackTicket?.stack.map(\.id) == ["p1", "p2", "p3"] && stackTicket?.kind == .failing
+          && stackTicket?.reason == "KLE-1300 · Stack of 3 PRs · 2 drafts · CI failing · klear#3" && stack.contains { $0.id == "p9" && $0.stack.isEmpty },
+          "PRs stacked on each other's branches show as one task under the ticket at the bottom, bottom first, with the stack's most urgent status")
     let weeks = try db.trends(since: "2026-09-01", range: .month)
     check(Set(weeks.prs.map(\.bucket)) == ["2026-08-31", "2026-09-28"], "weeks start on Monday")
     check(TrendRange.month.buckets(now: iso.date(from: "2026-10-21T12:00:00Z")!) == ["2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"], "last 5 weeks")

@@ -51,7 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self?.statusItem.button?.title = n > 0 ? "\(n)" : ""
                 self?.statusItem.button?.imagePosition = .imageLeading
             }
+            let size = self.popover.contentSize
             self.popover.contentViewController = NSHostingController(rootView: ContentView(store: store))
+            if size.width > 0 { self.popover.contentSize = size }
         }
 
         recordingIcon = Meetings.shared.$recording.sink { [weak self] meeting in
