@@ -16,6 +16,7 @@ struct ActionItem: Identifiable {
     var base: String?
     var draft = false
     var stack: [ActionItem] = []
+    var closes: [Int] = []
     var notificationID: String?
     var issueID: String?
     var teamID: String?
@@ -32,7 +33,7 @@ private let githubToday = """
 query($review: String!, $mine: String!) {
   viewer { login }
   review: search(query: $review, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url createdAt isDraft author { login } repository { name } } } }
-  mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title url createdAt isDraft headRefName baseRefName mergeStateStatus reviewDecision repository { name }
+  mine: search(query: $mine, type: ISSUE, first: 50) { nodes { ... on PullRequest { number title body url createdAt isDraft headRefName baseRefName mergeStateStatus reviewDecision repository { name }
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
     reviewThreads(first: 100) { nodes { isResolved comments(last: 1) { nodes { author { login } } } } } } } }
 }
@@ -58,7 +59,7 @@ private struct GitHubToday: Decodable {
         struct Commit: Decodable { struct C: Decodable { struct R: Decodable { let state: String }; let statusCheckRollup: R? }; let commit: C }
         struct Thread: Decodable { struct Comment: Decodable { let author: Login? }; let isResolved: Bool; let comments: Nodes<Comment> }
         let number: Int?
-        let title, url, createdAt, headRefName, baseRefName, mergeStateStatus, reviewDecision: String?
+        let title, body, url, createdAt, headRefName, baseRefName, mergeStateStatus, reviewDecision: String?
         let isDraft: Bool?
         let repository: Repo?
         let commits: Nodes<Commit>?
@@ -197,7 +198,7 @@ func fetchGitHubToday(token: String, github: Connections.GitHub) async throws ->
         let (failing, reasons) = prReasons(ci: ci, mergeState: pr.mergeStateStatus, decision: pr.reviewDecision, unanswered: replies)
         items.append(ActionItem(id: url.absoluteString, kind: failing ? .failing : reasons.isEmpty ? .followUp : .pr, title: pr.title ?? "",
                                 reason: (reasons.isEmpty ? [pr.isDraft == true ? "Draft" : "Waiting on review"] : reasons).joined(separator: " · ") + " · \(pr.repository?.name ?? "")#\(pr.number ?? 0)",
-                                url: url, started: true, branch: pr.headRefName, pr: url, base: pr.baseRefName, draft: pr.isDraft == true, since: date(pr.createdAt)))
+                                url: url, started: true, branch: pr.headRefName, pr: url, base: pr.baseRefName, draft: pr.isDraft == true, closes: closedIssues(pr.body ?? ""), since: date(pr.createdAt)))
     }
     return items + issues
 }
@@ -227,6 +228,11 @@ func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflo
     return (tickets + notes, workflow)
 }
 
+func closedIssues(_ body: String) -> [Int] {
+    let pattern = try! NSRegularExpression(pattern: #"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b"#, options: .caseInsensitive)
+    return pattern.matches(in: body, range: NSRange(body.startIndex..., in: body)).compactMap { Int((body as NSString).substring(with: $0.range(at: 1))) }
+}
+
 func stacked(_ prs: [ActionItem]) -> [ActionItem] {
     let byHead = Dictionary(prs.compactMap { p in p.branch.map { ($0, p) } }) { a, _ in a }
     let chain = { (p: ActionItem) -> [ActionItem] in
@@ -241,6 +247,7 @@ func stacked(_ prs: [ActionItem]) -> [ActionItem] {
         let urgent = ordered.min { $0.kind.rawValue < $1.kind.rawValue }!
         let drafts = ordered.filter(\.draft).count
         root.stack = ordered
+        root.closes = ordered.flatMap(\.closes)
         root.kind = urgent.kind
         root.draft = drafts == ordered.count
         root.reason = (["Stack of \(ordered.count) PRs"] + (drafts > 0 ? ["\(drafts == ordered.count ? "all" : "\(drafts)") draft\(drafts == 1 ? "" : "s")"] : [])
@@ -255,7 +262,11 @@ func mergeTicketsAndPRs(_ items: [ActionItem]) -> [ActionItem] {
     var merged = items.compactMap { item -> ActionItem? in
         guard item.kind == .ticket, let ticket = item.ticket?.lowercased() else { return item.pr != nil && item.kind != .review ? nil : item }
         var item = item
-        if let pr = prs.first(where: { ($0.branch ?? "").lowercased().hasPrefix(ticket) || $0.title.lowercased().contains(ticket) }) {
+        let issue = item.issueID == nil ? item.id.split(separator: "#").map(String.init) : []
+        let closesIt = { (pr: ActionItem) in
+            issue.count == 2 && Int(issue[1]).map(pr.closes.contains) == true && pr.pr.flatMap { githubSlug($0.absoluteString) }?.split(separator: "/").last.map(String.init) == issue[0]
+        }
+        if let pr = prs.first(where: { !used.contains($0.id) && (($0.branch ?? "").lowercased().hasPrefix(ticket) || $0.title.lowercased().contains(ticket) || closesIt($0)) }) {
             used.insert(pr.id)
             item.pr = pr.pr
             item.branch = pr.branch ?? item.branch

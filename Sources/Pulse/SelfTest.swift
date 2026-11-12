@@ -79,6 +79,20 @@ func selfTest() throws {
         pr(9, "other", "main", .followUp, "Waiting on review · klear#9", false),
         pr(2, "kle-1358-y", "kle-1300-x", .followUp, "Draft · klear#2", true),
     ])
+    check(closedIssues("Closes #163, closes #10.\nFixes: #5 and fixed #7, resolves #8") == [163, 10, 5, 7, 8]
+          && closedIssues("See #4, closes the #9, closes andymitch/other#4, prefix#12, closes #12x").isEmpty, "Pulse reads which issues a PR says it closes")
+    let issueURL = { (repo: String, n: Int) in URL(string: "https://github.com/me/\(repo)/issues/\(n)")! }
+    let prURL = { (repo: String, n: Int) in URL(string: "https://github.com/me/\(repo)/pull/\(n)")! }
+    let closing = mergeTicketsAndPRs([
+        githubIssueItem(repo: "pulse", number: 163, title: "Header", url: issueURL("pulse", 163), since: Date()),
+        githubIssueItem(repo: "pulse", number: 160, title: "Popover", url: issueURL("pulse", 160), since: Date()),
+        ActionItem(id: "x", kind: .followUp, title: "A tidier header", reason: "Draft · pulse#164", url: prURL("pulse", 164), started: true, branch: "tidy-header",
+                   pr: prURL("pulse", 164), closes: [160, 163], since: Date()),
+        ActionItem(id: "y", kind: .followUp, title: "Elsewhere", reason: "Draft · vellum#9", url: prURL("vellum", 9), started: true, branch: "b",
+                   pr: prURL("vellum", 9), closes: [163], since: Date()),
+    ])
+    check(closing.count == 3 && closing.first { $0.id == "pulse#163" }?.pr == prURL("pulse", 164) && closing.first { $0.id == "pulse#160" }?.pr == nil
+          && closing.contains { $0.id == "y" }, "a PR joins the first issue on the list that it says it closes in its own repo, and a PR in another repo doesn't")
     let stackTicket = stack.first { $0.id == "KLE-1300" }
     check(stack.count == 2 && stackTicket?.stack.map(\.id) == ["p1", "p2", "p3"] && stackTicket?.kind == .failing
           && stackTicket?.reason == "KLE-1300 · Stack of 3 PRs · 2 drafts · CI failing · klear#3" && stack.contains { $0.id == "p9" && $0.stack.isEmpty },
