@@ -15,7 +15,8 @@ struct ActionItem: Identifiable {
     var pr: URL?
     var base: String?
     var draft = false
-    var stack: [ActionItem] = []
+    var nested: [ActionItem] = []
+    var parent: String?
     var closes: [Int] = []
     var notificationID: String?
     var issueID: String?
@@ -29,6 +30,15 @@ struct ActionItem: Identifiable {
     var summary: String { "\(kind) \(ticket ?? "") \(reason) — \(title)" }
 }
 
+extension [ActionItem] {
+    mutating func update(_ id: String, _ change: (inout ActionItem) -> Void) {
+        for i in indices {
+            if self[i].id == id { change(&self[i]) }
+            self[i].nested.update(id, change)
+        }
+    }
+}
+
 private let githubToday = """
 query($review: String!, $mine: String!) {
   viewer { login }
@@ -40,7 +50,7 @@ query($review: String!, $mine: String!) {
 """
 
 private let linearToday = """
-{ viewer { assignedIssues(first: 100, filter: {state: {type: {in: ["started", "unstarted"]}}}) { nodes { id identifier title url priority createdAt branchName state { id name type color position } team { id } cycle { isActive } } } }
+{ viewer { assignedIssues(first: 100, filter: {state: {type: {in: ["started", "unstarted"]}}}) { nodes { id identifier title url priority createdAt branchName state { id name type color position } team { id } cycle { isActive } parent { identifier } } } }
   teams(first: 50) { nodes { id states { nodes { id name type color position } } } }
   notifications(first: 50) { nodes { id type readAt createdAt actor { name } ... on IssueNotification { issue { identifier title url } } } } }
 """
@@ -74,7 +84,9 @@ private struct LinearToday: Decodable {
     struct Issue: Decodable {
         struct Cycle: Decodable { let isActive: Bool }
         struct Team: Decodable { let id: String }
+        struct Parent: Decodable { let identifier: String }
         let id, identifier, title, url, createdAt, branchName: String
+        let parent: Parent?
         let priority: Int
         let state: WorkflowState
         let team: Team
@@ -211,7 +223,7 @@ func fetchLinearToday(key: String) async throws -> (items: [ActionItem], workflo
             guard let url = URL(string: i.url) else { return nil }
             let reason = [i.identifier, priorityNames[i.priority]].compactMap { $0 }.joined(separator: " · ")
             return ActionItem(id: i.identifier, kind: .ticket, title: i.title, reason: reason, url: url, ticket: i.identifier,
-                              started: i.state.type == "started", branch: i.branchName, issueID: i.id, teamID: i.team.id, state: i.state,
+                              started: i.state.type == "started", branch: i.branchName, parent: i.parent?.identifier, issueID: i.id, teamID: i.team.id, state: i.state,
                               priority: i.priority == 0 ? 5 : i.priority, since: date(i.createdAt))
         }
     let weekAgo = Date().addingTimeInterval(-7 * 86400)
@@ -246,7 +258,7 @@ func stacked(_ prs: [ActionItem]) -> [ActionItem] {
         var root = ordered[0]
         let urgent = ordered.min { $0.kind.rawValue < $1.kind.rawValue }!
         let drafts = ordered.filter(\.draft).count
-        root.stack = ordered
+        root.nested = ordered
         root.closes = ordered.flatMap(\.closes)
         root.kind = urgent.kind
         root.draft = drafts == ordered.count
@@ -273,11 +285,27 @@ func mergeTicketsAndPRs(_ items: [ActionItem]) -> [ActionItem] {
             item.started = true
             item.kind = pr.kind == .followUp ? .ticket : pr.kind
             item.reason += " · " + pr.reason
-            item.stack = pr.stack
+            item.nested = pr.nested
         }
         return item
     }
     merged += prs.filter { !used.contains($0.id) }
+    let ids = Set(merged.map(\.id))
+    let isSub = { (item: ActionItem) in item.parent.map(ids.contains) == true }
+    let subs = Dictionary(grouping: merged.filter(isSub)) { $0.parent! }
+    func nest(_ item: ActionItem) -> ActionItem {
+        guard let children = subs[item.id]?.sorted(by: { $0.since < $1.since }).map(nest) else { return item }
+        var item = item
+        let urgent = children.min { $0.kind.rawValue < $1.kind.rawValue }!
+        item.nested += children
+        item.reason += " · \(children.count) sub-issue\(children.count == 1 ? "" : "s")"
+        if urgent.kind.rawValue < min(item.kind.rawValue, ActionItem.Kind.followUp.rawValue) {
+            item.kind = urgent.kind
+            item.reason += " · " + urgent.reason
+        }
+        return item
+    }
+    merged = merged.filter { !isSub($0) }.map(nest)
     return merged.sorted { ($0.kind.rawValue, $0.priority, $0.since) < ($1.kind.rawValue, $1.priority, $1.since) }
 }
 
@@ -519,7 +547,7 @@ private struct TodoRowView: View {
                 Text([later ? "Later" : nil, row.why, item.reason].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
-                if !item.stack.isEmpty, !row.done { StackList(prs: item.stack) }
+                if !item.nested.isEmpty, !row.done { NestedList(store: store, items: item.nested) }
             }
             Spacer()
             if !row.done { Buttons(store: store, item: item) }
@@ -527,29 +555,41 @@ private struct TodoRowView: View {
     }
 }
 
-private struct StackList: View {
-    let prs: [ActionItem]
+private struct NestedList: View {
+    @ObservedObject var store: Store
+    let items: [ActionItem]
     @State private var open = false
 
     var body: some View {
+        let subs = items.filter { $0.issueID != nil }.count, prs = items.count - subs
+        let what = [prs > 0 ? "\(prs) PR\(prs == 1 ? "" : "s")" : nil, subs > 0 ? "\(subs) sub-issue\(subs == 1 ? "" : "s")" : nil].compactMap { $0 }.joined(separator: " and ")
         DisclosureGroup(isExpanded: $open) {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(prs.enumerated()), id: \.element.id) { i, pr in
-                    Button { Pulse.open(pr.url) } label: {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("\(i + 1). \(pr.title)").lineLimit(1)
-                            Text(pr.reason).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 8) {
+                        if let state = item.state, let team = item.teamID {
+                            StatusMenu(store: store, item: item, state: state, states: store.workflow[team] ?? [state]).frame(width: 16, height: 15)
+                        } else {
+                            Image(nsImage: statusSymbol(item.draft ? "circle.dashed" : "circle.lefthalf.filled", item.draft ? .secondaryLabelColor : .systemGreen))
+                                .frame(width: 16, height: 15)
+                                .help(item.draft ? "Draft" : "Open")
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        Button { Pulse.open(item.url) } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.title).lineLimit(1)
+                                Text(item.reason).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(item.issueID == nil ? "Open the PR" : "Open in Linear")
                     }
-                    .buttonStyle(.plain)
-                    .help("Open the PR")
                 }
             }
             .padding(.top, 2)
         } label: {
-            Text(open ? "Hide the \(prs.count) PRs" : "Show the \(prs.count) PRs, bottom first").font(.caption).foregroundStyle(.secondary)
+            Text(open ? "Hide the \(what)" : "Show the \(what)" + (subs == 0 ? ", bottom first" : "")).font(.caption).foregroundStyle(.secondary)
         }
     }
 }
