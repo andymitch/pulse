@@ -47,6 +47,7 @@ struct MeetingsView: View {
 
 private struct MeetingCard: View {
     let meeting: SavedMeeting
+    @ObservedObject private var meetings = Meetings.shared
     @State private var copied = false
     @State private var confirmDelete = false
 
@@ -73,6 +74,12 @@ private struct MeetingCard: View {
                 .foregroundStyle(meeting.summary.isEmpty ? .secondary : .primary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+            if meeting.summary.isEmpty {
+                let busy = meetings.summarizing.contains(meeting.id)
+                Button(busy ? "Summarizing…" : "Summarize") { Task { await meetings.summarize(meeting) } }
+                    .disabled(busy || demoMode)
+                    .help("Run the agent on the transcript again")
+            }
             if !meeting.decisions.isEmpty || !meeting.points.isEmpty {
                 DisclosureGroup("\(meeting.decisions.count) decisions, \(meeting.points.count) important points") {
                     VStack(alignment: .leading, spacing: 4) {
