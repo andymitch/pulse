@@ -27,6 +27,7 @@ final class Meetings: ObservableObject {
     @Published private(set) var transcribing = false
     @Published private(set) var noAudio = false
     @Published private(set) var saved: [SavedMeeting] = []
+    @Published private(set) var summarizing: Set<URL> = []
     @Published var error: String?
     var shown: Bool { settings.connections.recordsMeetings || !saved.isEmpty }
 
@@ -240,7 +241,9 @@ final class Meetings: ObservableObject {
         var transcript = try String(contentsOf: file, encoding: .utf8)
         if !transcript.isEmpty {
             var notes: MeetingNotes?
-            if spokenWords(transcript) >= 30 { notes = await summarize(meeting, transcript: file, folder: folder) }
+            if spokenWords(transcript) >= 30 {
+                do { notes = try await summarize(meeting, transcript: file, folder: folder) } catch { self.error = "Saved \(meeting.title) without a summary: \(error)" }
+            }
             for (label, name) in notes?.speakers ?? [:] { transcript = transcript.replacingOccurrences(of: "] \(label):", with: "] \(name):") }
             let meetings = folder.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("meetings")
             try FileManager.default.createDirectory(at: meetings, withIntermediateDirectories: true)
@@ -250,18 +253,43 @@ final class Meetings: ObservableObject {
         try FileManager.default.removeItem(at: folder)
     }
 
-    private func summarize(_ meeting: Meeting, transcript: URL, folder: URL) async -> MeetingNotes? {
+    private func summarize(_ meeting: Meeting, transcript: URL, folder: URL) async throws -> MeetingNotes {
         let out = folder.appendingPathComponent("notes.json")
         let prompt = folder.appendingPathComponent("notes-prompt.md")
-        do {
-            try notesPrompt(meeting, transcript: transcript.path, output: out.path).write(to: prompt, atomically: true, encoding: .utf8)
-            let log = try await runAgent(prompt: prompt)
-            guard let data = try? Data(contentsOf: out) else { throw SyncError(description: "The agent did not write its file. Last output:\n\(log)") }
-            return try JSONDecoder().decode(MeetingNotes.self, from: data)
-        } catch {
-            self.error = "Saved \(meeting.title) without a summary: \(error)"
-            return nil
+        try notesPrompt(meeting, transcript: transcript.path, output: out.path).write(to: prompt, atomically: true, encoding: .utf8)
+        var log = ""
+        for _ in 1...2 {
+            try? FileManager.default.removeItem(at: out)
+            do { log = try await runAgent(prompt: prompt) } catch { log = "\(error)" }
+            if let data = try? Data(contentsOf: out), let notes = try? JSONDecoder().decode(MeetingNotes.self, from: data) { return notes }
         }
+        throw SyncError(description: "The agent did not write its notes. Last output:\n\(log)")
+    }
+
+    func summarize(_ saved: SavedMeeting) async {
+        guard !summarizing.contains(saved.id), let markdown = try? String(contentsOf: saved.file, encoding: .utf8),
+              let split = markdown.range(of: "\n## Transcript\n") else { return }
+        summarizing.insert(saved.id)
+        defer { summarizing.remove(saved.id) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let people = saved.people
+        let meeting = Meeting(title: saved.title, start: saved.start, me: people.first ?? me() ?? "Me", attendees: Array(people.dropFirst()))
+        let transcript = folder.appendingPathComponent("transcript.txt")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try String(markdown[split.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines).write(to: transcript, atomically: true, encoding: .utf8)
+            let notes = try await summarize(meeting, transcript: transcript, folder: folder)
+            guard var updated = editMeeting(markdown, title: notes.title, summary: notes.summary, decisions: Array(notes.decisions.prefix(5)), points: Array(notes.points.prefix(5))) else {
+                throw SyncError(description: "its notes have sections Pulse doesn't know.")
+            }
+            for (label, name) in notes.speakers ?? [:] { updated = updated.replacingOccurrences(of: "] \(label):", with: "] \(name):") }
+            try updated.write(to: saved.file, atomically: true, encoding: .utf8)
+            error = nil
+        } catch {
+            self.error = "Couldn't summarize \(saved.title): \(error)"
+        }
+        self.saved = savedMeetings(in: archive)
     }
 }
 
@@ -530,6 +558,7 @@ struct SavedMeeting: Identifiable {
     var decisions: [String] = [], points: [String] = []
 
     var id: URL { file }
+    var people: [String] { recorded.components(separatedBy: ". With ").dropFirst().first.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")).components(separatedBy: ", ") } ?? [] }
 }
 
 func savedMeetings(in archive: URL, limit: Int = 10) -> [SavedMeeting] {

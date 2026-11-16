@@ -167,6 +167,8 @@ func selfTest() throws {
     check(parseMeeting(meetingMarkdown(standup, notes: long, transcript: ""), file: file, start: standup.start).decisions == Array(long.decisions.prefix(5)), "saved meeting keeps at most 5 decisions")
     let bare = parseMeeting(meetingMarkdown(standup, notes: nil, transcript: "[0:01] Jane: Hi"), file: file, start: standup.start)
     check(bare.title == "Standup" && bare.summary.isEmpty && bare.decisions.isEmpty, "meeting saved without a summary")
+    check(bare.people == ["Jane", "Omar"] && parsed.people == ["Jane", "Omar"] && SavedMeeting(file: file, start: standup.start, recorded: "Recorded Nov 3, 2026 at 9:00 AM.").people.isEmpty,
+          "summarizing a saved meeting again reads who was there from its recorded line")
     let rate = 16000.0
     let mono = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 1)!
     let tone = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: 1600)!

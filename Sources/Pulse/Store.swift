@@ -383,6 +383,7 @@ final class Store: ObservableObject {
     }
 
     func refreshAll() async {
+        Meetings.shared.error = nil
         await refresh()
         await synthesize()
     }
