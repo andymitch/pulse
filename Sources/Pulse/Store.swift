@@ -290,9 +290,9 @@ final class Store: ObservableObject {
         guard let key = key(), let issue = item.issueID else { return }
         do {
             try await moveIssue(key: key, issueID: issue, stateID: state.id)
-            if let i = today.firstIndex(where: { $0.id == item.id }) {
-                today[i].state = state
-                today[i].started = state.type == "started"
+            today.update(item.id) {
+                $0.state = state
+                $0.started = state.type == "started"
             }
             recordDone()
         } catch {
@@ -393,7 +393,7 @@ final class Store: ObservableObject {
         synthesisError = nil
         await Workspace.shared.brief { [self] in
             do {
-                synthesis = try await runSynthesis(dir: dir, db: db, connections: connections, candidates: today, tasks: openTasks, me: me ?? "me") { [weak self] in self?.applyTasks($0) }
+                synthesis = try await runSynthesis(dir: dir, db: db, connections: connections, candidates: today.flatMap { [$0] + $0.nested.filter { $0.issueID != nil } }, tasks: openTasks, me: me ?? "me") { [weak self] in self?.applyTasks($0) }
                 synthesizedAt = Date()
                 reloadFacts()
                 recordDone()

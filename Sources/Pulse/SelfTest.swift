@@ -94,9 +94,23 @@ func selfTest() throws {
     check(closing.count == 3 && closing.first { $0.id == "pulse#163" }?.pr == prURL("pulse", 164) && closing.first { $0.id == "pulse#160" }?.pr == nil
           && closing.contains { $0.id == "y" }, "a PR joins the first issue on the list that it says it closes in its own repo, and a PR in another repo doesn't")
     let stackTicket = stack.first { $0.id == "KLE-1300" }
-    check(stack.count == 2 && stackTicket?.stack.map(\.id) == ["p1", "p2", "p3"] && stackTicket?.kind == .failing
-          && stackTicket?.reason == "KLE-1300 · Stack of 3 PRs · 2 drafts · CI failing · klear#3" && stack.contains { $0.id == "p9" && $0.stack.isEmpty },
+    check(stack.count == 2 && stackTicket?.nested.map(\.id) == ["p1", "p2", "p3"] && stackTicket?.kind == .failing
+          && stackTicket?.reason == "KLE-1300 · Stack of 3 PRs · 2 drafts · CI failing · klear#3" && stack.contains { $0.id == "p9" && $0.nested.isEmpty },
           "PRs stacked on each other's branches show as one task under the ticket at the bottom, bottom first, with the stack's most urgent status")
+    let sub = { (id: String, parent: String?, days: Double) in
+        ActionItem(id: id, kind: .ticket, title: id, reason: id, url: u, ticket: id, branch: "\(id.lowercased())-x", parent: parent, issueID: id, since: Date(timeIntervalSince1970: days * 86400))
+    }
+    let family = mergeTicketsAndPRs([
+        sub("KLE-1406", "KLE-1375", 2), sub("KLE-1375", nil, 0), sub("KLE-1405", "KLE-1375", 1), sub("KLE-1409", "KLE-1406", 3), sub("KLE-1500", "KLE-1499", 0),
+        ActionItem(id: "p5", kind: .failing, title: "Helper", reason: "CI failing · klear#5", url: u, started: true, branch: "kle-1405-x", pr: u, since: Date()),
+    ])
+    let parent = family.first { $0.id == "KLE-1375" }
+    check(family.map(\.id).sorted() == ["KLE-1375", "KLE-1500"] && parent?.nested.map(\.id) == ["KLE-1405", "KLE-1406"] && parent?.nested[1].nested.map(\.id) == ["KLE-1409"]
+          && parent?.nested[0].pr == u && parent?.kind == .failing && parent?.reason == "KLE-1375 · 2 sub-issues · KLE-1405 · CI failing · klear#5",
+          "sub-issues show under their parent, oldest first, with their PRs and the most urgent status, and one whose parent isn't listed stands alone")
+    var tree = family
+    tree.update("KLE-1409") { $0.started = true }
+    check(tree.first { $0.id == "KLE-1375" }?.nested[1].nested[0].started == true, "a nested sub-issue's status can change in place")
     let weeks = try db.trends(since: "2026-09-01", range: .month)
     check(Set(weeks.prs.map(\.bucket)) == ["2026-08-31", "2026-09-28"], "weeks start on Monday")
     check(TrendRange.month.buckets(now: iso.date(from: "2026-10-21T12:00:00Z")!) == ["2026-09-21", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"], "last 5 weeks")
