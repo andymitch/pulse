@@ -253,8 +253,14 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
                 Button("Add agent") { draft.agents.append(Agent(name: "New agent", command: "agent {prompt}")) }
+                Picker("Open in", selection: $draft.terminal) {
+                    Text("Default terminal (\(appName(defaultTerminal)))").tag("")
+                    ForEach(terminals, id: \.self) { app in
+                        if let id = Bundle(url: app)?.bundleIdentifier { Text(appName(app)).tag(id) }
+                    }
+                }
             } header: { header("Terminal agents", nil, symbol: "terminal") } footer: {
-                note("Open in your default terminal, \(terminalName). {prompt} is the path of a file holding the ticket prompt.")
+                note("{prompt} is the path of a file holding the ticket prompt. In Rex, each ticket gets its own session.")
             }
 
             Section {

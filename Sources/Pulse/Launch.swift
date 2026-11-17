@@ -158,12 +158,35 @@ func openInIDE(_ ide: IDE, path: String, prompt: String? = nil) throws {
     }
 }
 
-let terminal = NSWorkspace.shared.urlForApplication(toOpen: .shellScript) ?? URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+let defaultTerminal = NSWorkspace.shared.urlForApplication(toOpen: .shellScript) ?? URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
 
-var terminalName: String { terminal.deletingPathExtension().lastPathComponent }
+let rexID = "com.superlogical.rex"
+
+let terminals: [URL] = {
+    let found = NSWorkspace.shared.urlsForApplications(toOpen: .unixExecutable).filter { app in
+        ((Bundle(url: app)?.infoDictionary?["CFBundleDocumentTypes"] as? [[String: Any]]) ?? []).contains { $0["CFBundleTypeRole"] as? String == "Shell" }
+    }
+    let rex = NSWorkspace.shared.urlForApplication(withBundleIdentifier: rexID).map { [$0] } ?? []
+    return found + rex.filter { !found.contains($0) }
+}()
+
+var terminal: URL { settings.terminal.isEmpty ? defaultTerminal : NSWorkspace.shared.urlForApplication(withBundleIdentifier: settings.terminal) ?? defaultTerminal }
+
+func appName(_ app: URL) -> String { app.deletingPathExtension().lastPathComponent }
+
+var terminalName: String { appName(terminal) }
+
+private let rexCLI = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex").path
 
 func openCommandInTerminal(_ command: String, in path: String = NSHomeDirectory(), scriptName: String = "pulse") throws {
     let full = "cd \(quoted(path)) && \(command)"
+    if Bundle(url: terminal)?.bundleIdentifier == rexID {
+        let rex = FileManager.default.isExecutableFile(atPath: rexCLI) ? quoted(rexCLI) : "rex"
+        let session = try shell("\(rex) new \(quoted(scriptName)) --cwd \(quoted(path)) --keep-open -- /bin/zsh -lc \(quoted(full))").trimmingCharacters(in: .whitespacesAndNewlines)
+        NSWorkspace.shared.openApplication(at: terminal, configuration: NSWorkspace.OpenConfiguration())
+        _ = try? shell("\(rex) do session.select session_id=\(quoted(session))")
+        return
+    }
     if terminalName == "Ghostty" {
         try shell("open -na \(quoted(terminal.path)) --args --working-directory=\(quoted(path)) -e /bin/zsh -lc \(quoted(full))")
         return

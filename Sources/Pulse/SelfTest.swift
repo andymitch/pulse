@@ -498,6 +498,8 @@ func selfTest() throws {
           "a v5-beta.2 Code connection's one repo becomes its list of repos")
     check(githubSlug("git@github.com:KlearBusiness/core-infrastructure.git") == "klearbusiness/core-infrastructure" && githubSlug("https://github.com/klearbusiness/klear.git") == "klearbusiness/klear" && githubSlug("https://github.com/acme/web") == "acme/web"
           && githubSlug("https://github.com/acme/web/pull/12") == "acme/web" && githubSlug("https://gitlab.com/acme/web") == nil, "a GitHub remote or link names its repo")
+    check(terminals.map(appName).contains("Terminal") && !terminals.map(appName).contains("TextEdit") && !terminals.map(appName).contains("Xcode"),
+          "the terminal list has the apps that run shell scripts, not the editors that open them")
     let oldGitHub = try JSONDecoder().decode(Connections.GitHub.self, from: Data(#"{"account": "me", "org": "acme", "monthlyPRTarget": 30}"#.utf8))
     check(oldGitHub.org == "acme" && oldGitHub.monthlyPRTarget == 30 && oldGitHub.repos.isEmpty && oldGitHub.issues == .off && oldGitHub.scope == "org:acme"
           && Connections.GitHub(account: "me", org: "acme", repos: ["me/pulse", "me/vellum"]).scope == "repo:me/pulse repo:me/vellum" && Connections.GitHub().scope == "",
