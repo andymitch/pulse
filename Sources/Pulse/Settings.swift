@@ -57,6 +57,7 @@ struct Settings: Codable, Equatable {
     var connections = Connections()
     var ides: [IDE] = [.zed]
     var agents: [Agent] = Settings.agentPresets
+    var terminal = ""
     var briefingCommand = Settings.briefingPresets[0].command
     var briefingHour = 7
     var naturalVoice = false
