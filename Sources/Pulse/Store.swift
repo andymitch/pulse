@@ -347,15 +347,20 @@ final class Store: ObservableObject {
                 let code = connections
                 let path = try await Task.detached { try worktree(for: branch, ticket: ticket, repo: repo, in: code) }.value
                 localBranches[branch] = repo
-                if let state = ctx.startedStateID, let key = key() { try await moveIssue(key: key, issueID: ctx.issueID, stateID: state) }
-                if let i = today.firstIndex(where: { $0.id == item.id }) {
-                    today[i].started = true
-                    today[i].state = workflow[item.teamID ?? ""]?.first { $0.id == ctx.startedStateID } ?? today[i].state
+                if !item.started {
+                    if let state = ctx.startedStateID, let key = key() { try await moveIssue(key: key, issueID: ctx.issueID, stateID: state) }
+                    if let i = today.firstIndex(where: { $0.id == item.id }) {
+                        today[i].started = true
+                        today[i].state = workflow[item.teamID ?? ""]?.first { $0.id == ctx.startedStateID } ?? today[i].state
+                    }
                 }
+                let prompt = item.started
+                    ? ctx.prompt + "\n\nThis work is already under way on \(branch)" + (item.pr.map { ", with PR \($0)" } ?? "") + ". Check what's been done on the branch" + (item.pr == nil ? "" : " and the PR's review comments and checks") + " first, then carry on from there rather than starting over."
+                    : ctx.prompt
                 if case .ide(let ide) = choice {
-                    try openInIDE(ide, path: path, prompt: ctx.prompt)
+                    try openInIDE(ide, path: path, prompt: prompt)
                 } else if case .agent(let name) = choice, let agent = settings.agents.first(where: { $0.name == name }) {
-                    try openAgentInTerminal(agent, path: path, promptFile: writePrompt(ctx.prompt, name: ticket))
+                    try openAgentInTerminal(agent, path: path, promptFile: writePrompt(prompt, name: ticket))
                 }
             }
         } catch {

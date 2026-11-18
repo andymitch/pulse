@@ -754,7 +754,7 @@ private struct TicketButton: View {
     private var agents: [Launch] { settings.enabledAgents.map { .agent($0.name) } }
 
     private var choices: [Launch] {
-        item.started ? ides + (item.pr != nil ? [.pr] : []) + [.linear] : ides + agents + [.prompt, .linear]
+        item.started ? ides + agents + (item.pr != nil ? [.pr] : []) + [.linear] : ides + agents + [.prompt, .linear]
     }
 
     private var primary: Launch {
@@ -767,13 +767,14 @@ private struct TicketButton: View {
     }
 
     var body: some View {
-        SplitButton(help: item.started ? "Open in \(primary.name)" : primary == .prompt ? "Copy the agent prompt" : isAgent(primary) ? "Start \(primary.name) in \(terminalName)" : "Start in \(primary.name)") {
+        SplitButton(help: item.started ? isAgent(primary) ? "Open \(primary.name) in \(terminalName)" : "Open in \(primary.name)" : primary == .prompt ? "Copy the agent prompt" : isAgent(primary) ? "Start \(primary.name) in \(terminalName)" : "Start in \(primary.name)") {
             Task { await store.launch(primary, item: item) }
         } title: {
             Label { Text(label(primary)) } icon: { icon(primary) }
         } items: {
             if item.started {
-                Section("Open in") { ForEach(choices, id: \.self) { menuItem($0) } }
+                Section("Open in") { ForEach(choices.filter { !isAgent($0) }, id: \.self) { menuItem($0) } }
+                if !agents.isEmpty { Section("Open in \(terminalName)") { ForEach(agents, id: \.self) { menuItem($0) } } }
                 Divider()
                 menuItem(.prompt)
             } else {
