@@ -195,7 +195,7 @@ final class Workspace: ObservableObject {
     private func open(_ p: Project) throws -> Store {
         if let existing = stores[p.id] { return existing }
         try FileManager.default.createDirectory(at: p.dir, withIntermediateDirectories: true)
-        let made = Store(db: try DB(path: p.db.path), dir: p.dir, connections: p.connections)
+        let made = Store(db: try DB(path: p.db.path), dir: p.dir, connections: demoMode ? settings.connections : p.connections)
         stores[p.id] = made
         made.startHourlySync()
         return made
