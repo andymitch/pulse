@@ -80,13 +80,29 @@ private struct IssuesData: Decodable {
     let issues: Page<Issue>
 }
 
+private let api: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.timeoutIntervalForRequest = 20
+    config.timeoutIntervalForResource = 60
+    return URLSession(configuration: config)
+}()
+
+private func send(_ req: URLRequest) async throws -> (Data, URLResponse) {
+    do {
+        return try await api.data(for: req)
+    } catch let error as URLError where error.code == .networkConnectionLost || error.code == .timedOut {
+        await api.flush()
+        return try await api.data(for: req)
+    }
+}
+
 func gql<T: Decodable>(_ url: URL, auth: String, _ query: String, _ variables: [String: Any] = [:]) async throws -> T {
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
     req.setValue(auth, forHTTPHeaderField: "Authorization")
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query, "variables": variables])
-    let (data, resp) = try await URLSession.shared.data(for: req)
+    let (data, resp) = try await send(req)
     let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
     guard let decoded = try? JSONDecoder().decode(Response<T>.self, from: data) else {
         throw SyncError(description: "\(url.host ?? "") HTTP \(status): \(String(decoding: data.prefix(300), as: UTF8.self))")
@@ -121,9 +137,11 @@ func ghToken(_ account: String) throws -> String {
     p.executableURL = URL(fileURLWithPath: "/bin/zsh")
     p.arguments = ["-lc", account.isEmpty ? "gh auth token" : "gh auth token -u \(quoted(account))"]
     let out = Pipe(), err = Pipe()
+    p.standardInput = FileHandle.nullDevice
     p.standardOutput = out
     p.standardError = err
     try p.run()
+    killAfter(p, 30)
     p.waitUntilExit()
     let token = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         .trimmingCharacters(in: .whitespacesAndNewlines)

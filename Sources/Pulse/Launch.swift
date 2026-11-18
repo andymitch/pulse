@@ -58,7 +58,7 @@ func adoptLoginShellPath() {
     p.standardOutput = pipe
     p.standardError = FileHandle.nullDevice
     guard (try? p.run()) != nil else { return }
-    DispatchQueue.global().asyncAfter(deadline: .now() + 5) { if p.isRunning { p.terminate() } }
+    killAfter(p, 5)
     p.waitUntilExit()
     let out = String(decoding: pipe.fileHandleForReading.availableData, as: UTF8.self)
     guard p.terminationStatus == 0, let marker = out.range(of: "\n__PULSE_PATH__", options: .backwards) else { return }
@@ -66,17 +66,25 @@ func adoptLoginShellPath() {
     if !path.isEmpty { setenv("PATH", String(path), 1) }
 }
 
+func killAfter(_ p: Process, _ seconds: TimeInterval) {
+    let group = p.processIdentifier
+    DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { if p.isRunning { kill(-group, SIGTERM) } }
+}
+
 @discardableResult
-func shell(_ command: String) throws -> String {
+func shell(_ command: String, timeout: TimeInterval = 120) throws -> String {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/zsh")
     p.arguments = ["-lc", command]
     let pipe = Pipe()
+    p.standardInput = FileHandle.nullDevice
     p.standardOutput = pipe
     p.standardError = pipe
     try p.run()
+    killAfter(p, timeout)
     let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     p.waitUntilExit()
+    if p.terminationReason == .uncaughtSignal { throw SyncError(description: "\(command)\ntimed out after \(Int(timeout))s") }
     guard p.terminationStatus == 0 else { throw SyncError(description: "\(command)\n\(out)") }
     return out
 }
