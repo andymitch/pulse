@@ -53,6 +53,9 @@ func selfTest() throws {
     check(stats["2026-09"]?.medianAdditions == 350, "median additions")
     check(stats["2026-09"]?.over500 == 1, "over 500")
     check(t.completed.isEmpty, "completed skips missing assignee")
+    let started = Date()
+    let hung = (try? shell("sleep 30 | cat", timeout: 1)) == nil
+    check(hung && Date().timeIntervalSince(started) < 5, "a hung shell command is stopped at its timeout, children included")
     check(prReasons(ci: "SUCCESS", mergeState: "UNKNOWN", decision: nil, unanswered: 0).reasons.isEmpty, "quiet PR is skipped")
     check(prReasons(ci: "SUCCESS", mergeState: "CLEAN", decision: "APPROVED", unanswered: 0).reasons == ["Approved, ready to merge"], "approved")
     check(prReasons(ci: "PENDING", mergeState: "CLEAN", decision: "APPROVED", unanswered: 0).reasons.isEmpty, "approved but CI pending")
