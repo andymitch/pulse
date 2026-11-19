@@ -15,6 +15,7 @@ struct MeetingsView: View {
                     } else {
                         Label("Recording \(recording.title)", systemImage: "record.circle").font(.caption).foregroundStyle(.red)
                     }
+                    MarkButton(meeting: recording)
                     Button("Stop") { Task { await meetings.stop(skip: true) } }
                 } else {
                     if meetings.transcribing {
@@ -42,6 +43,16 @@ struct MeetingsView: View {
         if Calendar.current.isDateInToday(day) { return "Today" }
         if Calendar.current.isDateInYesterday(day) { return "Yesterday" }
         return day.formatted(.dateTime.weekday(.wide).month().day())
+    }
+}
+
+struct MarkButton: View {
+    let meeting: Meeting
+
+    var body: some View {
+        let count = meeting.marks?.count ?? 0
+        Button(count > 0 ? "Mark (\(count))" : "Mark") { Meetings.shared.mark() }
+            .help("Mark this moment as important, so the summary covers it in more detail")
     }
 }
 

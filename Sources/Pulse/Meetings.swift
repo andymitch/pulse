@@ -12,6 +12,7 @@ struct Meeting: Codable {
     var me: String
     var attendees: [String]
     var minutes: Int?
+    var marks: [Double]?
 }
 
 struct MeetingNotes: Codable {
@@ -73,6 +74,13 @@ final class Meetings: ObservableObject {
         meeting.minutes = Int(Date().timeIntervalSince(meeting.start) / 60)
         try? JSONEncoder().encode(meeting).write(to: capture.folder.appendingPathComponent("meeting.json"))
         Task { await processPending() }
+    }
+
+    func mark() {
+        guard let capture, var meeting = recording else { return }
+        meeting.marks = (meeting.marks ?? []) + [Date().timeIntervalSince(meeting.start)]
+        recording = meeting
+        try? JSONEncoder().encode(meeting).write(to: capture.folder.appendingPathComponent("meeting.json"))
     }
 
     private func poll() async {
@@ -236,7 +244,7 @@ final class Meetings: ObservableObject {
         let meeting = try JSONDecoder().decode(Meeting.self, from: Data(contentsOf: folder.appendingPathComponent("meeting.json")))
         let file = folder.appendingPathComponent("transcript.txt")
         if !FileManager.default.fileExists(atPath: file.path) {
-            try await transcribeMeeting(folder, me: meeting.me, attendees: meeting.attendees).write(to: file, atomically: true, encoding: .utf8)
+            try await transcribeMeeting(folder, me: meeting.me, attendees: meeting.attendees, marks: meeting.marks ?? []).write(to: file, atomically: true, encoding: .utf8)
         }
         var transcript = try String(contentsOf: file, encoding: .utf8)
         if !transcript.isEmpty {
@@ -388,8 +396,10 @@ private final class Capture: NSObject, SCStreamOutput {
     }
 }
 
+let markLine = "★ Marked as important"
+
 func spokenWords(_ transcript: String) -> Int {
-    transcript.split(separator: "\n").map { $0.split(separator: ":", maxSplits: 2).last ?? "" }.reduce(0) { $0 + $1.split(separator: " ").count }
+    transcript.split(separator: "\n").filter { !$0.hasSuffix(markLine) }.map { $0.split(separator: ":", maxSplits: 2).last ?? "" }.reduce(0) { $0 + $1.split(separator: " ").count }
 }
 
 func append(_ buffer: AVAudioPCMBuffer, to file: AVAudioFile, since start: Date) throws {
@@ -477,7 +487,7 @@ func micUsers() -> [String] {
         .filter { $0 != "com.apple.replayd" }
 }
 
-func transcribeMeeting(_ folder: URL, me: String, attendees: [String]) async throws -> String {
+func transcribeMeeting(_ folder: URL, me: String, attendees: [String], marks: [Double]) async throws -> String {
     let asr = AsrManager()
     try await asr.loadModels(try await AsrModels.downloadAndLoad())
     func words(_ name: String) async throws -> [WordTiming] {
@@ -495,7 +505,7 @@ func transcribeMeeting(_ folder: URL, me: String, attendees: [String]) async thr
         turns = try await diarizer.process(folder.appendingPathComponent("system.caf")).segments
             .map { Turn(speaker: $0.speakerId, start: Double($0.startTimeSeconds), end: Double($0.endTimeSeconds)) }
     }
-    return transcriptText(mine: mine, theirs: theirs, turns: turns, me: me, attendees: attendees)
+    return transcriptText(mine: mine, theirs: theirs, turns: turns, me: me, attendees: attendees, marks: marks)
 }
 
 struct Turn {
@@ -503,7 +513,7 @@ struct Turn {
     let start, end: Double
 }
 
-func transcriptText(mine: [WordTiming], theirs: [WordTiming], turns: [Turn], me: String, attendees: [String]) -> String {
+func transcriptText(mine: [WordTiming], theirs: [WordTiming], turns: [Turn], me: String, attendees: [String], marks: [Double] = []) -> String {
     let key = { (word: String) in word.lowercased().filter { $0.isLetter || $0.isNumber } }
     let echoes = Dictionary(grouping: theirs, by: { key($0.word) })
     let spoken = mine.filter { w in !(echoes[key(w.word)] ?? []).contains { abs($0.startTime - w.startTime) < 1 } }
@@ -514,11 +524,14 @@ func transcriptText(mine: [WordTiming], theirs: [WordTiming], turns: [Turn], me:
         guard let turn = turns.min(by: { gap($0) < gap($1) }) else { return "Speaker 1" }
         return "Speaker \(ids.firstIndex(of: turn.speaker)! + 1)"
     }
-    let words = (spoken.map { ($0.startTime, me, $0.word) } + theirs.map { ($0.startTime, speaker($0.startTime), $0.word) }).sorted { $0.0 < $1.0 }
+    let words = (spoken.map { ($0.startTime, me, $0.word) } + theirs.map { ($0.startTime, speaker($0.startTime), $0.word) } + marks.map { ($0, "", markLine) }).sorted { $0.0 < $1.0 }
     var lines: [String] = []
     var current = ""
     for (time, who, word) in words {
-        if who == current {
+        if who.isEmpty {
+            lines.append(String(format: "[%d:%02d] %@", Int(time) / 60, Int(time) % 60, word))
+            current = ""
+        } else if who == current {
             lines[lines.count - 1] += " " + word
         } else {
             lines.append(String(format: "[%d:%02d] %@: %@", Int(time) / 60, Int(time) % 60, who, word))
@@ -533,7 +546,7 @@ func notesPrompt(_ m: Meeting, transcript: String, output: String) -> String {
     return """
     You are distilling a meeting that Pulse recorded on \(m.me)'s Mac: "\(m.title)", started \(m.start.formatted(date: .complete, time: .shortened)).\(attendees)
 
-    Read the transcript in \(transcript). Each line is "[minutes:seconds] speaker: words". Lines from \(m.me) are labelled with that name; "Speaker N" are other people. Speech recognition makes mistakes, so read past odd words.
+    Read the transcript in \(transcript). Each line is "[minutes:seconds] speaker: words". Lines from \(m.me) are labelled with that name; "Speaker N" are other people. Lines that say "\(markLine)" are moments \(m.me) marked while the meeting was happening. Speech recognition makes mistakes, so read past odd words.
 
     This is read-only. Never post, comment, create, or change anything anywhere. Only write the file below.
 
@@ -545,6 +558,7 @@ func notesPrompt(_ m: Meeting, transcript: String, output: String) -> String {
     - summary: 2 to 4 plain sentences on what the meeting was about and where it landed.
     - decisions: the 1 to 5 most important things that were agreed or decided. Empty if nothing was decided.
     - points: the 1 to 5 most important other points, such as open questions, risks, and action items with the owner's name.
+    - Marked moments matter most: cover what was being discussed at each one, mostly in the minute or two before it, in more detail, and make sure each one is in the summary, decisions or points.
     - Each decision and point is one short line: the key part in bold, then the rest of the sentence, like "**Ship Friday** after QA signs off on the import fix".
     - speakers: name a "Speaker N" only when the transcript makes clear who it is, for example they are addressed by name or introduce themselves\(m.attendees.isEmpty ? "" : ", and only with one of the attendees"). Leave the rest out.
     - Write plainly. No hype, no filler.

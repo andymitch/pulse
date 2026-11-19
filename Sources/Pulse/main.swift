@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
             menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",").target = self
             if Meetings.shared.recording != nil {
+                menu.addItem(withTitle: "Mark Important Moment", action: #selector(markMoment), keyEquivalent: "").target = self
                 menu.addItem(withTitle: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "").target = self
             }
             menu.addItem(.separator())
@@ -135,6 +136,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     @objc private func refresh() { Task { await store.refreshAll() } }
+
+    @objc private func markMoment() { Meetings.shared.mark() }
 
     @objc private func stopRecording() { Task { await Meetings.shared.stop(skip: true) } }
 
