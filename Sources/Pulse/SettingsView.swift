@@ -639,6 +639,7 @@ struct MeetingStatus: View {
             HStack {
                 Label("Recording \(meeting.title)", systemImage: "record.circle").foregroundStyle(.red)
                 Spacer()
+                Button("Mark") { meetings.mark() }.help("Mark this moment so the summary focuses on what's being said")
                 Button("Stop") { Task { await meetings.stop(skip: true) } }
             }
         } else if meetings.transcribing {

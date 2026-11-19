@@ -15,6 +15,7 @@ struct MeetingsView: View {
                     } else {
                         Label("Recording \(recording.title)", systemImage: "record.circle").font(.caption).foregroundStyle(.red)
                     }
+                    Button("Mark") { meetings.mark() }.help("Mark this moment so the summary focuses on what's being said")
                     Button("Stop") { Task { await meetings.stop(skip: true) } }
                 } else {
                     if meetings.transcribing {

@@ -160,6 +160,8 @@ func selfTest() throws {
                                me: "Jane", attendees: ["Omar", "Priya"])
     check(lines == "[0:00] Jane: Ship it.\n[0:05] Speaker 1: Sounds good.\n[1:01] Speaker 2: Next week.\n[1:10] Jane: Agreed.", "transcript merges tracks, drops echo, numbers speakers")
     check(transcriptText(mine: [], theirs: [w("Hi", 1)], turns: [], me: "Jane", attendees: ["Omar"]) == "[0:01] Omar: Hi", "one other attendee is named")
+    let marked = transcriptText(mine: [], theirs: [w("Ship", 1), w("Friday.", 2), w("Agreed.", 9)], turns: [], me: "Jane", attendees: ["Omar"], marks: [5])
+    check(marked == "[0:01] Omar: Ship Friday.\n[0:05] \(markLine)\n[0:09] Omar: Agreed." && spokenWords(marked) == 3, "a marked moment sits in the transcript at its time and isn't counted as speech")
     let standup = Meeting(title: "Standup", start: Date(timeIntervalSince1970: 0), me: "Jane", attendees: ["Omar"], minutes: 15)
     let notes = MeetingNotes(title: "Standup", summary: "Talked launch.\nAll good.", decisions: ["Ship Friday"], points: ["Omar: update docs", "Risk: QA time"], speakers: nil)
     let file = URL(fileURLWithPath: "/m/0.md")
