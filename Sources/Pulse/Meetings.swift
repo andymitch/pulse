@@ -558,7 +558,7 @@ func notesPrompt(_ m: Meeting, transcript: String, output: String) -> String {
     - summary: 2 to 4 plain sentences on what the meeting was about and where it landed.
     - decisions: the 1 to 5 most important things that were agreed or decided. Empty if nothing was decided.
     - points: the 1 to 5 most important other points, such as open questions, risks, and action items with the owner's name.
-    - Marked moments matter most: cover what was being discussed at each one, mostly in the minute or two before it, in more detail, and make sure each one is in the summary, decisions or points.
+    - Marked moments matter most: cover what was being said right at and just before each one in more detail, and make sure each one is in the summary, decisions or points.
     - Each decision and point is one short line: the key part in bold, then the rest of the sentence, like "**Ship Friday** after QA signs off on the import fix".
     - speakers: name a "Speaker N" only when the transcript makes clear who it is, for example they are addressed by name or introduce themselves\(m.attendees.isEmpty ? "" : ", and only with one of the attendees"). Leave the rest out.
     - Write plainly. No hype, no filler.
