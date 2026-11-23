@@ -41,6 +41,26 @@ func selfTest() throws {
     try db.identify("github", handle: "sam-gh", name: "sam-gh", email: nil)
     let omar = try db.query("SELECT count(DISTINCT person) FROM identities WHERE handle IN ('Omar Reyes', 'omar-gh')").first?[0] as? Int
     check(omar == 1 && db.peopleNames() == ["Ghost", "Jane Doe", "Omar Reyes", "Sam Lee"], "a GitHub login with a Linear user's email is the same person; one without an email is someone new")
+    do {
+        let team = try DB(path: ":memory:")
+        for (name, email) in [("Andrew Mitchell", "andrew@k.com"), ("Drew Osmond", "drew@k.com"), ("Drew Leahy", "dleahy@k.com"), ("nathan@k.com", "nathan@k.com")] {
+            try team.identify("linear", handle: name, name: name, email: email)
+        }
+        for login in ["andrew-klear", "drew-klear", "nathanklear", "bot-x"] { try team.identify("github", handle: login, name: login, email: nil) }
+        let pairs = { team.samePersonGuesses().map { "\($0.login)=\($0.name)" } }
+        check(pairs() == ["andrew-klear=Andrew Mitchell", "drew-klear=Drew Osmond", "nathanklear=Nathan"],
+              "a GitHub login is matched to the Linear person its words start with, preferring their email name, and never by a name inside another word")
+        try team.samePerson(team.samePersonGuesses()[1], false)
+        check(pairs() == ["andrew-klear=Andrew Mitchell", "drew-klear=Drew Leahy", "nathanklear=Nathan"], "saying no is remembered, and the next likeliest person is asked about")
+        try team.samePerson(team.samePersonGuesses()[0], true)
+        try team.identify("github", handle: "andrew-klear", name: "andrew-klear", email: nil)
+        try team.query("INSERT INTO items (id, connection, kind, identifier, author, assignee, created_at, closed_at) VALUES ('p', 'github', 'pr', 'r#1', 'andrew-klear', NULL, '2026-09-01', '2026-09-02'), ('t', 'linear', 'ticket', 'K-1', NULL, 'Andrew Mitchell', '2026-09-01', '2026-09-02')")
+        let joined = try team.trends(since: "2026-01-01"), everyone = try team.query("SELECT count(*) FROM people").first?[0] as? Int
+        check(pairs() == ["drew-klear=Drew Leahy", "nathanklear=Nathan"] && team.personName("github", "andrew-klear") == "Andrew Mitchell"
+              && joined.prs.map(\.person) == ["Andrew Mitchell"] && joined.completed.map(\.person) == ["Andrew Mitchell"]
+              && everyone == 7,
+              "a confirmed match joins the accounts into one person, who Trends counts once, and a later sync doesn't split them")
+    }
     try db.query("INSERT INTO items (id, connection, kind, identifier, title, created_at) VALUES ('t1', 'linear', 'ticket', 'KLE-12', 'Fix', '2026-09-01'), ('t2', 'linear', 'ticket', 'KLE-3', 'Other', '2026-09-01')")
     try db.query("INSERT INTO items (id, connection, kind, identifier, title, branch, created_at) VALUES ('p1', 'github', 'pr', 'r#10', 'Fix it', 'kle-12-fix-it', '2026-09-02'), ('p2', 'github', 'pr', 'r#11', 'Follow-up (KLE-3)', 'main-fix', '2026-09-02'), ('p3', 'github', 'pr', 'r#12', 'KLE-120 nope', 'x', '2026-09-02')")
     try db.linkItems()

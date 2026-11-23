@@ -438,7 +438,7 @@ struct TodayView: View {
                     Color.clear.frame(width: 16, height: 17)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Review what Pulse learned")
-                        Text("\(store.doubts.count) to resolve on Knowledge").font(.caption).foregroundStyle(.secondary)
+                        Text("\(store.toReview) to resolve on Knowledge").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button {

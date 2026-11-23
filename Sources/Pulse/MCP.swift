@@ -53,7 +53,7 @@ private let mcpTools: [[String: Any]] = [
     tool("today", "The briefing's team focus (the current priorities) with its sources, and my tasks: the ones the briefing found in Slack, mail, meetings and agent sessions, and the ones agents added. Each has an id, a link and whether it's done (doneOn is the day) or removed. Tasks stay until they're done; done ones are cleared each Monday. Open tickets and PRs aren't included, since Pulse lists them live from Linear and GitHub. stale is true when the briefing wasn't made today.", [:]),
     tool("stats", "PRs merged and tickets closed per person per period, plus PR stats (median hours to merge, median lines added, PRs over 500 lines), as shown on Trends.", [
         "range": ["type": "string", "enum": TrendRange.allCases.map(\.rawValue), "description": "Period, default 5 weeks"],
-        "person": ["type": "string", "description": "Only this person: a GitHub login for PRs, a Linear name for tickets"],
+        "person": ["type": "string", "description": "Only this person, by the name Trends shows"],
     ]),
     tool("add_task", "Put a task on my list, such as a follow-up I agreed to or something I asked you to remind me of. Not for tickets or PRs, which come from Linear and GitHub.", [
         "title": ["type": "string", "description": "What to do, starting with a verb"],

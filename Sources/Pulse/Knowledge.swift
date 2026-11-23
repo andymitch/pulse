@@ -83,8 +83,14 @@ struct KnowledgeView: View {
             }
             FocusHeader(store: store)
             PrioritiesView(store: store)
-            if !store.doubts.isEmpty {
-                Panel(title: "Needs you") { FactLines(store: store, facts: store.doubts.map(KnownFact.init), reviewing: true) }
+            if store.toReview > 0 {
+                Panel(title: "Needs you") {
+                    ForEach(store.guesses, id: \.self) { guess in
+                        SamePersonLine(store: store, guess: guess)
+                        if guess != store.guesses.last || !store.doubts.isEmpty { Divider() }
+                    }
+                    FactLines(store: store, facts: store.doubts.map(KnownFact.init), reviewing: true)
+                }
             }
         }
         .padding(.top, 6)
@@ -270,6 +276,29 @@ private func destination(_ s: KnownFact.Source) -> String {
     case "session": "Opens the agent session's digest"
     case "mail": "Opens in Mail"
     default: "Opens \(s.url.host ?? "the link")"
+    }
+}
+
+private struct SamePersonLine: View {
+    @ObservedObject var store: Store
+    let guess: SamePerson
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("People").font(.caption).foregroundStyle(.secondary)
+                Text("Is **\(guess.login)** on GitHub the same person as **\(guess.name)** on Linear?").fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            HStack(spacing: 6) {
+                Button { store.samePerson(guess, true) } label: { Label("Same person", systemImage: "checkmark") }
+                    .help("Count their GitHub and Linear work as one person")
+                Button { store.samePerson(guess, false) } label: { Label("Different", systemImage: "xmark") }
+                    .help("Keep them apart, and don't ask again")
+            }
+            .controlSize(.small)
+            .fixedSize()
+        }
     }
 }
 

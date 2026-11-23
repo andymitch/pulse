@@ -150,6 +150,12 @@ struct DBError: Error, CustomStringConvertible {
     var description: String { message }
 }
 
+struct SamePerson: Hashable {
+    let login: String
+    let person: Int
+    let name: String
+}
+
 struct PRRow {
     let bucket, person: String
     let hours: Double
@@ -244,20 +250,28 @@ enum TrendRange: String, CaseIterable {
 extension DB {
     func trends(since: String, range: TrendRange = .year) throws -> Trends {
         let prs = try query("""
-            SELECT \(range.sql("closed_at")), author,
+            SELECT \(range.sql("closed_at")), \(personName("author")),
                    (julianday(closed_at) - julianday(created_at)) * 24, size
             FROM items WHERE kind = 'pr' AND closed_at >= ? ORDER BY closed_at
             """, [since]).map { r in
-            PRRow(bucket: r[0] as! String, person: r[1] as! String, hours: r[2] as? Double ?? 0, additions: r[3] as? Int ?? 0)
+            PRRow(bucket: r[0] as! String, person: displayName(r[1] as! String), hours: r[2] as? Double ?? 0, additions: r[3] as? Int ?? 0)
         }
 
         let completed = try query("""
-            SELECT \(range.sql("closed_at")), assignee, count(*)
+            SELECT \(range.sql("closed_at")), \(personName("assignee")), count(*)
             FROM items WHERE kind = 'ticket' AND closed_at >= ? AND assignee IS NOT NULL GROUP BY 1, 2
             """, [since]).map {
             Count(bucket: $0[0] as! String, person: displayName($0[1] as! String), n: $0[2] as! Int)
         }
         return Trends(prs: prs, completed: completed)
+    }
+
+    func personName(_ connection: String, _ handle: String) -> String {
+        ((try? query("SELECT p.name FROM identities i JOIN people p ON p.id = i.person WHERE i.connection = ? AND i.handle = ?", [connection, handle]))?.first?[0] as? String).map(displayName) ?? handle
+    }
+
+    private func personName(_ column: String) -> String {
+        "coalesce((SELECT p.name FROM identities i JOIN people p ON p.id = i.person WHERE i.connection = items.connection AND i.handle = items.\(column)), \(column))"
     }
 
     func merged(since: Date, author: String) -> [Date] {
@@ -274,6 +288,37 @@ extension DB {
         let person = try email.flatMap { try query("SELECT person FROM identities WHERE email = ? LIMIT 1", [$0]).first?[0] as? Int }
             ?? query("INSERT INTO people (name) VALUES (?) RETURNING id", [name]).first?[0] as? Int
         try query("INSERT INTO identities VALUES (?, ?, ?, ?)", [connection, handle, person, email])
+    }
+
+    func samePersonGuesses() -> [SamePerson] {
+        let no = Set(ids("same_person_no"))
+        let logins = ((try? query("""
+            SELECT handle FROM identities g WHERE connection = 'github'
+              AND NOT EXISTS (SELECT 1 FROM identities o WHERE o.person = g.person AND o.connection <> 'github')
+            """)) ?? []).compactMap { $0[0] as? String }
+        let people = ((try? query("""
+            SELECT p.id, p.name, lower(coalesce(l.email, '')) FROM identities l JOIN people p ON p.id = l.person WHERE l.connection = 'linear'
+              AND NOT EXISTS (SELECT 1 FROM identities o WHERE o.person = l.person AND o.connection = 'github')
+            """)) ?? []).compactMap { r in (r[0] as? Int).flatMap { id in (r[1] as? String).map { (id, $0, r[2] as? String ?? "") } } }
+        return logins.sorted().flatMap { login -> [SamePerson] in
+            let words = login.lowercased().split { !$0.isLetter }
+            let starts = { (s: Substring) in s.count >= 3 && words.contains { $0.hasPrefix(s) } }
+            let scored = people.filter { !no.contains("\(login)|\($0.0)") }.map { id, name, email -> (SamePerson, Int) in
+                let local = email.split(separator: "@").first ?? ""
+                let names = displayName(name).lowercased().split { !$0.isLetter }
+                return (SamePerson(login: login, person: id, name: displayName(name)), starts(local) ? 2 : names.contains(where: starts) ? 1 : 0)
+            }
+            let best = scored.map(\.1).max() ?? 0
+            return best == 0 ? [] : scored.filter { $0.1 == best }.map(\.0)
+        }
+    }
+
+    func samePerson(_ guess: SamePerson, _ same: Bool) throws {
+        guard same else { return try set(ids("same_person_no") + ["\(guess.login)|\(guess.person)"], "same_person_no") }
+        try transaction {
+            try query("UPDATE identities SET person = ? WHERE connection = 'github' AND handle = ?", [guess.person, guess.login])
+            try query("DELETE FROM people WHERE id NOT IN (SELECT person FROM identities)")
+        }
     }
 
     func peopleNames() -> [String] {

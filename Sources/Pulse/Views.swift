@@ -82,10 +82,10 @@ struct ContentView: View {
             case .prs:
                 StackedChart(store: store, counts: prCounts, unit: "PRs")
                 PRStatsTable(store: store, prs: store.trends.prs.filter { store.includes($0.person) })
-                Text("PRs merged, by GitHub login.").font(.caption2).foregroundStyle(.secondary)
+                Text("PRs merged, by author.").font(.caption2).foregroundStyle(.secondary)
             case .closed:
                 StackedChart(store: store, counts: store.trends.completed, unit: "Tickets")
-                Text("Tickets completed, by Linear assignee.").font(.caption2).foregroundStyle(.secondary)
+                Text("Tickets completed, by assignee.").font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(14)

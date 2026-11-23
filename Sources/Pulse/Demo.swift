@@ -34,6 +34,7 @@ func seedDemo(_ db: DB) throws {
     try db.transaction {
         for (name, handle) in people {
             try db.identify("linear", handle: name, name: name, email: "\(handle)@acme.com")
+            try db.identify("github", handle: "\(handle)-acme", name: "\(handle)-acme", email: handle == "kai" ? nil : "\(handle)@acme.com")
         }
         try db.setMeta("me", "Jane Doe")
         try db.setMeta("linear_workspace", "acme")

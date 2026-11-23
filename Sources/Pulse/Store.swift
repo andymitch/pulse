@@ -31,6 +31,7 @@ final class Store: ObservableObject {
     @Published var doneThisWeek: [DoneItem] = []
     @Published var workflow: [String: [WorkflowState]] = [:]
     @Published var doubts: [[String: Any]] = []
+    @Published var guesses: [SamePerson] = []
     @Published var factsVersion = 0
     private var localBranches: [String: String] = [:]
     private var slugs: [String: String] = [:]
@@ -89,7 +90,7 @@ final class Store: ObservableObject {
 
     private func token() throws -> String { try ghToken(connections.github?.account ?? "") }
 
-    var meInTrends: String? { metric == .prs ? connections.github.flatMap { $0.account.isEmpty ? nil : $0.account } : me }
+    var meInTrends: String? { metric == .prs ? connections.github.flatMap { $0.account.isEmpty ? nil : db.personName("github", $0.account) } : me }
 
     func includes(_ person: String) -> Bool { selected.isEmpty || selected.contains(person) }
 
@@ -199,7 +200,9 @@ final class Store: ObservableObject {
 
     var toDoCount: Int { checklist.filter { !$0.done && $0.item.toDo }.count }
 
-    private var doubtIDs: [String] { doubts.compactMap { ($0["id"] as? Int).map(String.init) } }
+    private var doubtIDs: [String] { doubts.compactMap { ($0["id"] as? Int).map(String.init) } + guesses.map { "\($0.login)|\($0.person)" } }
+
+    var toReview: Int { doubts.count + guesses.count }
 
     var triageWaiting: Bool { !Set(doubtIDs).isSubset(of: db.ids("triage_seen")) }
 
@@ -210,12 +213,19 @@ final class Store: ObservableObject {
 
     func reloadFacts() {
         doubts = (try? doubtedFacts(db)) ?? []
+        guesses = db.samePersonGuesses()
         factsVersion += 1
     }
 
     func confirm(fact id: Int, text: String? = nil) {
         do { try confirmFact(db, id: id, text: text) } catch { lastError = "\(error)" }
         reloadFacts()
+    }
+
+    func samePerson(_ guess: SamePerson, _ same: Bool) {
+        do { try db.samePerson(guess, same) } catch { lastError = "\(error)" }
+        reloadFacts()
+        load()
     }
 
     func reject(fact id: Int) {
