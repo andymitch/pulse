@@ -46,7 +46,6 @@ func applyTaskChanges(_ changes: TaskChanges, to tasks: [PulseTask], open: Set<S
 
 struct TaskMarks {
     var done: [String: String] = [:]
-    var later: Set<String> = []
     var removed: [String: String] = [:]
 }
 
@@ -74,22 +73,20 @@ extension DB {
 
     func marks() -> TaskMarks {
         var m = TaskMarks()
-        for r in (try? query("SELECT id, done, later, removed FROM task_marks")) ?? [] {
+        for r in (try? query("SELECT id, done, removed FROM task_marks")) ?? [] {
             guard let id = r[0] as? String else { continue }
             m.done[id] = r[1] as? String
-            if r[2] as? Int == 1 { m.later.insert(id) }
-            m.removed[id] = r[3] as? String
+            m.removed[id] = r[2] as? String
         }
         return m
     }
 
-    func mark(_ id: String, done: String?? = nil, later: Bool? = nil, removed: String?? = nil) throws {
+    func mark(_ id: String, done: String?? = nil, removed: String?? = nil) throws {
         try transaction {
             try query("INSERT INTO task_marks (id) VALUES (?) ON CONFLICT (id) DO NOTHING", [id])
             if let done { try query("UPDATE task_marks SET done = ? WHERE id = ?", [done, id]) }
-            if let later { try query("UPDATE task_marks SET later = ? WHERE id = ?", [later ? 1 : 0, id]) }
             if let removed { try query("UPDATE task_marks SET removed = ? WHERE id = ?", [removed, id]) }
-            try query("DELETE FROM task_marks WHERE id = ? AND done IS NULL AND later = 0 AND removed IS NULL", [id])
+            try query("DELETE FROM task_marks WHERE id = ? AND done IS NULL AND removed IS NULL", [id])
         }
     }
 

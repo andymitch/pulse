@@ -13,6 +13,9 @@ func selfTest() throws {
             CREATE TABLE prs (repo TEXT NOT NULL, number INTEGER NOT NULL, author TEXT NOT NULL, created_at TEXT NOT NULL, merged_at TEXT NOT NULL, additions INTEGER NOT NULL, PRIMARY KEY (repo, number));
             CREATE TABLE issues (id TEXT PRIMARY KEY, identifier TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL, creator TEXT, assignee TEXT, created_at TEXT NOT NULL, completed_at TEXT);
             CREATE TABLE users (name TEXT PRIMARY KEY, email TEXT NOT NULL);
+            DROP TABLE task_marks;
+            CREATE TABLE task_marks (id TEXT PRIMARY KEY, done TEXT, later INTEGER NOT NULL DEFAULT 0, removed TEXT);
+            INSERT INTO task_marks VALUES ('a', NULL, 1, NULL), ('b', '2026-09-01', 1, NULL);
             """)
         for (n, author, created, merged, adds) in [
             (1, "jane-acme", "2026-09-01T00:00:00Z", "2026-09-01T10:00:00Z", 100),
@@ -31,6 +34,8 @@ func selfTest() throws {
     let moved = try db.query("SELECT count(*) FROM items").first?[0] as? Int
     let left = try db.query("SELECT count(*) FROM sqlite_master WHERE name IN ('prs', 'issues', 'users')").first?[0] as? Int
     check(moved == 7 && left == 0 && db.peopleNames() == ["Jane Doe", "Omar Reyes", "Sam Lee"], "v4's prs, issues and users move into items, people and identities")
+    let marks = try db.query("SELECT id FROM task_marks").count
+    check(db.marks().done == ["b": "2026-09-01"] && marks == 1, "tasks put off for later come back to their place, keeping other marks")
     try db.identify("github", handle: "omar-gh", name: "Omar R", email: "OMAR@x.com")
     try db.identify("github", handle: "ghost-dev", name: "Ghost", email: nil)
     try db.identify("github", handle: "sam-gh", name: "sam-gh", email: nil)
@@ -424,10 +429,9 @@ func selfTest() throws {
         check(store.selected.isEmpty, "switching the Trends chart resets the people filter, since PRs and tickets list different people")
         store.today = (1...8).map { ActionItem(id: "T\($0)", kind: .ticket, title: "T\($0)", reason: "", url: URL(string: "https://x")!, since: Date()) }
         store.remove("T2")
-        store.toggleLater("T1")
-        check(store.checklist.map(\.id) == ["T3", "T4", "T5", "T6", "T7", "T8", "T1"], "all open work is listed, a removed item drops out and a later one moves to the bottom")
+        check(store.checklist.map(\.id) == ["T1", "T3", "T4", "T5", "T6", "T7", "T8"], "all open work is listed and a removed item drops out")
         store.restoreRemoved()
-        check(store.checklist.map(\.id).first == "T2", "restoring brings removed items back")
+        check(store.checklist.map(\.id).starts(with: ["T1", "T2"]), "restoring brings removed items back")
         store.toggleDone("T3")
         check(store.doneThisWeek.isEmpty, "nothing is logged before a successful fetch")
         store.fetchedOK = true
@@ -452,7 +456,7 @@ func selfTest() throws {
         store.me = nil
         store.doneThisWeek = []
         store.applyTasks(try JSONDecoder().decode(TaskChanges.self, from: Data(#"{"add": [{"title": "Reply to Dana", "why": "", "url": "message://%3Cm1%3E", "source": "mail"}, {"title": "Send the notice", "why": "", "url": "https://x/1", "source": "slack"}]}"#.utf8)))
-        check(store.checklist.map(\.item.title) == ["T2", "T3", "T4", "T5", "T6", "T7", "T8", "Reply to Dana", "Send the notice", "T1"], "the briefing's tasks join the list after tickets and PRs, with later ones still last")
+        check(store.checklist.map(\.item.title) == ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "Reply to Dana", "Send the notice"], "the briefing's tasks join the list after tickets and PRs")
         let danaID = store.tasks[0].id
         store.applyTasks(try JSONDecoder().decode(TaskChanges.self, from: Data(#"{"close": [{"id": "\#(danaID)", "reason": "Answered"}]}"#.utf8)))
         check(store.checklist.first { $0.id == danaID }?.done == true && store.openTasks.map(\.title) == ["Send the notice"] && store.doneThisWeek.map(\.id) == [danaID],
@@ -582,7 +586,7 @@ func selfTest() throws {
     check(tasks?.last?["id"] as? String == "T-1" && tasks?.last?["done"] as? Bool == true && tasks?.last?["removed"] as? Bool == true, "MCP marks a task done and removed")
     _ = call("update_task", ["id": "T-1", "removed": false])
     check(((call("today", [:]) as? [String: Any])?["tasks"] as? [[String: Any]])?.last?["removed"] as? Bool == false, "MCP restores a removed task and leaves done alone")
-    check(call("update_task", ["id": "nope", "title": "x"]) == nil && (call("update_task", ["id": "KLE-9", "later": true]) as? [String: Any])?["later"] as? Bool == true,
+    check(call("update_task", ["id": "nope", "title": "x"]) == nil && (call("update_task", ["id": "KLE-9", "removed": true]) as? [String: Any])?["removed"] as? Bool == true,
           "MCP edits only tasks, but can mark a ticket or PR")
     let added = call("add_task", ["title": "Follow up with Jed\nonce it's sent", "why": "He asked", "url": "https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB"]) as? [String: Any]
     check(added?["title"] as? String == "Follow up with Jed once it's sent" && added?["url"] as? String == "https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456"
