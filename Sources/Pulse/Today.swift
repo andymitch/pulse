@@ -566,8 +566,8 @@ private struct TodoRowView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).lineLimit(2).strikethrough(row.done).foregroundStyle(row.done ? .secondary : .primary)
-                Text([row.why, item.reason].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                let subtitle = [row.why, item.reason].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                 if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
                 if !item.nested.isEmpty, !row.done { NestedList(store: store, items: item.nested) }
             }
@@ -699,6 +699,8 @@ private struct Buttons: View {
                 TicketButton(store: store, item: item, triage: triage)
             } else if let pr = item.pr {
                 AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { open(pr) }
+            } else if item.url == noLink, let task = triage.task, let agent = settings.enabledAgents.first(where: { Launch.agent($0.name) == store.lastStart }) ?? settings.enabledAgents.first {
+                AppButton(agent.brand, "Start", help: "Start \(agent.name) in \(terminalName)", symbol: "terminal", menu: triage) { store.startSession(agent, task: task) }
             } else if item.url == noLink {
                 Menu { triage } label: { Image(systemName: "chevron.down") }
                     .menuStyle(.borderlessButton)
