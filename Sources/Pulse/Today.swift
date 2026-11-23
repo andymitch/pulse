@@ -700,7 +700,7 @@ private struct Buttons: View {
             } else if let pr = item.pr {
                 AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { open(pr) }
             } else if item.url == noLink, let task = triage.task, let agent = settings.enabledAgents.first(where: { Launch.agent($0.name) == store.lastStart }) ?? settings.enabledAgents.first {
-                AppButton(agent.brand, "Start", help: "Start \(agent.name) in \(terminalName)", symbol: "terminal", menu: triage) { store.startSession(agent, task: task) }
+                AppButton(agent.brand, "Start", help: demoMode ? "Not available in the demo" : "Start \(agent.name) in \(terminalName)", symbol: "terminal", off: demoMode, menu: triage) { store.startSession(agent, task: task) }
             } else if item.url == noLink {
                 Menu { triage } label: { Image(systemName: "chevron.down") }
                     .menuStyle(.borderlessButton)
@@ -721,6 +721,7 @@ private struct Buttons: View {
 
 private struct SplitButton<Title: View, Items: View>: View {
     let help: String
+    var off = false
     let action: () -> Void
     @ViewBuilder let title: Title
     @ViewBuilder let items: Items
@@ -738,6 +739,8 @@ private struct SplitButton<Title: View, Items: View>: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(Pressable())
+            .disabled(off)
+            .opacity(off ? 0.4 : 1)
             .help(help)
             Divider().padding(.vertical, 5)
             Menu { items } label: { Image(systemName: "chevron.down") }
@@ -768,6 +771,7 @@ private struct Triage: View {
                     Button { store.startSession(agent, task: task) } label: {
                         Label { Text(agent.name) } icon: { icon(.agent(agent.name)) }
                     }
+                    .disabled(demoMode)
                 }
             }
             Divider()
@@ -856,9 +860,11 @@ private struct AppButton: View {
     let action: () async -> Void
 
     var symbol = "arrow.up.right.square"
+    var off = false
 
-    init(_ brand: Brand?, _ label: String? = nil, help: String = "", icon: Bool = true, symbol: String = "arrow.up.right.square", menu: Triage? = nil, action: @escaping () async -> Void) {
+    init(_ brand: Brand?, _ label: String? = nil, help: String = "", icon: Bool = true, symbol: String = "arrow.up.right.square", off: Bool = false, menu: Triage? = nil, action: @escaping () async -> Void) {
         self.symbol = symbol
+        self.off = off
         self.brand = brand
         self.label = label
         self.help = help
@@ -877,7 +883,7 @@ private struct AppButton: View {
 
     var body: some View {
         if let menu {
-            SplitButton(help: help) { Task { await action() } } title: { labelView } items: { menu }
+            SplitButton(help: help, off: off) { Task { await action() } } title: { labelView } items: { menu }
         } else {
             Button { Task { await action() } } label: { labelView }
                 .buttonStyle(.bordered)
