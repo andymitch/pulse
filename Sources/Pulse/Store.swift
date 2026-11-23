@@ -266,6 +266,12 @@ final class Store: ObservableObject {
 
     func remove(_ id: String) { write { try db.mark(id, removed: day) } }
 
+    func addTask(_ title: String) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        write { try db.saveTask(PulseTask(id: UUID().uuidString, title: title, why: "", url: "")) }
+    }
+
     func restoreRemoved() {
         let none: String? = nil
         write { for id in removedIDs.keys { try db.mark(id, removed: none) } }
@@ -274,7 +280,7 @@ final class Store: ObservableObject {
     var checklist: [TodoRow] {
         let synced = today.map { TodoRow(item: $0, why: nil, done: $0.closed || doneIDs[$0.id] != nil) }
         let mine = tasks.compactMap { t -> TodoRow? in
-            guard let url = URL(string: t.url) else { return nil }
+            guard let url = t.url.isEmpty ? noLink : URL(string: t.url) else { return nil }
             let item = ActionItem(id: t.id, kind: .followUp, title: t.title, reason: (t.source ?? "").capitalized, url: url, since: .distantPast)
             return TodoRow(item: item, why: t.why, done: doneIDs[t.id] != nil, reply: t.reply)
         }

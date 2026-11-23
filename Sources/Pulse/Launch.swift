@@ -37,7 +37,10 @@ func openSource(_ url: URL, kind: String) {
     open(url, in: ["slack": App.slack, "linear": .linear][kind])
 }
 
+let noLink = URL(string: "pulse:no-link")!
+
 func open(_ url: URL, in app: App? = nil) {
+    guard url != noLink else { return }
     if app == .slack {
         NSWorkspace.shared.open(slackDeepLink(url) ?? url)
         return

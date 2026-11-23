@@ -403,6 +403,7 @@ struct TodoRow: Identifiable {
 struct TodayView: View {
     @ObservedObject var store: Store
     @State private var showDone = false
+    @State private var newTask = ""
 
     var body: some View {
         let rows = store.checklist
@@ -426,17 +427,27 @@ struct TodayView: View {
                     }
                     .help("Open Knowledge to resolve them")
                 }
-                if !rows.isEmpty { Divider() }
+                Divider()
             }
             if open.isEmpty && !store.triageWaiting {
                 Text(store.syncing ? "Loading…" : "Nothing needs you right now.").foregroundStyle(.secondary)
+                Divider()
             }
             ForEach(open) { row in
                 TodoRowView(store: store, row: row)
-                if row.id != open.last?.id { Divider() }
+                Divider()
+            }
+            HStack(spacing: 10) {
+                Image(systemName: "plus").foregroundStyle(.secondary).frame(width: 16, height: 17)
+                TextField("Add a task", text: $newTask)
+                    .textFieldStyle(.plain)
+                    .onSubmit {
+                        store.addTask(newTask)
+                        newTask = ""
+                    }
             }
             if !done.isEmpty || !week.isEmpty {
-                if !open.isEmpty || store.triageWaiting { Divider() }
+                Divider()
                 DisclosureGroup(isExpanded: $showDone) {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(done) { row in
@@ -676,6 +687,14 @@ private struct Buttons: View {
                 TicketButton(store: store, item: item, triage: triage)
             } else if let pr = item.pr {
                 AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { open(pr) }
+            } else if item.url == noLink {
+                Menu { triage } label: { Image(systemName: "chevron.down") }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 26, height: 24)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .help("More actions")
+                    .accessibilityLabel("More actions")
             } else {
                 let slack = item.url.host?.hasSuffix("slack.com") == true
                 let linear = item.url.host == "linear.app"

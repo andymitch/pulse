@@ -28,7 +28,7 @@ func applyTaskChanges(_ changes: TaskChanges, to tasks: [PulseTask], open: Set<S
     }
     for a in changes.add ?? [] where !a.title.isEmpty {
         let url = threadLink(a.url) ?? a.url
-        if let i = tasks.firstIndex(where: { open.contains($0.id) && $0.url == url }) {
+        if !url.isEmpty, let i = tasks.firstIndex(where: { open.contains($0.id) && $0.url == url }) {
             edit(i, a.title, a.why, nil, a.reply)
         } else {
             tasks.append(PulseTask(id: newID(), title: a.title, why: a.why, url: url, source: a.source, reply: a.reply))
@@ -98,7 +98,7 @@ extension DB {
 func taskPrompt(_ task: PulseTask) -> String {
     var parts = ["Help me get this task done: \(task.title)"]
     if !task.why.isEmpty { parts.append("Why: \(task.why)") }
-    parts.append("Link: \(task.url)\nStart by reading what the link points to.")
+    if !task.url.isEmpty { parts.append("Link: \(task.url)\nStart by reading what the link points to.") }
     if let reply = task.reply, !reply.isEmpty { parts.append("Suggested reply:\n\(reply)") }
     parts.append("It's on my Pulse task list with id \(task.id). Once it's done, mark it done with the Pulse MCP update_task tool.")
     return parts.joined(separator: "\n\n")
