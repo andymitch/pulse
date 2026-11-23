@@ -137,6 +137,7 @@ func selfTest() throws {
     check(Settings.load(Data(#"{"superwhisperFolder": "~/x", "briefingHour": 9}"#.utf8), connections: nil).briefingHour == 9, "old settings Pulse no longer has are ignored, the rest kept")
     let whisper = "com.superduper.superwhisper"
     check(callName(micUsers: [whisper], event: true, meetOpen: false) == nil && callName(micUsers: [whisper], event: false, meetOpen: false) == nil
+          && callName(micUsers: [whisper], event: true, meetOpen: true) == nil
           && callName(micUsers: ["com.tinyspeck.slackmacgap.helper"], event: false, meetOpen: false) == "Slack huddle"
           && callName(micUsers: ["com.google.Chrome"], event: false, meetOpen: true) == "Google Meet"
           && callName(micUsers: ["us.zoom.xos"], event: true, meetOpen: false) == "Call" && callName(micUsers: ["us.zoom.xos"], event: false, meetOpen: false) == nil,
@@ -167,6 +168,15 @@ func selfTest() throws {
     check(transcriptText(mine: [], theirs: [w("Hi", 1)], turns: [], me: "Jane", attendees: ["Omar"]) == "[0:01] Omar: Hi", "one other attendee is named")
     let marked = transcriptText(mine: [], theirs: [w("Ship", 1), w("Friday.", 2), w("Agreed.", 9)], turns: [], me: "Jane", attendees: ["Omar"], marks: [5])
     check(marked == "[0:01] Omar: Ship Friday.\n[0:05] \(markLine)\n[0:09] Omar: Agreed." && spokenWords(marked) == 3, "a marked moment sits in the transcript at its time and isn't counted as speech")
+    let take = { (dir: String, start: Double, end: Double?) in
+        (folder: URL(fileURLWithPath: "/p/\(dir)/recordings/\(Int(start))"), meeting: Optional(Meeting(title: "T", start: Date(timeIntervalSince1970: start), me: "Jane", attendees: [], end: end.map { Date(timeIntervalSince1970: $0) })))
+    }
+    let takes = [take("a", 1000, 1030), take("a", 1100, 1200), take("a", 1500, 4000), take("b", 1210, 1300), take("a", 4050, nil)]
+    let names = { (groups: [[URL]]) in groups.map { $0.map(\.lastPathComponent) } }
+    check(names(captureGroups(takes, now: Date(timeIntervalSince1970: 5000), recording: nil)) == [["1000", "1100"], ["1500", "4050"], ["1210"]]
+          && names(captureGroups(takes, now: Date(timeIntervalSince1970: 1250), recording: nil)) == [["1500", "4050"]]
+          && names(captureGroups(Array(takes.prefix(2)), now: Date(timeIntervalSince1970: 1400), recording: Date(timeIntervalSince1970: 1290))) == [],
+          "captures restarted within two minutes join one meeting, which waits until no restart can follow")
     let standup = Meeting(title: "Standup", start: Date(timeIntervalSince1970: 0), me: "Jane", attendees: ["Omar"], minutes: 15)
     let notes = MeetingNotes(title: "Standup", summary: "Talked launch.\nAll good.", decisions: ["Ship Friday"], points: ["Omar: update docs", "Risk: QA time"], speakers: nil)
     let file = URL(fileURLWithPath: "/m/0.md")

@@ -13,6 +13,7 @@ struct Meeting: Codable {
     var attendees: [String]
     var minutes: Int?
     var marks: [Double]?
+    var end: Date?
 }
 
 struct MeetingNotes: Codable {
@@ -54,7 +55,7 @@ final class Meetings: ObservableObject {
         saved = savedMeetings(in: archive)
         self.me = me
         UNUserNotificationCenter.current().delegate = asker
-        Task { await processPending() }
+        processSoon()
         Task {
             while true {
                 await poll()
@@ -71,9 +72,17 @@ final class Meetings: ObservableObject {
         recording = nil
         noAudio = false
         await capture.stop()
-        meeting.minutes = Int(Date().timeIntervalSince(meeting.start) / 60)
+        meeting.end = Date()
+        meeting.minutes = Int(meeting.end!.timeIntervalSince(meeting.start) / 60)
         try? JSONEncoder().encode(meeting).write(to: capture.folder.appendingPathComponent("meeting.json"))
-        Task { await processPending() }
+        processSoon()
+    }
+
+    private func processSoon() {
+        Task {
+            try? await Task.sleep(for: .seconds(restartGap))
+            await processPending()
+        }
     }
 
     func mark() {
@@ -221,11 +230,11 @@ final class Meetings: ObservableObject {
         guard !transcribing else { return }
         transcribing = true
         var failed: Set<URL> = []
-        while let folder = pending().first(where: { !failed.contains($0) }) {
+        while let group = pending().first(where: { !failed.contains($0[0]) }) {
             do {
-                try await process(folder)
+                try await process(group)
             } catch {
-                failed.insert(folder)
+                failed.insert(group[0])
                 self.error = "Couldn't transcribe a meeting: \(error.localizedDescription) Pulse tries again after the next meeting."
             }
         }
@@ -233,21 +242,29 @@ final class Meetings: ObservableObject {
         saved = savedMeetings(in: archive)
     }
 
-    private func pending() -> [URL] {
+    private func pending() -> [[URL]] {
         let folders = Project.all(in: Settings.dir).flatMap { p in
             (try? FileManager.default.contentsOfDirectory(at: p.dir.appendingPathComponent("recordings"), includingPropertiesForKeys: nil)) ?? []
         }
-        return folders.filter { $0.lastPathComponent != capture?.folder.lastPathComponent }.sorted { $0.path < $1.path }
+        let stopped = folders.filter { $0.lastPathComponent != capture?.folder.lastPathComponent }
+            .map { ($0, try? JSONDecoder().decode(Meeting.self, from: Data(contentsOf: $0.appendingPathComponent("meeting.json")))) }
+        return captureGroups(stopped, now: Date(), recording: recording?.start)
     }
 
-    private func process(_ folder: URL) async throws {
-        let meeting = try JSONDecoder().decode(Meeting.self, from: Data(contentsOf: folder.appendingPathComponent("meeting.json")))
+    private func process(_ folders: [URL]) async throws {
+        let parts = try folders.map { try JSONDecoder().decode(Meeting.self, from: Data(contentsOf: $0.appendingPathComponent("meeting.json"))) }
+        var meeting = parts[parts.count - 1]
+        meeting.start = parts[0].start
+        let offsets = parts.map { $0.start.timeIntervalSince(meeting.start) }
+        meeting.marks = zip(parts, offsets).flatMap { part, offset in (part.marks ?? []).map { $0 + offset } }
+        if let end = meeting.end { meeting.minutes = Int(end.timeIntervalSince(meeting.start) / 60) }
+        let folder = folders[0]
         let file = folder.appendingPathComponent("transcript.txt")
         if !FileManager.default.fileExists(atPath: file.path) {
-            try await transcribeMeeting(folder, me: meeting.me, attendees: meeting.attendees, marks: meeting.marks ?? []).write(to: file, atomically: true, encoding: .utf8)
+            try await transcribeMeeting(Array(zip(folders, offsets)), me: meeting.me, attendees: meeting.attendees, marks: meeting.marks ?? []).write(to: file, atomically: true, encoding: .utf8)
         }
         var transcript = try String(contentsOf: file, encoding: .utf8)
-        if !transcript.isEmpty {
+        if spokenWords(transcript) > 0 {
             var notes: MeetingNotes?
             if spokenWords(transcript) >= 30 {
                 do { notes = try await summarize(meeting, transcript: file, folder: folder) } catch { self.error = "Saved \(meeting.title) without a summary: \(error)" }
@@ -258,7 +275,7 @@ final class Meetings: ObservableObject {
             try meetingMarkdown(meeting, notes: notes, transcript: transcript)
                 .write(to: meetings.appendingPathComponent(folder.lastPathComponent + ".md"), atomically: true, encoding: .utf8)
         }
-        try FileManager.default.removeItem(at: folder)
+        for folder in folders.reversed() { try FileManager.default.removeItem(at: folder) }
     }
 
     private func summarize(_ meeting: Meeting, transcript: URL, folder: URL) async throws -> MeetingNotes {
@@ -441,8 +458,26 @@ private let callApps = ["us.zoom.xos", "com.microsoft.teams", "com.apple.FaceTim
 
 func callName(micUsers: [String], event: Bool, meetOpen: Bool) -> String? {
     if micUsers.contains(where: { $0.hasPrefix("com.tinyspeck.slackmacgap") }) { return "Slack huddle" }
-    if meetOpen { return "Google Meet" }
-    return event && micUsers.contains { user in callApps.contains { user.hasPrefix($0) } } ? "Call" : nil
+    guard micUsers.contains(where: { user in callApps.contains { user.hasPrefix($0) } }) else { return nil }
+    return meetOpen ? "Google Meet" : event ? "Call" : nil
+}
+
+let restartGap: TimeInterval = 120
+
+func captureGroups(_ stopped: [(folder: URL, meeting: Meeting?)], now: Date, recording: Date?) -> [[URL]] {
+    var groups: [[(folder: URL, meeting: Meeting?)]] = []
+    for capture in stopped.sorted(by: { $0.folder.path < $1.folder.path }) {
+        if let last = groups.last?.last, last.folder.deletingLastPathComponent() == capture.folder.deletingLastPathComponent(),
+           let end = last.meeting?.end, let start = capture.meeting?.start, start.timeIntervalSince(end) < restartGap {
+            groups[groups.count - 1].append(capture)
+        } else {
+            groups.append([capture])
+        }
+    }
+    return groups.filter { group in
+        guard let end = group.last?.meeting?.end else { return true }
+        return now.timeIntervalSince(end) >= restartGap && (recording.map { $0.timeIntervalSince(end) >= restartGap } ?? true)
+    }.map { $0.map(\.folder) }
 }
 
 enum Call: Equatable { case slack(workspace: String?), calendar(account: String?) }
@@ -487,23 +522,27 @@ func micUsers() -> [String] {
         .filter { $0 != "com.apple.replayd" }
 }
 
-func transcribeMeeting(_ folder: URL, me: String, attendees: [String], marks: [Double]) async throws -> String {
+func transcribeMeeting(_ parts: [(folder: URL, offset: Double)], me: String, attendees: [String], marks: [Double]) async throws -> String {
     let asr = AsrManager()
     try await asr.loadModels(try await AsrModels.downloadAndLoad())
-    func words(_ name: String) async throws -> [WordTiming] {
-        let url = folder.appendingPathComponent(name)
-        guard let audio = try? AVAudioFile(forReading: url), Double(audio.length) > audio.fileFormat.sampleRate else { return [] }
-        var state = TdtDecoderState.make()
-        return buildWordTimings(from: try await asr.transcribe(url, decoderState: &state).tokenTimings ?? [])
-    }
-    let mine = try await words("mic.caf")
-    let theirs = try await words("system.caf")
-    var turns: [Turn] = []
-    if !theirs.isEmpty && attendees.count != 1 {
-        let diarizer = OfflineDiarizerManager()
-        try await diarizer.prepareModels()
-        turns = try await diarizer.process(folder.appendingPathComponent("system.caf")).segments
-            .map { Turn(speaker: $0.speakerId, start: Double($0.startTimeSeconds), end: Double($0.endTimeSeconds)) }
+    var mine: [WordTiming] = [], theirs: [WordTiming] = [], turns: [Turn] = []
+    for (i, (folder, offset)) in parts.enumerated() {
+        func words(_ name: String) async throws -> [WordTiming] {
+            let url = folder.appendingPathComponent(name)
+            guard let audio = try? AVAudioFile(forReading: url), Double(audio.length) > audio.fileFormat.sampleRate else { return [] }
+            var state = TdtDecoderState.make()
+            return buildWordTimings(from: try await asr.transcribe(url, decoderState: &state).tokenTimings ?? [])
+                .map { WordTiming(word: $0.word, startTime: $0.startTime + offset, endTime: $0.endTime + offset) }
+        }
+        mine += try await words("mic.caf")
+        let heard = try await words("system.caf")
+        theirs += heard
+        if !heard.isEmpty && attendees.count != 1 {
+            let diarizer = OfflineDiarizerManager()
+            try await diarizer.prepareModels()
+            turns += try await diarizer.process(folder.appendingPathComponent("system.caf")).segments
+                .map { Turn(speaker: "\(i)-\($0.speakerId)", start: Double($0.startTimeSeconds) + offset, end: Double($0.endTimeSeconds) + offset) }
+        }
     }
     return transcriptText(mine: mine, theirs: theirs, turns: turns, me: me, attendees: attendees, marks: marks)
 }
