@@ -40,7 +40,7 @@ final class DB: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS facts_subject ON facts (subject_id, superseded_by);
             CREATE TABLE IF NOT EXISTS tasks (
                 id TEXT PRIMARY KEY, title TEXT NOT NULL, why TEXT NOT NULL DEFAULT '', url TEXT NOT NULL, source TEXT, reply TEXT);
-            CREATE TABLE IF NOT EXISTS task_marks (id TEXT PRIMARY KEY, done TEXT, later INTEGER NOT NULL DEFAULT 0, removed TEXT);
+            CREATE TABLE IF NOT EXISTS task_marks (id TEXT PRIMARY KEY, done TEXT, removed TEXT);
             CREATE TABLE IF NOT EXISTS pending_replaces (
                 fact_id INTEGER NOT NULL REFERENCES facts(id), replaces_id INTEGER NOT NULL REFERENCES facts(id), PRIMARY KEY (fact_id, replaces_id));
             """)
@@ -59,6 +59,9 @@ final class DB: @unchecked Sendable {
                     try exec("DROP TABLE users")
                 }
             }
+        }
+        if try !query("SELECT 1 FROM pragma_table_info('task_marks') WHERE name = 'later'").isEmpty {
+            try exec("ALTER TABLE task_marks DROP COLUMN later; DELETE FROM task_marks WHERE done IS NULL AND removed IS NULL")
         }
         if try query("SELECT 1 FROM pragma_table_info('facts') WHERE name = 'doubt'").isEmpty {
             try exec("ALTER TABLE facts ADD COLUMN doubt TEXT")

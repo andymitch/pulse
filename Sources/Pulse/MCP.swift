@@ -50,7 +50,7 @@ private let mcpTools: [[String: Any]] = [
     tool("forget", "Mark a fact as wrong so Pulse stops using it. Only when I say it's wrong; a fact that's just out of date should be replaced with remember instead. Any facts it replaced become current again.", [
         "id": ["type": "integer", "description": "The fact id from search or subject"],
     ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": true, "idempotentHint": true]),
-    tool("today", "The briefing's team focus (the current priorities) with its sources, and my tasks: the ones the briefing found in Slack, mail, meetings and agent sessions, and the ones agents added. Each has an id, a link and whether it's done (doneOn is the day), put off until later or removed. Tasks stay until they're done; done ones are cleared each Monday. Open tickets and PRs aren't included, since Pulse lists them live from Linear and GitHub. stale is true when the briefing wasn't made today.", [:]),
+    tool("today", "The briefing's team focus (the current priorities) with its sources, and my tasks: the ones the briefing found in Slack, mail, meetings and agent sessions, and the ones agents added. Each has an id, a link and whether it's done (doneOn is the day) or removed. Tasks stay until they're done; done ones are cleared each Monday. Open tickets and PRs aren't included, since Pulse lists them live from Linear and GitHub. stale is true when the briefing wasn't made today.", [:]),
     tool("stats", "PRs merged and tickets closed per person per period, plus PR stats (median hours to merge, median lines added, PRs over 500 lines), as shown on Trends.", [
         "range": ["type": "string", "enum": TrendRange.allCases.map(\.rawValue), "description": "Period, default 5 weeks"],
         "person": ["type": "string", "description": "Only this person: a GitHub login for PRs, a Linear name for tickets"],
@@ -60,10 +60,10 @@ private let mcpTools: [[String: Any]] = [
         "why": ["type": "string", "description": "One short line on why it matters or who's waiting"],
         "url": ["type": "string", "description": "The thread, message, doc, ticket or PR it's about"],
     ], required: ["title", "url"], hints: ["readOnlyHint": false, "destructiveHint": false]),
-    tool("update_task", "Change one of my tasks: its title, why or link, mark it done or not done, move it to later or back up, or remove it or restore it. Only the fields given change. A Linear ticket (its identifier, like KLE-123) or a PR (its URL) can be marked done, later or removed, but not edited.", [
+    tool("update_task", "Change one of my tasks: its title, why or link, mark it done or not done, or remove it or restore it. Only the fields given change. A Linear ticket (its identifier, like KLE-123) or a PR (its URL) can be marked done or removed, but not edited.", [
         "id": ["type": "string", "description": "The task id from today, a ticket identifier or a PR URL"],
         "title": ["type": "string"], "why": ["type": "string"], "url": ["type": "string"],
-        "done": ["type": "boolean"], "later": ["type": "boolean"], "removed": ["type": "boolean"],
+        "done": ["type": "boolean"], "removed": ["type": "boolean"],
     ], required: ["id"], hints: ["readOnlyHint": false, "destructiveHint": false, "idempotentHint": true]),
     tool("delete_task", "Delete a task that shouldn't be on my list at all. To finish a task, mark it done with update_task instead.", [
         "id": ["type": "string", "description": "The task id from today"],
@@ -207,7 +207,7 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         let briefed = (try? dir.appendingPathComponent("synthesis.json").resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let db = try? DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true)
         let tasks = db?.tasks() ?? [], marks = db?.marks() ?? TaskMarks()
-        let done = marks.done, later = marks.later, removed = marks.removed
+        let done = marks.done, removed = marks.removed
         let focus: [[String: Any]] = (s?.focus ?? []).map { f in
             let sources: [[String: Any]] = f.sources.compactMap { id in s?.sources.first { $0.id == id } }.map { ["title": $0.title, "url": $0.url, "kind": $0.kind] }
             return ["headline": f.headline, "summary": f.summary, "sources": sources]
@@ -215,7 +215,7 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         let list: [[String: Any]] = tasks.map { t in
             ([
                 "id": t.id, "title": t.title, "why": t.why, "url": t.url, "source": t.source, "reply": t.reply,
-                "done": done[t.id] != nil, "doneOn": done[t.id], "later": later.contains(t.id), "removed": removed[t.id] != nil,
+                "done": done[t.id] != nil, "doneOn": done[t.id], "removed": removed[t.id] != nil,
             ] as [String: Any?]).compactMapValues { $0 }
         }
         return (["focus": focus, "tasks": list, "briefedAt": briefed.map(iso.string(from:)),
@@ -259,7 +259,7 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
             id = given
             task = db.tasks().first { $0.id == id }
             if task == nil, title != nil || why != nil || url != nil {
-                throw SyncError(description: "Only tasks from today can be edited. Tickets and PRs can only be marked done, later or removed.")
+                throw SyncError(description: "Only tasks from today can be edited. Tickets and PRs can only be marked done or removed.")
             }
             if let title { task?.title = title }
             if let why { task?.why = why }
@@ -270,11 +270,11 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         let done = (args["done"] as? Bool).map { $0 ? marks.done[id] ?? day : nil }
         let removed = (args["removed"] as? Bool).map { $0 ? marks.removed[id] ?? day : nil }
         if let task { try db.saveTask(task) }
-        try db.mark(id, done: done, later: args["later"] as? Bool, removed: removed)
+        try db.mark(id, done: done, removed: removed)
         changed(dir)
         let after = db.marks()
         return (["id": id, "title": task?.title, "why": task?.why, "url": task?.url,
-                 "done": after.done[id] != nil, "later": after.later.contains(id), "removed": after.removed[id] != nil] as [String: Any?]).compactMapValues { $0 }
+                 "done": after.done[id] != nil, "removed": after.removed[id] != nil] as [String: Any?]).compactMapValues { $0 }
     case "delete_task":
         let db = try DB(path: dir.appendingPathComponent("pulse.db").path)
         guard let id = args["id"] as? String, db.tasks().contains(where: { $0.id == id }) else { throw SyncError(description: "Unknown task id. Use the ids from today.") }

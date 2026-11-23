@@ -27,7 +27,6 @@ final class Store: ObservableObject {
     @Published var synthesisError: String?
     @Published var tasks: [PulseTask] = []
     @Published var doneIDs: [String: String] = [:]
-    @Published var laterIDs: Set<String> = []
     @Published var removedIDs: [String: String] = [:]
     @Published var doneThisWeek: [DoneItem] = []
     @Published var workflow: [String: [WorkflowState]] = [:]
@@ -178,7 +177,6 @@ final class Store: ObservableObject {
         tasks = db.tasks()
         let marks = db.marks()
         doneIDs = marks.done
-        laterIDs = marks.later
         removedIDs = marks.removed
     }
 
@@ -244,7 +242,7 @@ final class Store: ObservableObject {
         guard fetchedOK else { return }
         if loadedDay != day { loadDay() }
         let known = Set(today.map(\.id) + tasks.map(\.id))
-        let gone = Set(doneIDs.keys).union(removedIDs.keys).union(laterIDs).subtracting(known)
+        let gone = Set(doneIDs.keys).union(removedIDs.keys).subtracting(known)
         if !gone.isEmpty { write { try db.clearMarks(gone) } }
         let rows = checklist
         let done = Set(rows.filter { $0.done && ($0.item.state?.type ?? "completed") == "completed" }.map(\.id)), shown = Set(rows.map(\.id))
@@ -266,8 +264,6 @@ final class Store: ObservableObject {
         recordDone()
     }
 
-    func toggleLater(_ id: String) { write { try db.mark(id, later: !laterIDs.contains(id)) } }
-
     func remove(_ id: String) { write { try db.mark(id, removed: day) } }
 
     func restoreRemoved() {
@@ -282,8 +278,7 @@ final class Store: ObservableObject {
             let item = ActionItem(id: t.id, kind: .followUp, title: t.title, reason: (t.source ?? "").capitalized, url: url, since: .distantPast)
             return TodoRow(item: item, why: t.why, done: doneIDs[t.id] != nil, reply: t.reply)
         }
-        let rows = (synced + mine).filter { removedIDs[$0.id] == nil }
-        return rows.filter { !laterIDs.contains($0.id) } + rows.filter { laterIDs.contains($0.id) }
+        return (synced + mine).filter { removedIDs[$0.id] == nil }
     }
 
     func setState(_ state: WorkflowState, for item: ActionItem) async {

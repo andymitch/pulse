@@ -531,7 +531,6 @@ private struct TodoRowView: View {
 
     var body: some View {
         let item = row.item
-        let later = store.laterIDs.contains(item.id)
         HStack(alignment: .top, spacing: 10) {
             if let state = item.state, let team = item.teamID {
                 StatusMenu(store: store, item: item, state: state, states: store.workflow[team] ?? [state]).frame(width: 16, height: 17)
@@ -544,7 +543,7 @@ private struct TodoRowView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).lineLimit(2).strikethrough(row.done).foregroundStyle(row.done ? .secondary : .primary)
-                Text([later ? "Later" : nil, row.why, item.reason].compactMap { $0 }.joined(separator: " · "))
+                Text([row.why, item.reason].compactMap { $0 }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
                 if !item.nested.isEmpty, !row.done { NestedList(store: store, items: item.nested) }
@@ -740,8 +739,7 @@ private struct Triage: View {
             }
             Divider()
         }
-        Button(store.laterIDs.contains(id) ? "Move back up" : "Do later") { store.toggleLater(id) }
-        Button("Remove") { store.remove(id) }
+        Button(role: .destructive) { store.remove(id) } label: { Label("Remove", systemImage: "trash") }
     }
 }
 
