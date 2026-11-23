@@ -404,13 +404,35 @@ struct TodayView: View {
     @ObservedObject var store: Store
     @State private var showDone = false
     @State private var newTask = ""
+    @State private var adding = false
+    @FocusState private var typing: Bool
 
     var body: some View {
         let rows = store.checklist
         let monday = thisMonday.formatted(localDay)
         let open = rows.filter { !$0.done }, done = rows.filter { $0.done && store.doneDay($0.id) >= monday }
         let week = store.earlierThisWeek.sorted { $0.day > $1.day }
-        Panel(title: "Tasks · \(open.count) open") {
+        Panel(title: "Tasks · \(open.count) open", accessory: {
+            Button { adding = true } label: { Image(systemName: "plus") }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Add a task")
+                .accessibilityLabel("Add a task")
+        }) {
+            if adding {
+                TextField("New task", text: $newTask)
+                    .textFieldStyle(.plain)
+                    .focused($typing)
+                    .onAppear { typing = true }
+                    .onSubmit {
+                        store.addTask(newTask)
+                        newTask = ""
+                        adding = false
+                    }
+                    .onExitCommand { newTask = ""; adding = false }
+                    .onChange(of: typing) { if !typing && newTask.isEmpty { adding = false } }
+                Divider()
+            }
             if store.triageWaiting {
                 HStack(alignment: .top, spacing: 10) {
                     Color.clear.frame(width: 16, height: 17)
@@ -427,27 +449,17 @@ struct TodayView: View {
                     }
                     .help("Open Knowledge to resolve them")
                 }
-                Divider()
+                if !rows.isEmpty { Divider() }
             }
             if open.isEmpty && !store.triageWaiting {
                 Text(store.syncing ? "Loading…" : "Nothing needs you right now.").foregroundStyle(.secondary)
-                Divider()
             }
             ForEach(open) { row in
                 TodoRowView(store: store, row: row)
-                Divider()
-            }
-            HStack(spacing: 10) {
-                Image(systemName: "plus").foregroundStyle(.secondary).frame(width: 16, height: 17)
-                TextField("Add a task", text: $newTask)
-                    .textFieldStyle(.plain)
-                    .onSubmit {
-                        store.addTask(newTask)
-                        newTask = ""
-                    }
+                if row.id != open.last?.id { Divider() }
             }
             if !done.isEmpty || !week.isEmpty {
-                Divider()
+                if !open.isEmpty || store.triageWaiting { Divider() }
                 DisclosureGroup(isExpanded: $showDone) {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(done) { row in
