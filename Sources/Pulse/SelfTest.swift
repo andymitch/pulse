@@ -472,6 +472,16 @@ func selfTest() throws {
         check(store.checklist.first { $0.id == danaID }?.done == true && store.openTasks.map(\.title) == ["Send the notice"] && store.doneThisWeek.map(\.id) == [danaID],
               "a task the briefing closes is done and logged for the week")
         check(Store(db: store.db, dir: store.dir).tasks.count == 2, "tasks survive a restart")
+        store.addTask("  ")
+        store.addTask(" Water the plants ")
+        let mine = store.tasks.last!
+        check(store.tasks.count == 3 && store.checklist.last?.item.title == "Water the plants" && store.checklist.last?.item.url == noLink
+              && Store(db: store.db, dir: store.dir).tasks.last?.title == "Water the plants" && !taskPrompt(mine).contains("Link:"),
+              "a task typed by hand is listed straight away without a link, survives a restart, and a blank one isn't added")
+        store.remove(mine.id)
+        check(!store.checklist.contains { $0.id == mine.id }, "a task typed by hand can be removed")
+        try store.db.deleteTasks([mine.id])
+        store.reloadDay()
         try store.db.saveTask(PulseTask(id: "from-agent", title: "Follow up with Jed", why: "", url: "https://x/3", source: "agent"))
         store.applyTasks(try JSONDecoder().decode(TaskChanges.self, from: Data(#"{"add": [{"title": "Book the room", "why": "", "url": "https://x/4", "source": "mail"}]}"#.utf8)))
         check(store.openTasks.map(\.title) == ["Send the notice", "Follow up with Jed", "Book the room"], "a task an agent adds while the app is open isn't lost when the briefing adds its own")

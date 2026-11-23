@@ -403,13 +403,36 @@ struct TodoRow: Identifiable {
 struct TodayView: View {
     @ObservedObject var store: Store
     @State private var showDone = false
+    @State private var newTask = ""
+    @State private var adding = false
+    @FocusState private var typing: Bool
 
     var body: some View {
         let rows = store.checklist
         let monday = thisMonday.formatted(localDay)
         let open = rows.filter { !$0.done }, done = rows.filter { $0.done && store.doneDay($0.id) >= monday }
         let week = store.earlierThisWeek.sorted { $0.day > $1.day }
-        Panel(title: "Tasks · \(open.count) open") {
+        Panel(title: "Tasks · \(open.count) open", accessory: {
+            Button { adding = true } label: { Image(systemName: "plus") }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Add a task")
+                .accessibilityLabel("Add a task")
+        }) {
+            if adding {
+                TextField("New task", text: $newTask)
+                    .textFieldStyle(.plain)
+                    .focused($typing)
+                    .onAppear { typing = true }
+                    .onSubmit {
+                        store.addTask(newTask)
+                        newTask = ""
+                        adding = false
+                    }
+                    .onExitCommand { newTask = ""; adding = false }
+                    .onChange(of: typing) { if !typing && newTask.isEmpty { adding = false } }
+                Divider()
+            }
             if store.triageWaiting {
                 HStack(alignment: .top, spacing: 10) {
                     Color.clear.frame(width: 16, height: 17)
@@ -543,8 +566,8 @@ private struct TodoRowView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).lineLimit(2).strikethrough(row.done).foregroundStyle(row.done ? .secondary : .primary)
-                Text([row.why, item.reason].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                let subtitle = [row.why, item.reason].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                 if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty, !row.done { ReplySuggestion(store: store, text: reply, url: item.url).id(reply) }
                 if !item.nested.isEmpty, !row.done { NestedList(store: store, items: item.nested) }
             }
@@ -676,6 +699,16 @@ private struct Buttons: View {
                 TicketButton(store: store, item: item, triage: triage)
             } else if let pr = item.pr {
                 AppButton(.github, item.kind == .review ? "Review" : "Open", help: "Open the PR", menu: triage) { open(pr) }
+            } else if item.url == noLink, let task = triage.task, let agent = settings.enabledAgents.first(where: { Launch.agent($0.name) == store.lastStart }) ?? settings.enabledAgents.first {
+                AppButton(agent.brand, "Start", help: demoMode ? "Not available in the demo" : "Start \(agent.name) in \(terminalName)", symbol: "terminal", off: demoMode, menu: triage) { store.startSession(agent, task: task) }
+            } else if item.url == noLink {
+                Menu { triage } label: { Image(systemName: "chevron.down") }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 26, height: 24)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                    .help("More actions")
+                    .accessibilityLabel("More actions")
             } else {
                 let slack = item.url.host?.hasSuffix("slack.com") == true
                 let linear = item.url.host == "linear.app"
@@ -688,6 +721,7 @@ private struct Buttons: View {
 
 private struct SplitButton<Title: View, Items: View>: View {
     let help: String
+    var off = false
     let action: () -> Void
     @ViewBuilder let title: Title
     @ViewBuilder let items: Items
@@ -705,6 +739,8 @@ private struct SplitButton<Title: View, Items: View>: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(Pressable())
+            .disabled(off)
+            .opacity(off ? 0.4 : 1)
             .help(help)
             Divider().padding(.vertical, 5)
             Menu { items } label: { Image(systemName: "chevron.down") }
@@ -735,6 +771,7 @@ private struct Triage: View {
                     Button { store.startSession(agent, task: task) } label: {
                         Label { Text(agent.name) } icon: { icon(.agent(agent.name)) }
                     }
+                    .disabled(demoMode)
                 }
             }
             Divider()
@@ -823,9 +860,11 @@ private struct AppButton: View {
     let action: () async -> Void
 
     var symbol = "arrow.up.right.square"
+    var off = false
 
-    init(_ brand: Brand?, _ label: String? = nil, help: String = "", icon: Bool = true, symbol: String = "arrow.up.right.square", menu: Triage? = nil, action: @escaping () async -> Void) {
+    init(_ brand: Brand?, _ label: String? = nil, help: String = "", icon: Bool = true, symbol: String = "arrow.up.right.square", off: Bool = false, menu: Triage? = nil, action: @escaping () async -> Void) {
         self.symbol = symbol
+        self.off = off
         self.brand = brand
         self.label = label
         self.help = help
@@ -844,7 +883,7 @@ private struct AppButton: View {
 
     var body: some View {
         if let menu {
-            SplitButton(help: help) { Task { await action() } } title: { labelView } items: { menu }
+            SplitButton(help: help, off: off) { Task { await action() } } title: { labelView } items: { menu }
         } else {
             Button { Task { await action() } } label: { labelView }
                 .buttonStyle(.bordered)
