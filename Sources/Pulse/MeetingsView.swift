@@ -15,6 +15,7 @@ struct MeetingsView: View {
                     } else {
                         Label("Recording \(recording.title)", systemImage: "record.circle").font(.caption).foregroundStyle(.red)
                     }
+                    Button("Notes") { NotesPanel.shared.show() }.help("Open a notepad to type what matters to you while the meeting records")
                     Button("Mark") { meetings.mark() }.help("Mark this moment so the summary focuses on what's being said")
                     Button("Stop") { Task { await meetings.stop(skip: true) } }
                 } else {
@@ -75,6 +76,17 @@ private struct MeetingCard: View {
                 .foregroundStyle(meeting.summary.isEmpty ? .secondary : .primary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+            if !meeting.notes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Your notes", systemImage: "pencil").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(Array(meeting.notes.enumerated()), id: \.offset) { _, note in
+                        Text(note).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            }
             if meeting.summary.isEmpty {
                 let busy = meetings.summarizing.contains(meeting.id)
                 Button(busy ? "Summarizing…" : "Summarize") { Task { await meetings.summarize(meeting) } }

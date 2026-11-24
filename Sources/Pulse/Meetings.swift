@@ -14,6 +14,12 @@ struct Meeting: Codable {
     var minutes: Int?
     var marks: [Double]?
     var end: Date?
+    var notes: [MeetingNote]?
+}
+
+struct MeetingNote: Codable, Equatable {
+    let at: Double
+    let text: String
 }
 
 struct MeetingNotes: Codable {
@@ -75,6 +81,7 @@ final class Meetings: ObservableObject {
         meeting.end = Date()
         meeting.minutes = Int(meeting.end!.timeIntervalSince(meeting.start) / 60)
         try? JSONEncoder().encode(meeting).write(to: capture.folder.appendingPathComponent("meeting.json"))
+        NotesPanel.shared.close()
         processSoon()
     }
 
@@ -85,9 +92,17 @@ final class Meetings: ObservableObject {
         }
     }
 
-    func mark() {
+    func mark() { save { $0.marks = ($0.marks ?? []) + [Date().timeIntervalSince($0.start)] } }
+
+    func note(_ text: String) {
+        let text = text.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        save { $0.notes = ($0.notes ?? []) + [MeetingNote(at: Date().timeIntervalSince($0.start), text: text)] }
+    }
+
+    private func save(_ change: (inout Meeting) -> Void) {
         guard let capture, var meeting = recording else { return }
-        meeting.marks = (meeting.marks ?? []) + [Date().timeIntervalSince(meeting.start)]
+        change(&meeting)
         recording = meeting
         try? JSONEncoder().encode(meeting).write(to: capture.folder.appendingPathComponent("meeting.json"))
     }
@@ -257,11 +272,12 @@ final class Meetings: ObservableObject {
         meeting.start = parts[0].start
         let offsets = parts.map { $0.start.timeIntervalSince(meeting.start) }
         meeting.marks = zip(parts, offsets).flatMap { part, offset in (part.marks ?? []).map { $0 + offset } }
+        meeting.notes = zip(parts, offsets).flatMap { part, offset in (part.notes ?? []).map { MeetingNote(at: $0.at + offset, text: $0.text) } }
         if let end = meeting.end { meeting.minutes = Int(end.timeIntervalSince(meeting.start) / 60) }
         let folder = folders[0]
         let file = folder.appendingPathComponent("transcript.txt")
         if !FileManager.default.fileExists(atPath: file.path) {
-            try await transcribeMeeting(Array(zip(folders, offsets)), me: meeting.me, attendees: meeting.attendees, marks: meeting.marks ?? []).write(to: file, atomically: true, encoding: .utf8)
+            try await transcribeMeeting(Array(zip(folders, offsets)), me: meeting.me, attendees: meeting.attendees, marks: meeting.marks ?? [], notes: meeting.notes ?? []).write(to: file, atomically: true, encoding: .utf8)
         }
         var transcript = try String(contentsOf: file, encoding: .utf8)
         if spokenWords(transcript) > 0 {
@@ -415,8 +431,10 @@ private final class Capture: NSObject, SCStreamOutput {
 
 let markLine = "★ Marked as important"
 
+let noteSign = "✎"
+
 func spokenWords(_ transcript: String) -> Int {
-    transcript.split(separator: "\n").filter { !$0.hasSuffix(markLine) }.map { $0.split(separator: ":", maxSplits: 2).last ?? "" }.reduce(0) { $0 + $1.split(separator: " ").count }
+    transcript.split(separator: "\n").filter { !$0.hasSuffix(markLine) && !$0.contains("] \(noteSign) ") }.map { $0.split(separator: ":", maxSplits: 2).last ?? "" }.reduce(0) { $0 + $1.split(separator: " ").count }
 }
 
 func append(_ buffer: AVAudioPCMBuffer, to file: AVAudioFile, since start: Date) throws {
@@ -522,7 +540,7 @@ func micUsers() -> [String] {
         .filter { $0 != "com.apple.replayd" }
 }
 
-func transcribeMeeting(_ parts: [(folder: URL, offset: Double)], me: String, attendees: [String], marks: [Double]) async throws -> String {
+func transcribeMeeting(_ parts: [(folder: URL, offset: Double)], me: String, attendees: [String], marks: [Double], notes: [MeetingNote] = []) async throws -> String {
     let asr = AsrManager()
     try await asr.loadModels(try await AsrModels.downloadAndLoad())
     var mine: [WordTiming] = [], theirs: [WordTiming] = [], turns: [Turn] = []
@@ -544,7 +562,7 @@ func transcribeMeeting(_ parts: [(folder: URL, offset: Double)], me: String, att
                 .map { Turn(speaker: "\(i)-\($0.speakerId)", start: Double($0.startTimeSeconds) + offset, end: Double($0.endTimeSeconds) + offset) }
         }
     }
-    return transcriptText(mine: mine, theirs: theirs, turns: turns, me: me, attendees: attendees, marks: marks)
+    return transcriptText(mine: mine, theirs: theirs, turns: turns, me: me, attendees: attendees, marks: marks, notes: notes)
 }
 
 struct Turn {
@@ -552,7 +570,7 @@ struct Turn {
     let start, end: Double
 }
 
-func transcriptText(mine: [WordTiming], theirs: [WordTiming], turns: [Turn], me: String, attendees: [String], marks: [Double] = []) -> String {
+func transcriptText(mine: [WordTiming], theirs: [WordTiming], turns: [Turn], me: String, attendees: [String], marks: [Double] = [], notes: [MeetingNote] = []) -> String {
     let key = { (word: String) in word.lowercased().filter { $0.isLetter || $0.isNumber } }
     let echoes = Dictionary(grouping: theirs, by: { key($0.word) })
     let spoken = mine.filter { w in !(echoes[key(w.word)] ?? []).contains { abs($0.startTime - w.startTime) < 1 } }
@@ -563,7 +581,7 @@ func transcriptText(mine: [WordTiming], theirs: [WordTiming], turns: [Turn], me:
         guard let turn = turns.min(by: { gap($0) < gap($1) }) else { return "Speaker 1" }
         return "Speaker \(ids.firstIndex(of: turn.speaker)! + 1)"
     }
-    let words = (spoken.map { ($0.startTime, me, $0.word) } + theirs.map { ($0.startTime, speaker($0.startTime), $0.word) } + marks.map { ($0, "", markLine) }).sorted { $0.0 < $1.0 }
+    let words = (spoken.map { ($0.startTime, me, $0.word) } + theirs.map { ($0.startTime, speaker($0.startTime), $0.word) } + marks.map { ($0, "", markLine) } + notes.map { ($0.at, "", "\(noteSign) \($0.text)") }).sorted { $0.0 < $1.0 }
     var lines: [String] = []
     var current = ""
     for (time, who, word) in words {
@@ -585,7 +603,7 @@ func notesPrompt(_ m: Meeting, transcript: String, output: String) -> String {
     return """
     You are distilling a meeting that Pulse recorded on \(m.me)'s Mac: "\(m.title)", started \(m.start.formatted(date: .complete, time: .shortened)).\(attendees)
 
-    Read the transcript in \(transcript). Each line is "[minutes:seconds] speaker: words". Lines from \(m.me) are labelled with that name; "Speaker N" are other people. Lines that say "\(markLine)" are moments \(m.me) marked while the meeting was happening. Speech recognition makes mistakes, so read past odd words.
+    Read the transcript in \(transcript). Each line is "[minutes:seconds] speaker: words". Lines from \(m.me) are labelled with that name; "Speaker N" are other people. Lines that say "\(markLine)" are moments \(m.me) marked while the meeting was happening, and lines that start with "\(noteSign)" are notes \(m.me) typed at that moment. Speech recognition makes mistakes, so read past odd words.
 
     This is read-only. Never post, comment, create, or change anything anywhere. Only write the file below.
 
@@ -597,6 +615,7 @@ func notesPrompt(_ m: Meeting, transcript: String, output: String) -> String {
     - summary: 2 to 4 plain sentences on what the meeting was about and where it landed.
     - decisions: the 1 to 5 most important things that were agreed or decided. Empty if nothing was decided.
     - points: the 1 to 5 most important other points, such as open questions, risks, and action items with the owner's name.
+    - \(m.me)'s notes say what they found important: build on them, so each one is in the summary, decisions or points, filled in with what was said around it. Don't repeat a note word for word; \(m.me) sees their notes next to your summary.
     - Marked moments matter most: cover what was being said right at and just before each one in more detail, and make sure each one is in the summary, decisions or points.
     - Each decision and point is one short line: the key part in bold, then the rest of the sentence, like "**Ship Friday** after QA signs off on the import fix".
     - speakers: name a "Speaker N" only when the transcript makes clear who it is, for example they are addressed by name or introduce themselves\(m.attendees.isEmpty ? "" : ", and only with one of the attendees"). Leave the rest out.
@@ -608,7 +627,7 @@ struct SavedMeeting: Identifiable {
     let file: URL
     let start: Date
     var title = "", recorded = "", summary = ""
-    var decisions: [String] = [], points: [String] = []
+    var decisions: [String] = [], points: [String] = [], notes: [String] = []
 
     var id: URL { file }
     var people: [String] { recorded.components(separatedBy: ". With ").dropFirst().first.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")).components(separatedBy: ", ") } ?? [] }
@@ -639,6 +658,7 @@ func parseMeeting(_ markdown: String, file: URL, start: Date) -> SavedMeeting {
             case "Summary": m.summary += m.summary.isEmpty ? line : "\n" + line
             case "Decisions": m.decisions.append(item)
             case "Important points": m.points.append(item)
+            case "My notes": m.notes.append(item)
             default: break
             }
         }
@@ -648,19 +668,20 @@ func parseMeeting(_ markdown: String, file: URL, start: Date) -> SavedMeeting {
 
 func editMeeting(_ markdown: String, title: String?, summary: String?, decisions: [String]?, points: [String]?) -> String? {
     let parts = markdown.components(separatedBy: "\n## Transcript\n")
-    let known: Set<String> = ["Summary", "Decisions", "Important points"]
+    let known: Set<String> = ["My notes", "Summary", "Decisions", "Important points"]
     guard parts.count > 1, parts[0].split(separator: "\n").allSatisfy({ !$0.hasPrefix("## ") || known.contains(String($0.dropFirst(3))) }) else { return nil }
     var m = parseMeeting(markdown, file: URL(fileURLWithPath: "/"), start: Date())
     if let title { m.title = title }
     if let summary { m.summary = summary.split(separator: "\n", omittingEmptySubsequences: false).map { $0.drop { $0 == "#" || $0 == " " } }.joined(separator: "\n") }
     if let decisions { m.decisions = decisions }
     if let points { m.points = points }
-    return notesLines(title: m.title, recorded: m.recorded, summary: m.summary.isEmpty ? nil : m.summary, decisions: m.decisions, points: m.points)
+    return notesLines(title: m.title, recorded: m.recorded, notes: m.notes, summary: m.summary.isEmpty ? nil : m.summary, decisions: m.decisions, points: m.points)
         .joined(separator: "\n") + "\n\n## Transcript\n" + parts.dropFirst().joined(separator: "\n## Transcript\n")
 }
 
-private func notesLines(title: String, recorded: String, summary: String?, decisions: [String], points: [String]) -> [String] {
+private func notesLines(title: String, recorded: String, notes: [String], summary: String?, decisions: [String], points: [String]) -> [String] {
     var lines = ["# \(title)", "", recorded]
+    if !notes.isEmpty { lines += ["", "## My notes", ""] + notes.map { "- " + $0 } }
     if let summary { lines += ["", "## Summary", "", summary] }
     if !decisions.isEmpty { lines += ["", "## Decisions", ""] + decisions.map { "- " + $0 } }
     if !points.isEmpty { lines += ["", "## Important points", ""] + points.map { "- " + $0 } }
@@ -671,7 +692,8 @@ func meetingMarkdown(_ m: Meeting, notes: MeetingNotes?, transcript: String) -> 
     let length = m.minutes.map { " (\($0) min)" } ?? ""
     let with = m.attendees.isEmpty ? "" : ". With \(([m.me] + m.attendees).joined(separator: ", "))"
     let recorded = "Recorded \(m.start.formatted(date: .abbreviated, time: .shortened))\(length)\(with)."
-    let lines = notesLines(title: notes?.title ?? m.title, recorded: recorded, summary: notes?.summary,
+    let mine = (m.notes ?? []).map { String(format: "[%d:%02d] ", Int($0.at) / 60, Int($0.at) % 60) + $0.text }
+    let lines = notesLines(title: notes?.title ?? m.title, recorded: recorded, notes: mine, summary: notes?.summary,
                            decisions: Array((notes?.decisions ?? []).prefix(5)), points: Array((notes?.points ?? []).prefix(5)))
     return (lines + ["", "## Transcript", "", transcript, ""]).joined(separator: "\n")
 }
