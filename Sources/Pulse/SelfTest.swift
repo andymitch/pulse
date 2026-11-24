@@ -607,7 +607,7 @@ func selfTest() throws {
         let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String) ?? ""
         return try? JSONSerialization.jsonObject(with: Data(text.utf8))
     }
-    check(((mcpResponse(["id": 1, "method": "tools/list"], root: mcpRoot, project: mcpProject)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 15, "MCP lists its fifteen tools")
+    check(((mcpResponse(["id": 1, "method": "tools/list"], root: mcpRoot, project: mcpProject)?["result"] as? [String: Any])?["tools"] as? [Any])?.count == 17, "MCP lists its seventeen tools")
     check((mcpResponse(["id": 1, "method": "nope"], root: mcpRoot, project: mcpProject)?["error"] as? [String: Any])?["code"] as? Int == -32601 && mcpResponse(["method": "notifications/initialized"], root: mcpRoot, project: mcpProject) == nil, "MCP rejects unknown methods and doesn't answer notifications")
     check((call("list_meetings", ["query": "launch"]) as? [[String: Any]])?.first?["id"] as? String == "0", "MCP finds a meeting by text")
     let page = call("get_meeting", ["id": "0", "transcript": true, "offset": 1, "lines": 1]) as? [String: Any]
@@ -628,6 +628,18 @@ func selfTest() throws {
     check(((call("today", [:]) as? [String: Any])?["tasks"] as? [[String: Any]])?.last?["removed"] as? Bool == false, "MCP restores a removed task and leaves done alone")
     check(call("update_task", ["id": "nope", "title": "x"]) == nil && (call("update_task", ["id": "KLE-9", "removed": true]) as? [String: Any])?["removed"] as? Bool == true,
           "MCP edits only tasks, but can mark a ticket or PR")
+    let org = Connections.GitHub(account: "me", org: "Acme"), chosen = Connections.GitHub(account: "me", org: "acme", repos: ["acme/web"])
+    check(SourceLink("https://linear.app/acme/issue/ACME-12/fix-it", linearWorkspace: "acme", github: nil) == .linearIssue("ACME-12")
+          && SourceLink("https://linear.app/acme/document/launch-plan-305de38efe1f", linearWorkspace: "acme", github: nil) == .linearDocument("305de38efe1f")
+          && SourceLink("https://linear.app/other/issue/OTH-1", linearWorkspace: "acme", github: nil) == nil
+          && SourceLink("https://linear.app/acme/issue/ACME-12", linearWorkspace: nil, github: nil) == nil
+          && SourceLink("https://github.com/acme/api/pull/9", linearWorkspace: nil, github: org) == .github(owner: "acme", repo: "api", number: 9)
+          && SourceLink("https://github.com/acme/api/issues/9", linearWorkspace: nil, github: chosen) == nil
+          && SourceLink("https://github.com/acme/web/issues/9#issuecomment-1", linearWorkspace: nil, github: chosen) == .github(owner: "acme", repo: "web", number: 9)
+          && SourceLink("https://github.com/me/notes/issues/1", linearWorkspace: nil, github: .init(account: "me")) != nil
+          && SourceLink("https://github.com/other/web/pull/1", linearWorkspace: nil, github: org) == nil
+          && SourceLink("https://example.com/acme/web/pull/1", linearWorkspace: nil, github: org) == nil,
+          "fetch only takes links the project's own Linear workspace and GitHub repos own")
     let added = call("add_task", ["title": "Follow up with Jed\nonce it's sent", "why": "He asked", "url": "https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB"]) as? [String: Any]
     check(added?["title"] as? String == "Follow up with Jed once it's sent" && added?["url"] as? String == "https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456"
           && call("add_task", ["title": "No link", "url": "nope"]) == nil && call("add_task", ["title": "", "url": "https://x"]) == nil,

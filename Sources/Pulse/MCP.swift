@@ -55,6 +55,12 @@ private let mcpTools: [[String: Any]] = [
         "range": ["type": "string", "enum": TrendRange.allCases.map(\.rawValue), "description": "Period, default 5 weeks"],
         "person": ["type": "string", "description": "Only this person, by the name Trends shows"],
     ]),
+    tool("fetch", "Read a Linear issue or doc, or a GitHub issue or PR with its comments and reviews, live, as it is now. Give its link, such as a source of a fact or a link in a message. Only links this project's Linear workspace and GitHub repos own; anything else is refused.", [
+        "url": ["type": "string", "description": "The link, such as https://linear.app/acme/issue/ACME-12/… or https://github.com/acme/web/pull/412"],
+    ], required: ["url"], hints: ["readOnlyHint": true, "openWorldHint": true]),
+    tool("lookup", "Search this project's Linear (issues and docs) and GitHub (issues and PRs) live, for something Pulse hasn't learned yet. Returns titles and links; read one in full with fetch.", [
+        "query": ["type": "string", "description": "Words to search for"],
+    ], required: ["query"], hints: ["readOnlyHint": true, "openWorldHint": true]),
     tool("add_task", "Put a task on my list, such as a follow-up I agreed to or something I asked you to remind me of. Not for tickets or PRs, which come from Linear and GitHub.", [
         "title": ["type": "string", "description": "What to do, starting with a verb"],
         "why": ["type": "string", "description": "One short line on why it matters or who's waiting"],
@@ -151,6 +157,23 @@ func mcpResponse(_ request: [String: Any], root: URL, project fallback: Project?
     return ["jsonrpc": "2.0", "id": id, "result": result]
 }
 
+private var fetched: [String: (at: Date, item: SourceItem)] = [:]
+
+private func encoded(_ value: some Encodable) throws -> Any {
+    try JSONSerialization.jsonObject(with: JSONEncoder().encode(value))
+}
+
+private func blocking<T>(_ work: @escaping @Sendable () async throws -> T) throws -> T {
+    let done = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var result: Result<T, Error>!
+    Task.detached {
+        do { result = .success(try await work()) } catch { result = .failure(error) }
+        done.signal()
+    }
+    done.wait()
+    return try result.get()
+}
+
 private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws -> Any {
     let archive = dir.appendingPathComponent("meetings")
     switch name {
@@ -220,6 +243,20 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         }
         return (["focus": focus, "tasks": list, "briefedAt": briefed.map(iso.string(from:)),
                  "stale": !(briefed.map(Calendar.current.isDateInToday) ?? false)] as [String: Any?]).compactMapValues { $0 }
+    case "fetch", "lookup":
+        let project = Project(id: dir.lastPathComponent, root: dir.deletingLastPathComponent().deletingLastPathComponent())
+        let connections = project.connections, key = linearKey(in: dir, connections: connections)
+        if name == "lookup" {
+            let query = (args["query"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else { throw SyncError(description: "Give a query.") }
+            return try encoded(try blocking { try await lookupSources(query, connections: connections, linearKey: key) })
+        }
+        let url = args["url"] as? String ?? ""
+        if let hit = fetched[url], hit.at > Date().addingTimeInterval(-300) { return try encoded(hit.item) }
+        let workspace = (try? DB(path: dir.appendingPathComponent("pulse.db").path, readOnly: true))?.meta("linear_workspace")
+        let item = try blocking { try await fetchSource(url, connections: connections, linearWorkspace: workspace, linearKey: key) }
+        fetched[url] = (Date(), item)
+        return try encoded(item)
     case "stats":
         let range = (args["range"] as? String).flatMap(TrendRange.init) ?? .month
         let person = args["person"] as? String
