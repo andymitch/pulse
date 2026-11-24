@@ -47,20 +47,20 @@ private struct NotesPad: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Circle().fill(.red).frame(width: 7, height: 7)
-                Text(meeting?.title ?? "Notes").font(.caption.weight(.semibold)).lineLimit(1)
+                Text(meeting?.title ?? "Notes").font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 Button { meetings.mark() } label: { Image(systemName: "star") }
                     .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                     .help("Mark this moment so the summary focuses on what's being said")
                     .accessibilityLabel("Mark this moment")
             }
-            .foregroundStyle(.black.opacity(0.7))
             ScrollViewReader { scroll in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(String(format: "%d:%02d", Int(line.0) / 60, Int(line.0) % 60)).font(.caption2.monospacedDigit()).foregroundStyle(.black.opacity(0.45))
+                                Text(String(format: "%d:%02d", Int(line.0) / 60, Int(line.0) % 60)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                                 Text(line.1).fixedSize(horizontal: false, vertical: true)
                             }
                             .id(i)
@@ -71,7 +71,7 @@ private struct NotesPad: View {
                 .scrollIndicators(.never)
                 .onChange(of: lines.count) { scroll.scrollTo(lines.count - 1, anchor: .bottom) }
             }
-            TextField("Note", text: $draft, prompt: Text("Type what matters…").foregroundStyle(.black.opacity(0.4)))
+            TextField("Note", text: $draft, prompt: Text("Type what matters…"))
                 .textFieldStyle(.plain)
                 .onSubmit {
                     meetings.note(draft)
@@ -79,10 +79,8 @@ private struct NotesPad: View {
                 }
         }
         .font(.callout)
-        .foregroundStyle(.black.opacity(0.85))
         .padding(12)
         .frame(minWidth: 220, minHeight: 140)
-        .background(Color(red: 1, green: 0.93, blue: 0.6), in: RoundedRectangle(cornerRadius: 10))
-        .environment(\.colorScheme, .light)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 }
