@@ -412,6 +412,7 @@ final class Store: ObservableObject {
             do {
                 synthesis = try await runSynthesis(dir: dir, db: db, connections: connections, candidates: today.flatMap { [$0] + $0.nested.filter { $0.issueID != nil } }, tasks: openTasks, me: me ?? "me") { [weak self] in self?.applyTasks($0) }
                 synthesizedAt = Date()
+                synthesisError = db.meta("gather_errors").flatMap { $0.isEmpty ? nil : $0 }
                 reloadFacts()
                 recordDone()
             } catch {

@@ -437,6 +437,20 @@ func selfTest() throws {
     check(later.contains("What's new since 2026-11-03T22:00:00Z in Linear") && later.contains("gathered by Pulse into s.json") && later.contains("Pulse's fetch tool")
           && later.contains("gather only what's new") && !later.contains("in the last 14 days") && first.contains("What's new in the last 14 days in Linear") && later.range(of: "u.json")!.lowerBound < later.range(of: "n.json")!.lowerBound && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
           "after a run the briefing reads only what's new, a first run reads 14 days, and tasks are written first, then memory, then the briefing")
+    let withSlack = synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasks: "t.json", tasksOutput: "u.json", since: nil, gathered: "s.json", slack: "Jane Doe",
+                                    connections: { var c = Connections(); c.slack = .init(); return c }())
+    check(withSlack.contains("Jane is Slack \"Jane Doe\"") && withSlack.contains("in Slack (new messages in Jane's channels") && !withSlack.contains("Slack tools") && !withSlack.contains("fetch"),
+          "Slack reaches the briefing in the gathered file, and a Slack-only briefing needs no tools of its own")
+    let slackFile = { (json: String) in try? checkSlack(Data(json.utf8), workspace: "acme") }
+    let slackFound = slackFile(#"{"workspace": "acme", "user": "Jane Doe", "reached": true, "error": null, "items": [{"title": "Omar in #launch", "url": "https://acme.slack.com/archives/C08QBJ75EUB/p1761234999000100?thread_ts=1761234567.123456&cid=C08QBJ75EUB", "author": "Omar", "date": "2026-11-03", "text": "Omar (2026-11-03 09:00): Ship it?"}, {"title": "Elsewhere", "url": "https://other.slack.com/archives/C1/p1", "text": "x"}]}"#)
+    let mismatch = { () -> SlackError? in do { _ = try checkSlack(Data(#"{"workspace": "other", "reached": true, "items": []}"#.utf8), workspace: "acme"); return nil } catch { return error as? SlackError } }()
+    check(slackFound?.user == "Jane Doe" && slackFound?.items.map(\.url) == ["https://acme.slack.com/archives/C08QBJ75EUB/p1761234567123456"] && slackFound?.items.first?.kind == "slack"
+          && slackFile(#"{"workspace": "acme", "reached": false, "error": "no Slack tools", "items": []}"#) == nil && slackFile("nope") == nil && (try? checkSlack(nil, workspace: "")) == nil
+          && mismatch?.retry == false && mismatch?.description.contains("signed in to other") == true
+          && (try? checkSlack(Data(#"{"workspace": "acme.slack.com", "reached": true, "items": []}"#.utf8), workspace: ""))?.items.isEmpty == true,
+          "Pulse keeps only the agent's Slack messages from the project's workspace, and says why when Slack wasn't reached or is the wrong workspace")
+    check(slackGatherPrompt(output: "s", slack: .init(workspace: "acme"), since: nil, me: "Jane").contains("Only use the acme workspace") && slackGatherPrompt(output: "s", slack: .init(), since: nil, me: "Jane").contains("12 busiest channels"),
+          "the Slack gathering prompt names the project's workspace and channels")
     let d = "2026-11-03"
     check(withoutOwnDate("On 2026-11-03 Drew Osmond opened PR #2047.", d) == "Drew Osmond opened PR #2047."
           && withoutOwnDate("As of 2026-11-03 document unification met 9 of 10 criteria.", d) == "Document unification met 9 of 10 criteria."

@@ -210,3 +210,63 @@ func gatherGitHub(token: String, github: Connections.GitHub, since: Date) async 
         return indexed(item)
     }
 }
+
+struct SlackError: Error, CustomStringConvertible {
+    let description: String
+    var retry = true
+}
+
+func slackGatherPrompt(output: String, slack: Connections.Slack, since: String?, me: String) -> String {
+    let window = since.map { "since \($0)" } ?? "in the last 14 days"
+    let channels = slack.channels.map { "#\($0.name) (\($0.id))" }.joined(separator: ", ")
+    let workspace = slack.workspace.isEmpty ? "" : " Only use the \(slack.workspace) workspace, whose links are on \(slack.workspace).slack.com. If you're signed in to a different one, set reached to false and say which."
+    return """
+    Using your Slack tools (MCP servers; in pi, call them through codemode), gather what's new in Slack for \(me). This is read-only. Never post, react, draft, or change anything.\(workspace)
+
+    1. Find out who you're signed in as, and which workspace: its domain is the part before .slack.com in its links.
+    2. Messages \(window) in \(channels.isEmpty ? "the up to 12 busiest channels \(me) is a member of, skipping channels that are mostly bots or alerts" : "these channels: \(channels)").
+    3. Messages that need \(me): mentions of them and DMs to them from the last 7 days, keeping only those not yet answered.
+
+    Write one JSON file to \(output) with exactly this shape and nothing else:
+    {"workspace": string, "user": string, "reached": boolean, "error": string | null, "items": [{"title": string, "url": string, "author": string | null, "date": "YYYY-MM-DD" | null, "text": string}]}
+
+    - workspace is the domain, user is the name of who you're signed in as.
+    - reached is false, with error saying why, when you have no Slack tools or they fail. Then items is empty. Never make anything up.
+    - One item per thread or conversation. title says where it is and who started it, like "Maya in #launch" or "DM from Jason". url is the permalink of the thread's first message. text is the new messages in order, each on its own line as "Name (YYYY-MM-DD HH:MM): message", whole, with the replies in the thread. Start text with "Needs a reply." for a mention or DM that still needs \(me).
+    - Leave out messages from bots and alerts.
+    """
+}
+
+func checkSlack(_ data: Data?, workspace: String) throws -> (user: String?, items: [SourceItem]) {
+    struct Item: Decodable { let title, url, text: String; let author, date: String? }
+    struct Out: Decodable { let workspace, user, error: String?; let reached: Bool; let items: [Item] }
+    guard let data else { throw SlackError(description: "the agent didn't write what it found") }
+    guard let out = try? JSONDecoder().decode(Out.self, from: data) else { throw SlackError(description: "the agent's list wasn't valid") }
+    guard out.reached else { throw SlackError(description: out.error ?? "the agent couldn't reach Slack") }
+    let signedIn = out.workspace?.lowercased().replacingOccurrences(of: ".slack.com", with: "") ?? ""
+    if !workspace.isEmpty, signedIn.caseInsensitiveCompare(workspace) != .orderedSame {
+        throw SlackError(description: "the agent's Slack is signed in to \(signedIn.isEmpty ? "another workspace" : signedIn), but this project reads \(workspace). Sign it in to \(workspace).", retry: false)
+    }
+    let host = "\(workspace.isEmpty ? signedIn : workspace).slack.com".lowercased()
+    let items = out.items.compactMap { i -> SourceItem? in
+        guard URL(string: i.url)?.host?.lowercased() == host else { return nil }
+        return SourceItem(kind: "slack", title: i.title, url: threadLink(i.url) ?? i.url, author: i.author, date: i.date, text: i.text)
+    }
+    return (out.user, items)
+}
+
+func gatherSlack(dir: URL, slack: Connections.Slack, since: String?, me: String) async throws -> (user: String?, items: [SourceItem]) {
+    let out = dir.appendingPathComponent("slack.json"), prompt = dir.appendingPathComponent("slack-prompt.md")
+    defer { try? FileManager.default.removeItem(at: out) }
+    try slackGatherPrompt(output: out.path, slack: slack, since: since, me: me).write(to: prompt, atomically: true, encoding: .utf8)
+    var failure = SlackError(description: "")
+    for _ in 1...2 {
+        try? FileManager.default.removeItem(at: out)
+        _ = try? await runAgent(prompt: prompt)
+        do { return try checkSlack(try? Data(contentsOf: out), workspace: slack.workspace) } catch let error as SlackError {
+            failure = error
+            if !error.retry { break }
+        }
+    }
+    throw failure
+}
