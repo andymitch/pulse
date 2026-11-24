@@ -5,9 +5,9 @@ struct SlackChannel: Codable, Hashable {
 }
 
 enum MCPService: String {
-    case slack, linear
+    case slack
 
-    var url: String { self == .slack ? "https://mcp.slack.com/mcp" : "https://mcp.linear.app/mcp" }
+    var url: String { "https://mcp.slack.com/mcp" }
     var host: String { URL(string: url)!.host! }
     var name: String { rawValue.capitalized }
 }

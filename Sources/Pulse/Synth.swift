@@ -23,13 +23,18 @@ func meetingTranscripts(in archive: URL, days: Int = 14) -> [String] {
 }
 
 func synthesisPrompt(output: String, today: String, me: String, transcripts: [String], mail: String?, candidates: [ActionItem],
-                     facts: String, factsOutput: String, tasks: String, tasksOutput: String, since: String?, sessions: [String] = [], projects: [String] = [], people: [String] = [], connections c: Connections = settings.connections) -> String {
+                     facts: String, factsOutput: String, tasks: String, tasksOutput: String, since: String?, sessions: [String] = [], gathered: String? = nil, projects: [String] = [], people: [String] = [], connections c: Connections = settings.connections) -> String {
     let s = settings
     var who = c.linear != nil ? ["Linear \"\(me)\""] : []
     if c.slack != nil { who.append("the Slack user your Slack tools are logged in as") }
     let window = since.map { "since \($0)" } ?? "in the last 14 days"
     var gather: [String] = []
-    if c.linear != nil { gather.append("Linear: the active cycles and what is in them right now, project and initiative status updates posted \(window), and documents created \(window) (meeting minutes).") }
+    if let gathered {
+        let names = [c.linear != nil ? "Linear" : nil, c.github != nil ? "GitHub" : nil].compactMap { $0 }.joined(separator: " and ")
+        let from = [c.linear != nil ? "Linear (the active cycles and what is in them right now, project and initiative status updates, and documents such as meeting minutes)" : nil,
+                    c.github != nil ? "GitHub (issue and PR threads with their new comments and reviews)" : nil].compactMap { $0 }.joined(separator: " and ")
+        gather.append("What's new \(window) in \(from), gathered by Pulse into \(gathered): a JSON list of items, each with kind, title, url, author, date and text. An item with no text is long (size is its length in characters): read the ones that matter with Pulse's fetch tool. Use fetch too for any \(names) link an item or message mentions that you need, and lookup to search \(names).")
+    }
     if let slack = c.slack {
         let channels = slack.channels.map { "#\($0.name) (\($0.id))" }.joined(separator: ", ")
         gather.append("Slack messages \(window) in " + (channels.isEmpty ? "the up to 12 busiest channels \(me) is a member of, skipping channels that are mostly bots or alerts." : "these channels: \(channels)."))
@@ -41,7 +46,7 @@ func synthesisPrompt(output: String, today: String, me: String, transcripts: [St
     gather.append("\(me)'s open work right now, from \([c.github != nil ? "GitHub" : nil, c.linear != nil ? "Linear" : nil].compactMap { $0 }.joined(separator: " and ")). Each line starts with its ref:\n" + candidates.map { "   - ref \($0.id) | \($0.summary)" }.joined(separator: "\n"))
     let on: [(String, Bool)] = [("github", c.github != nil), ("linear", c.linear != nil), ("slack", c.slack != nil), ("mail", mail != nil), ("meeting", true), ("doc", true), ("session", !sessions.isEmpty)]
     let kinds = on.filter(\.1).map(\.0)
-    let tools = (c.linear != nil ? ["Linear"] : []) + (c.slack != nil ? ["Slack"] : [])
+    let tools = (gathered != nil ? ["Pulse (fetch and lookup)"] : []) + (c.slack != nil ? ["Slack"] : [])
     let kindList = kinds.map { "\"\($0)\"" }.joined(separator: " | ")
 
     return """
@@ -129,13 +134,30 @@ func runSynthesis(dir: URL, db: DB, connections: Connections, candidates: [Actio
             mailError = "Mail export failed: \(error)"
         }
     }
+    var gathered: String?
+    var gatherErrors: [String] = []
+    if connections.linear != nil || connections.github != nil {
+        let from = since ?? Date().addingTimeInterval(-14 * 86400)
+        var items: [SourceItem] = []
+        if let key = linearKey(in: dir, connections: connections) {
+            do { items += try await gatherLinear(key: key, workspace: db.meta("linear_workspace"), since: from) } catch { gatherErrors.append("Linear: \(error)") }
+        }
+        if let github = connections.github {
+            do { items += try await gatherGitHub(token: try ghToken(github.account), github: github, since: from) } catch { gatherErrors.append("GitHub: \(error)") }
+        }
+        let file = dir.appendingPathComponent("sources.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        try encoder.encode(items).write(to: file)
+        gathered = file.path
+    }
     let changedSince = { (path: String, date: Date) in ((try? URL(fileURLWithPath: path).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast) > date }
     let transcripts = meetingTranscripts(in: dir.appendingPathComponent("meetings")).filter { path in since.map { changedSince(path, $0) } ?? true }
     let newSince = since ?? Date().addingTimeInterval(-3 * 86400)
     let sessions = await Task.detached { digestSessions(into: dir.appendingPathComponent("sessions"), folders: connections.repos.isEmpty ? [] : connections.repos + [connections.worktrees]) }.value
         .filter { changedSince($0, newSince) }
     try synthesisPrompt(output: out.path, today: day, me: me, transcripts: transcripts, mail: mail, candidates: candidates,
-                        facts: facts.path, factsOutput: factsOut.path, tasks: tasks.path, tasksOutput: tasksOut.path, since: since.map(iso.string(from:)), sessions: sessions,
+                        facts: facts.path, factsOutput: factsOut.path, tasks: tasks.path, tasksOutput: tasksOut.path, since: since.map(iso.string(from:)), sessions: sessions, gathered: gathered,
                         projects: db.ids("linear_projects"), people: db.peopleNames(), connections: connections)
         .write(to: prompt, atomically: true, encoding: .utf8)
 
@@ -154,6 +176,7 @@ func runSynthesis(dir: URL, db: DB, connections: Connections, candidates: [Actio
         }
     }
     let log: String
+    defer { if let gathered { try? FileManager.default.removeItem(atPath: gathered) } }
     do { log = try await runAgent(prompt: prompt) } catch { watcher.cancel(); throw error }
     watcher.cancel()
     await watcher.value
@@ -169,7 +192,7 @@ func runSynthesis(dir: URL, db: DB, connections: Connections, candidates: [Actio
     }
 
     guard let data = try? Data(contentsOf: out) else {
-        throw SyncError(description: [mailError, "The briefing agent did not write its file. Last output:\n\(log)"].compactMap { $0 }.joined(separator: "\n"))
+        throw SyncError(description: ([mailError] + gatherErrors + ["The briefing agent did not write its file. Last output:\n\(log)"]).compactMap { $0 }.joined(separator: "\n"))
     }
     let synthesis = try JSONDecoder().decode(Synthesis.self, from: data)
     try? FileManager.default.removeItem(at: dir.appendingPathComponent("synthesis.json"))

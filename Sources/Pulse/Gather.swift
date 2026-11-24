@@ -151,3 +151,62 @@ func lookupSources(_ query: String, connections: Connections, linearKey: String?
     }
     return found
 }
+
+func indexed(_ item: SourceItem, limit: Int = 1500) -> SourceItem {
+    guard let text = item.text, text.count > limit else { return item }
+    var index = item
+    index.text = nil
+    index.size = text.count
+    return index
+}
+
+func gatherLinear(key: String, workspace: String?, since: Date) async throws -> [SourceItem] {
+    struct Issue: Decodable { let identifier, title: String; let state: Named?; let assignee: Named? }
+    struct Cycle: Decodable { struct Issues: Decodable { let nodes: [Issue] }; struct Team: Decodable { let key, name: String }; let number: Int; let startsAt, endsAt: String; let team: Team; let issues: Issues }
+    struct Update: Decodable { let url, createdAt, body: String; let user: Named?; let project: Named?; let initiative: Named? }
+    struct Nodes<T: Decodable>: Decodable { let nodes: [T] }
+    struct Cycles: Decodable { let cycles: Nodes<Cycle> }
+    struct Out: Decodable { let projectUpdates, initiativeUpdates: Nodes<Update>; let documents: Nodes<LinearDocument> }
+    let active: Cycles = try await gql(linearURL, auth: key,
+        "{ cycles(first: 5, filter: {isActive: {eq: true}}) { nodes { number startsAt endsAt team { key name } issues(first: 100) { nodes { identifier title state { name } assignee { name } } } } } }")
+    let out: Out = try await gql(linearURL, auth: key, """
+        query($since: DateTimeOrDuration!) {
+          projectUpdates(first: 50, filter: {createdAt: {gt: $since}}) { nodes { url createdAt body user { name } project { name } } }
+          initiativeUpdates(first: 50, filter: {createdAt: {gt: $since}}) { nodes { url createdAt body user { name } initiative { name } } }
+          documents(first: 50, filter: {createdAt: {gt: $since}}) { nodes { title url createdAt content creator { name } } }
+        }
+        """, ["since": iso.string(from: since)])
+    let cycles = active.cycles.nodes.map { c in
+        SourceItem(kind: "linear", title: "\(c.team.name) cycle \(c.number), \(c.startsAt.prefix(10)) to \(c.endsAt.prefix(10))",
+                   url: "https://linear.app/\(workspace ?? "")/team/\(c.team.key)/cycle/\(c.number)", date: String(c.startsAt.prefix(10)),
+                   text: c.issues.nodes.map { i in [i.identifier, i.title, i.state?.name, i.assignee?.name].compactMap { $0 }.joined(separator: " · ") }.joined(separator: "\n"))
+    }
+    let updates = (out.projectUpdates.nodes + out.initiativeUpdates.nodes).map { u in
+        SourceItem(kind: "linear", title: "Status update: \((u.project ?? u.initiative)?.name ?? "")", url: u.url, author: u.user?.name, date: String(u.createdAt.prefix(10)), text: String(u.body.prefix(8000)))
+    }
+    let docs = out.documents.nodes.map { d in
+        indexed(SourceItem(kind: "linear", title: d.title, url: d.url, author: d.creator?.name, date: String(d.createdAt.prefix(10)), text: d.content))
+    }
+    return cycles + updates + docs
+}
+
+func gatherGitHub(token: String, github: Connections.GitHub, since: Date) async throws -> [SourceItem] {
+    struct Hit: Decodable { struct Repo: Decodable { let nameWithOwner: String }; let repository: Repo?; let thread: GitHubThread
+        init(from decoder: Decoder) throws {
+            repository = try? decoder.container(keyedBy: Key.self).decode(Repo.self, forKey: .repository)
+            thread = try GitHubThread(from: decoder)
+        }
+        enum Key: String, CodingKey { case repository }
+    }
+    struct Out: Decodable { struct Search: Decodable { let nodes: [Hit] }; let search: Search }
+    let scope = github.scope.isEmpty ? "involves:\(github.account)" : github.scope
+    let day = since.formatted(.iso8601.year().month().day())
+    let out: Out = try await gql(githubURL, auth: "bearer \(token)",
+                                 "query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on Issue { repository { nameWithOwner } } ... on PullRequest { repository { nameWithOwner } } \(githubThreadQuery) } } }",
+                                 ["q": "\(scope) updated:>=\(day) sort:updated-desc"])
+    let after = iso.string(from: since)
+    return out.search.nodes.compactMap { hit in
+        guard let repo = hit.repository?.nameWithOwner, let item = githubItem(hit.thread, repo: repo, since: after), !(item.text ?? "").isEmpty else { return nil }
+        return indexed(item)
+    }
+}

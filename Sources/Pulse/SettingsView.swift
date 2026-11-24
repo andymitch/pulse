@@ -153,7 +153,6 @@ struct SettingsView: View {
                         Link("Create a personal API key in Linear", destination: URL(string: "https://linear.app/settings/account/security")!)
                             .font(.caption)
                     }
-                    ConnectionRow(service: .linear)
                 } header: { connectionHeader("Linear", .linear, \.linear) }
                 .onChange(of: store.hasLinearKey) { replacingKey = false }
             }
