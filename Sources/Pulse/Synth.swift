@@ -176,6 +176,7 @@ func runSynthesis(dir: URL, db: DB, connections: Connections, candidates: [Actio
         }
     }
     let log: String
+    defer { if let gathered { try? FileManager.default.removeItem(atPath: gathered) } }
     do { log = try await runAgent(prompt: prompt) } catch { watcher.cancel(); throw error }
     watcher.cancel()
     await watcher.value
