@@ -332,6 +332,9 @@ func selfTest() throws {
     check(linkLabel("PR #1490", kind: "github") == "#1490" && linkLabel("PR #1490", kind: "slack") == "PR #1490" && linkLabel("KLE-630", kind: "linear") == "KLE-630", "GitHub links in answers read as #123")
     let codemode = #"{"type":"tool_execution_start","toolName":"codemode","args":{"code":"const a = await tools.mcp__pulse__search({ query: 'allianz' });\nconst b = await tools.mcp__linear__list_issues({ query: \"allianz credit\" });"}}"#
     check(agentEvents(codemode) == [.step("Checking what Pulse knows"), .step("Looking in Linear for \"allianz\"")], "pi codemode calls read as the services they look in")
+    check(agentEvents(#"{"type":"tool_execution_start","toolName":"codemode","args":{"code":"await tools.mcp__pulse__lookup({ query: 'invites' })"}}"#) == [.step("Looking in Linear and GitHub for \"invites\"")]
+          && agentEvents(#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__pulse__fetch","input":{"url":"https://x"}}]}}"#) == [.step("Looking in Linear and GitHub")],
+          "Pulse's live lookup and fetch read as looking in Linear and GitHub")
     check(agentEvents(#"{"type":"tool_execution_start","toolName":"bash","args":{"command":"gh pr view 1502"}}"#) == [.step("Looking in GitHub")]
           && agentEvents(#"{"type":"tool_execution_start","toolName":"read","args":{"path":"/x"}}"#).isEmpty, "gh commands are GitHub, and plain file reads aren't shown")
     check(agentEvents(#"{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"Checking the "}}"#) == [.thought("Checking the ")], "pi reasoning streams as thought")
@@ -422,16 +425,17 @@ func selfTest() throws {
     let savedSettings = settings
     settings.connections = Connections()
     settings.connections.github = .init()
-    let githubOnly = synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasks: "t.json", tasksOutput: "u.json", since: nil)
-    check(!githubOnly.contains("Linear") && !githubOnly.contains("Slack") && githubOnly.contains("open work right now, from GitHub.") && githubOnly.contains("Gather:"),
+    let githubOnly = synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasks: "t.json", tasksOutput: "u.json", since: nil, gathered: "s.json")
+    check(!githubOnly.contains("Linear") && !githubOnly.contains("Slack") && githubOnly.contains("open work right now, from GitHub.") && githubOnly.contains("Gather, using your Pulse (fetch and lookup) tools")
+          && githubOnly.contains("What's new in the last 14 days in GitHub (issue and PR threads"),
           "a project with only GitHub gets a briefing prompt that never mentions Linear or Slack")
     settings.connections.linear = .init()
     settings.connections.slack = .init()
-    let prompt = { (since: String?) in synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasks: "t.json", tasksOutput: "u.json", since: since) }
+    let prompt = { (since: String?) in synthesisPrompt(output: "o", today: "Tuesday", me: "Jane", transcripts: [], mail: nil, candidates: [], facts: "f.json", factsOutput: "n.json", tasks: "t.json", tasksOutput: "u.json", since: since, gathered: "s.json") }
     let later = prompt("2026-11-03T22:00:00Z"), first = prompt(nil)
     settings = savedSettings
-    check(later.contains("documents created since 2026-11-03T22:00:00Z") && later.contains("gather only what's new") && !later.contains("in the last 14 days")
-          && first.contains("documents created in the last 14 days") && later.range(of: "u.json")!.lowerBound < later.range(of: "n.json")!.lowerBound && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
+    check(later.contains("What's new since 2026-11-03T22:00:00Z in Linear") && later.contains("gathered by Pulse into s.json") && later.contains("Pulse's fetch tool")
+          && later.contains("gather only what's new") && !later.contains("in the last 14 days") && first.contains("What's new in the last 14 days in Linear") && later.range(of: "u.json")!.lowerBound < later.range(of: "n.json")!.lowerBound && later.range(of: "n.json")!.lowerBound < later.range(of: "to o with")!.lowerBound,
           "after a run the briefing reads only what's new, a first run reads 14 days, and tasks are written first, then memory, then the briefing")
     let d = "2026-11-03"
     check(withoutOwnDate("On 2026-11-03 Drew Osmond opened PR #2047.", d) == "Drew Osmond opened PR #2047."

@@ -60,7 +60,7 @@ func agentAnswer(_ question: String, me: String, known: [[String: Any]] = [], on
 
         \(known.isEmpty ? "Pulse has no facts that match the question." : "What Pulse already knows that may help, newest first, each with its sources:\n" + known.map { f in "- \(f["observed"] as? String ?? "") \((f["subject"] as? [String: Any])?["name"] as? String ?? ""): \(f["text"] as? String ?? "") " + (((f["sources"] as? [[String: Any]]) ?? []).compactMap { $0["url"] as? String }.map { "<\($0)>" }.joined(separator: " ")) }.joined(separator: "\n"))
 
-        Answer from that when it's enough. Otherwise look further: Pulse's MCP search and subject tools if you have them, then Linear, Slack or GitHub. Newer information wins over older.
+        Answer from that when it's enough. Otherwise look further with Pulse's MCP tools (in pi, call them through codemode): search and subject for what Pulse knows, then lookup to search Linear and GitHub and fetch to read a Linear or GitHub link in full\(settings.connections.slack != nil ? ", and your Slack tools for Slack" : ""). Newer information wins over older.
 
         Write one JSON file to \(out.path) with exactly {"answer": string}. The answer is one to four plain sentences that name the tickets, people and dates involved, with Markdown links to the sources you used. Put each link on the words it backs up, where they appear in the sentence: a ticket ID like [KLE-123](…), a PR number like [#1490](…), or the few words a message or doc supports, like [Chad Schwab reported](…) or [done 31 Aug](…). Never add a separate link such as "(Slack)" or "source" at the end. If you can't find it, say so.
         """
@@ -93,19 +93,22 @@ private let services = ["pulse": "Pulse", "linear": "Linear", "slack": "Slack", 
 
 private func describe(tool name: String, args: [String: Any]) -> [AgentEvent] {
     let text = (args["code"] as? String) ?? (args["command"] as? String) ?? ""
-    var calls: [(server: String, query: String?)] = []
+    var calls: [(server: String, tool: String, query: String?)] = []
+    let parts = { (call: String) in call.components(separatedBy: "__").filter { !$0.isEmpty && $0 != "mcp" } }
     if name.hasPrefix("mcp__") {
-        calls.append((String(name.split(separator: "_", omittingEmptySubsequences: true).first(where: { $0 != "mcp" }) ?? ""), args["query"] as? String))
+        let p = parts(name)
+        calls.append((p.first ?? "", p.dropFirst().first ?? "", args["query"] as? String))
     } else if name == "codemode" {
         let query = (try? Regex<(Substring, Substring)>(#"query:\s*["'`]([^"'`\n]{1,60})["'`]"#)).flatMap { text.firstMatch(of: $0) }.map { String($0.1) }
-        let servers = (try? Regex<(Substring, Substring)>(#"mcp__([a-z0-9]+)__"#)).map { text.matches(of: $0).map { String($0.1) } } ?? []
-        for server in servers where !calls.contains(where: { $0.server == server }) { calls.append((server, query)) }
+        let found = (try? Regex<(Substring, Substring, Substring)>(#"mcp__([a-z0-9]+)__([a-z_]+)"#)).map { text.matches(of: $0).map { (String($0.1), String($0.2)) } } ?? []
+        for (server, tool) in found where !calls.contains(where: { $0.server == server && $0.tool == tool }) { calls.append((server, tool, query)) }
     } else if name.lowercased() == "bash", text.contains("gh ") {
-        calls.append(("github", nil))
+        calls.append(("github", "", nil))
     }
     return calls.map { call in
-        let service = services[call.server] ?? call.server.capitalized
-        if call.server == "pulse" { return .step("Checking what Pulse knows") }
+        let live = call.server == "pulse" && ["fetch", "lookup"].contains(call.tool)
+        if call.server == "pulse" && !live { return .step("Checking what Pulse knows") }
+        let service = live ? "Linear and GitHub" : services[call.server] ?? call.server.capitalized
         return .step("Looking in \(service)" + (call.query.map { " for \"\($0)\"" } ?? ""))
     }
 }
