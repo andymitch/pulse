@@ -207,6 +207,16 @@ func selfTest() throws {
     check(parseMeeting(meetingMarkdown(standup, notes: long, transcript: ""), file: file, start: standup.start).decisions == Array(long.decisions.prefix(5)), "saved meeting keeps at most 5 decisions")
     let bare = parseMeeting(meetingMarkdown(standup, notes: nil, transcript: "[0:01] Jane: Hi"), file: file, start: standup.start)
     check(bare.title == "Standup" && bare.summary.isEmpty && bare.decisions.isEmpty, "meeting saved without a summary")
+    var jotted = standup
+    jotted.notes = [MeetingNote(at: 4, text: "Ask Omar about QA"), MeetingNote(at: 75, text: "Friday is firm")]
+    let jottedText = transcriptText(mine: [], theirs: [w("Ship", 1), w("Friday.", 2), w("Agreed.", 9)], turns: [], me: "Jane", attendees: ["Omar"], notes: jotted.notes!)
+    let withNotes = meetingMarkdown(jotted, notes: notes, transcript: jottedText)
+    let reread = parseMeeting(withNotes, file: file, start: standup.start)
+    check(jottedText == "[0:01] Omar: Ship Friday.\n[0:04] \(noteSign) Ask Omar about QA\n[0:09] Omar: Agreed.\n[1:15] \(noteSign) Friday is firm" && spokenWords(jottedText) == 3
+          && reread.notes == ["[0:04] Ask Omar about QA", "[1:15] Friday is firm"] && reread.summary == notes.summary && reread.decisions == notes.decisions
+          && editMeeting(withNotes, title: "New", summary: nil, decisions: nil, points: nil).map { parseMeeting($0, file: file, start: standup.start).notes } == reread.notes
+          && notesPrompt(jotted, transcript: "t", output: "o").contains("notes Jane typed"),
+          "notes typed during a meeting sit in the transcript at their time, aren't counted as speech, are kept apart from the summary, survive an edit, and the summary builds on them")
     check(bare.people == ["Jane", "Omar"] && parsed.people == ["Jane", "Omar"] && SavedMeeting(file: file, start: standup.start, recorded: "Recorded Nov 3, 2026 at 9:00 AM.").people.isEmpty,
           "summarizing a saved meeting again reads who was there from its recorded line")
     let rate = 16000.0

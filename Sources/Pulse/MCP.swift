@@ -21,7 +21,7 @@ private let mcpTools: [[String: Any]] = [
         "days": ["type": "integer", "description": "Only meetings from the last N days"],
         "limit": ["type": "integer", "description": "Most meetings to return, default 20"],
     ]),
-    tool("get_meeting", "One meeting's summary, decisions and important points. The transcript is only included when asked for, a page of lines at a time.", [
+    tool("get_meeting", "One meeting's summary, decisions and important points, and the notes I typed during it. The transcript is only included when asked for, a page of lines at a time.", [
         "id": ["type": "string", "description": "The meeting id from list_meetings"],
         "transcript": ["type": "boolean", "description": "Include the transcript"],
         "offset": ["type": "integer", "description": "First transcript line to return, default 0"],
@@ -189,7 +189,7 @@ private func callTool(_ name: String, _ args: [String: Any], dir: URL) throws ->
         let (id, file, markdown) = try meetingFile(args, in: archive)
         let m = parseMeeting(markdown, file: file, start: Date(timeIntervalSince1970: TimeInterval(id) ?? 0))
         var out: [String: Any] = ["id": id, "title": m.title, "start": iso.string(from: m.start), "recorded": m.recorded,
-                                  "summary": m.summary, "decisions": m.decisions, "points": m.points]
+                                  "summary": m.summary, "decisions": m.decisions, "points": m.points, "notes": m.notes]
         if args["transcript"] as? Bool == true {
             let lines = markdown.components(separatedBy: "\n## Transcript\n").dropFirst().joined()
                 .split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
