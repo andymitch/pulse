@@ -15,7 +15,6 @@ struct MeetingsView: View {
                     } else {
                         Label("Recording \(recording.title)", systemImage: "record.circle").font(.caption).foregroundStyle(.red)
                     }
-                    Button("Notes") { NotesPanel.shared.show() }.help("Open a notepad to type what matters to you while the meeting records")
                     Button("Mark") { meetings.mark() }.help("Mark this moment so the summary focuses on what's being said")
                     Button("Stop") { Task { await meetings.stop(skip: true) } }
                 } else {

@@ -221,6 +221,7 @@ final class Meetings: ObservableObject {
             try JSONEncoder().encode(meeting).write(to: folder.appendingPathComponent("meeting.json"))
             capture = try await Capture(folder: folder, mic: await AVCaptureDevice.requestAccess(for: .audio))
             recording = meeting
+            NotesPanel.shared.show()
             self.manual = manual
             quietPolls = 0
             error = nil
